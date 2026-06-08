@@ -33,6 +33,17 @@ import {
 import { HttpBackendOperationsClient } from './operations-client.js';
 import { loadTrustedKeys, realDeps } from './env.js';
 import { formatHealth, formatPreflight, formatSteps, formatTable } from './output.js';
+import type { ManagerRole } from '@shm/auth';
+import {
+  adminAllowEmailAdd,
+  adminBootstrapToken,
+  adminCreate,
+  adminDisable,
+  adminList,
+  adminRoleGrant,
+  fileOperatorStore,
+  parseRoles,
+} from './admin.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ROOT = process.env.SELFHELP_ROOT ?? '/opt/selfhelp';
@@ -322,6 +333,100 @@ safeMode
     try {
       await instanceSafeMode(await deps(program.opts().root as string), id, false);
       console.log(`Safe-mode disabled for ${id}.`);
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+const admin = program.command('admin').description('Manage manager operators (local auth + OIDC allowlist)');
+
+admin
+  .command('create')
+  .description('Create a local operator')
+  .requiredOption('--email <email>', 'operator email')
+  .requiredOption('--roles <roles>', 'comma-separated roles: server_owner,instance_operator,read_only')
+  .option('--name <name>', 'display name')
+  .option('--password <password>', 'operator password (or env SELFHELP_MANAGER_ADMIN_PASSWORD)')
+  .action(async (opts) => {
+    try {
+      const password = (opts.password as string | undefined) ?? process.env.SELFHELP_MANAGER_ADMIN_PASSWORD;
+      if (!password) throw new Error('A password is required (--password or SELFHELP_MANAGER_ADMIN_PASSWORD).');
+      const store = fileOperatorStore(program.opts().root as string);
+      const op = await adminCreate(store, {
+        email: opts.email,
+        displayName: (opts.name as string | undefined) ?? opts.email,
+        password,
+        roles: parseRoles(opts.roles as string),
+      });
+      console.log(`Created operator ${op.email} [${op.roles.join(', ')}].`);
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+admin
+  .command('disable <email>')
+  .description('Disable an operator (keeps the record; blocks login)')
+  .action(async (email: string) => {
+    try {
+      await adminDisable(fileOperatorStore(program.opts().root as string), email);
+      console.log(`Disabled operator ${email}.`);
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+const adminRole = admin.command('role').description('Operator role management');
+adminRole
+  .command('grant <email> <role>')
+  .description('Grant a role to an operator')
+  .action(async (email: string, role: string) => {
+    try {
+      await adminRoleGrant(fileOperatorStore(program.opts().root as string), email, role as ManagerRole);
+      console.log(`Granted ${role} to ${email}.`);
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+const adminAllowEmail = admin.command('allow-email').description('OIDC email allowlist management');
+adminAllowEmail
+  .command('add <email>')
+  .description('Allow an email to authenticate via OIDC')
+  .action(async (email: string) => {
+    try {
+      await adminAllowEmailAdd(fileOperatorStore(program.opts().root as string), email);
+      console.log(`Allowed OIDC email ${email}.`);
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+admin
+  .command('list')
+  .description('List operators (password digests never shown)')
+  .action(async () => {
+    try {
+      const ops = await adminList(fileOperatorStore(program.opts().root as string));
+      console.log(
+        formatTable(
+          ['EMAIL', 'NAME', 'ROLES', 'SOURCE', 'STATUS'],
+          ops.map((o) => [o.email, o.displayName, o.roles.join('/'), o.source, o.disabled ? 'disabled' : 'active']),
+        ),
+      );
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+admin
+  .command('bootstrap-token')
+  .description('Issue a one-time bootstrap token to unlock first-run operator creation')
+  .option('--ttl <seconds>', 'token lifetime in seconds', (v) => parseInt(v, 10), 3600)
+  .action(async (opts) => {
+    try {
+      const token = await adminBootstrapToken(fileOperatorStore(program.opts().root as string), opts.ttl as number);
+      console.log(`Bootstrap token (valid ${opts.ttl}s, shown once):\n${token}`);
     } catch (err) {
       fail(err);
     }
