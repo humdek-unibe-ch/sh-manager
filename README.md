@@ -48,7 +48,7 @@ Docker / network / filesystem side effects live behind injected boundaries.
 | `@shm/docker` | Per-instance compose generation, `.env` (BFF invariant), safety guards, runner |
 | `@shm/traefik` | The single shared reverse proxy |
 | `@shm/instances` | Paths, atomic writes, inventory/manifest/lock stores, drift, README |
-| `@shm/core` | Instance-scope guard, preflight, health, update plan/execute, bootstrap/install |
+| `@shm/core` | Instance-scope guard, preflight, health, update plan/execute, bootstrap/install, post-up provisioning |
 | `@shm/backup` | Backup manifest + integrity, restore/clone planning |
 | `@shm/support` | Secret redaction + support bundle assembly |
 | `@shm/auth` | Configurable campus/OIDC operator authorization (old PHP plugin is reference-only) |
@@ -78,6 +78,13 @@ sh-manager server init --server-id srv-001 --mode production --email ops@example
 # install an isolated instance from the official registry
 sh-manager instance install --id website1 --domain website1.example.ch \
   --registry https://humdek-unibe-ch.github.io/sh2-plugin-registry/ --version latest --up
+
+# install AND fully provision (wait for DB -> migrate -> create admin ->
+# install plugins -> warm caches -> health). A generated admin password is
+# printed once and never written to disk/manifest/lock.
+sh-manager instance install --id website1 --domain website1.example.ch \
+  --registry https://humdek-unibe-ch.github.io/sh2-plugin-registry/ --version latest \
+  --provision --admin-email ops@example.ch
 
 sh-manager instance list
 sh-manager instance health website1

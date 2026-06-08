@@ -5,7 +5,7 @@
  * health probing, image-digest resolution) are injected via {@link ActionDeps}
  * so the offline paths are unit-testable and the real wiring lives in env.ts.
  */
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import semver from 'semver';
@@ -32,12 +32,14 @@ import {
   installInstance,
   planUpdate,
   processNextOperation,
+  provisionInstance,
   runPreflight,
   type BackendOperationsClient,
   type HealthReport,
   type OperationExecutor,
   type PreflightResourceFacts,
   type ProcessOutcome,
+  type ProvisionReport,
   type ServiceProbeResult,
   type UpdatePlan,
 } from '@shm/core';
@@ -93,8 +95,19 @@ export interface ActionDeps {
   secretIO?: SecretIO;
   /** RSA modulus for clone/restore JWT keygen; tests lower it for speed. */
   jwtModulusLength?: number;
+  /** Sleep used by the install DB-readiness retry loop (tests inject a no-op). */
+  sleep?: (ms: number) => Promise<void>;
+  /** DB-readiness retry budget for provisioning (defaults: 60 attempts x 2s). */
+  dbWaitAttempts?: number;
+  dbWaitDelayMs?: number;
   now?: () => string;
 }
+
+function errMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+const realSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 function secretGenOptions(deps: ActionDeps): GenerateSecretsOptions {
   return deps.jwtModulusLength === undefined ? {} : { jwtModulusLength: deps.jwtModulusLength };
@@ -155,6 +168,22 @@ export interface InstanceInstallOptions {
   channel?: ReleaseChannel;
   version?: string;
   bringUp?: boolean;
+  /**
+   * Run post-`up` provisioning (wait for DB → migrate → create admin → install
+   * plugins → warm caches → health). Implies bringUp.
+   */
+  provision?: boolean;
+  /** Create the first CMS admin during provisioning. */
+  adminEmail?: string;
+  adminName?: string;
+  /** Admin password; when omitted a strong one is generated and returned once. */
+  adminPassword?: string;
+  /**
+   * Absolute `plugin.json` paths reachable INSIDE the backend container to
+   * install during provisioning (dispatched through `selfhelp:plugin:install`;
+   * the stack's worker finalises them via the documented Messenger pipeline).
+   */
+  pluginManifests?: string[];
 }
 
 async function fetchAllFrontends(client: RegistryClient, refs: RegistryReleaseRef[], channel: string): Promise<FrontendRelease[]> {
@@ -175,7 +204,10 @@ function selectCoreRef<T extends { version: string; channel: string; blocked?: b
   return [...usable].sort((a, b) => semver.rcompare(semver.coerce(a.version) ?? '0.0.0', semver.coerce(b.version) ?? '0.0.0'))[0]!;
 }
 
-export async function instanceInstall(deps: ActionDeps, opts: InstanceInstallOptions): Promise<{ instanceDir: string; version: string; broughtUp: boolean }> {
+export async function instanceInstall(
+  deps: ActionDeps,
+  opts: InstanceInstallOptions,
+): Promise<{ instanceDir: string; version: string; broughtUp: boolean; provision?: ProvisionReport; adminPassword?: string }> {
   const channel = opts.channel ?? 'stable';
   const client = registryClient(deps, opts.registryUrl);
   const index = await client.getIndex();
@@ -210,8 +242,106 @@ export async function instanceInstall(deps: ActionDeps, opts: InstanceInstallOpt
     mercurePublicUrl: `${publicFrontendUrl}/.well-known/mercure`,
   });
 
-  const res = await installInstance(artifacts, { root: deps.root, runner: deps.runner, bringUp: opts.bringUp ?? false });
-  return { instanceDir: res.instanceDir, version: core.version, broughtUp: res.broughtUp };
+  // Provisioning requires a running stack, so it implies bringUp.
+  const bringUp = (opts.bringUp ?? false) || (opts.provision ?? false);
+  const res = await installInstance(artifacts, { root: deps.root, runner: deps.runner, bringUp });
+
+  if (!opts.provision) {
+    return { instanceDir: res.instanceDir, version: core.version, broughtUp: res.broughtUp };
+  }
+
+  // A generated admin password is returned to the caller exactly once and never
+  // written to disk, the manifest, the lock, or any log.
+  const generatedPassword =
+    opts.adminEmail && !opts.adminPassword ? randomBytes(18).toString('base64url') : undefined;
+  const provision = await runInstanceProvisioning(deps, opts, artifacts, core.version, generatedPassword);
+
+  return {
+    instanceDir: res.instanceDir,
+    version: core.version,
+    broughtUp: res.broughtUp,
+    provision,
+    ...(generatedPassword ? { adminPassword: generatedPassword } : {}),
+  };
+}
+
+/**
+ * Builds the real Docker-exec executors for {@link provisionInstance}. Every
+ * step shells `php bin/console …` into the instance's backend container through
+ * the injected compose runner, so it never compiles anything on the server.
+ */
+async function runInstanceProvisioning(
+  deps: ActionDeps,
+  opts: InstanceInstallOptions,
+  artifacts: { manifest: { routing: { publicFrontendUrl: string; browserApiPrefix: string } } },
+  version: string,
+  generatedPassword: string | undefined,
+): Promise<ProvisionReport> {
+  const paths = instancePaths(opts.instanceId, deps.root);
+  const consoleExec = (args: string[]): Promise<{ stdout: string; stderr: string }> =>
+    deps.runner.run(paths.dir, ['exec', '-T', 'backend', 'php', 'bin/console', ...args]);
+  const sleep = deps.sleep ?? realSleep;
+  const routing = artifacts.manifest.routing;
+
+  return provisionInstance(
+    { instanceId: opts.instanceId, version },
+    {
+      waitForDatabase: async () => {
+        const attempts = deps.dbWaitAttempts ?? 60;
+        const delayMs = deps.dbWaitDelayMs ?? 2000;
+        let lastErr: unknown;
+        for (let i = 0; i < attempts; i++) {
+          try {
+            await consoleExec(['dbal:run-sql', 'SELECT 1']);
+            return;
+          } catch (err) {
+            lastErr = err;
+            if (i < attempts - 1) await sleep(delayMs);
+          }
+        }
+        throw new Error(`Database not ready after ${attempts} attempts: ${errMessage(lastErr)}`);
+      },
+      runMigrations: async () => {
+        await consoleExec(['doctrine:migrations:migrate', '--no-interaction', '--allow-no-migration']);
+      },
+      ...(opts.adminEmail
+        ? {
+            createAdmin: async (): Promise<{ created: boolean; detail?: string }> => {
+              const password = opts.adminPassword ?? generatedPassword ?? '';
+              if (password === '') throw new Error('No admin password available.');
+              await consoleExec([
+                'app:create-admin-user',
+                opts.adminEmail!,
+                opts.adminName ?? 'Admin',
+                `--password=${password}`,
+              ]);
+              return { created: true, detail: opts.adminEmail! };
+            },
+          }
+        : {}),
+      ...(opts.pluginManifests && opts.pluginManifests.length > 0
+        ? {
+            installPlugins: async (): Promise<{ installed: string[]; detail?: string }> => {
+              const installed: string[] = [];
+              for (const manifestPath of opts.pluginManifests!) {
+                await consoleExec(['selfhelp:plugin:install', manifestPath]);
+                installed.push(manifestPath);
+              }
+              return { installed, detail: `dispatched ${installed.length} (worker finalises)` };
+            },
+          }
+        : {}),
+      warmCaches: async () => {
+        await consoleExec(['cache:clear']);
+      },
+      checkHealth: async () =>
+        evaluateHealth(
+          opts.instanceId,
+          await deps.probeHealth(routing.publicFrontendUrl, routing.browserApiPrefix),
+          deps.now,
+        ),
+    },
+  );
 }
 
 function pickCompatibleFrontend(core: CoreRelease, frontends: FrontendRelease[]): FrontendRelease | null {

@@ -112,6 +112,11 @@ instance
   .option('--channel <channel>', 'stable|beta|nightly', 'stable')
   .option('--version <version>', "core version or 'latest'", 'latest')
   .option('--up', 'bring the stack up after install', false)
+  .option('--provision', 'after up: wait for DB, migrate, create admin, install plugins, warm caches, health-check', false)
+  .option('--admin-email <email>', 'create the first CMS admin during provisioning')
+  .option('--admin-name <name>', 'admin display name', 'Admin')
+  .option('--admin-password <password>', 'admin password (a strong one is generated + shown once if omitted)')
+  .option('--plugin-manifest <path...>', 'plugin.json path(s) inside the backend container to install during provisioning')
   .action(async (opts) => {
     try {
       const d = await deps(program.opts().root as string);
@@ -125,8 +130,23 @@ instance
         channel: opts.channel as ReleaseChannel,
         version: opts.version,
         bringUp: opts.up,
+        provision: opts.provision,
+        adminEmail: opts.adminEmail,
+        adminName: opts.adminName,
+        adminPassword: opts.adminPassword,
+        pluginManifests: opts.pluginManifest as string[] | undefined,
       });
       console.log(`Installed ${opts.id} (SelfHelp ${res.version}) at ${res.instanceDir}${res.broughtUp ? ' [started]' : ''}`);
+      if (res.provision) {
+        console.log(`\nProvisioning: ${res.provision.ok ? 'OK' : 'FAILED'}`);
+        for (const s of res.provision.steps) {
+          console.log(`  ${s.status.padEnd(7)} ${s.name}${s.detail ? ` (${s.detail})` : ''}`);
+        }
+        if (res.adminPassword) {
+          console.log(`\nGenerated admin password (shown once, store it now): ${res.adminPassword}`);
+        }
+        if (!res.provision.ok) process.exitCode = 1;
+      }
     } catch (err) {
       fail(err);
     }

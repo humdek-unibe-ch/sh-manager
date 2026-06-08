@@ -6,3 +6,4 @@ export * from './health.js';
 export * from './update.js';
 export * from './operations.js';
 export * from './bootstrap.js';
+export * from './provision.js';

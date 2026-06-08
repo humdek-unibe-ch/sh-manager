@@ -132,6 +132,72 @@ describe('CLI actions (offline)', () => {
     const pf = await doctor(d, [80, 443]);
     expect(pf.status).toBe('ok');
   });
+
+  it('provision runs migrations + admin + plugins + cache + health via backend console', async () => {
+    const d = await makeDeps();
+    d.sleep = async () => {};
+    d.dbWaitDelayMs = 0;
+    await serverInit(d, { serverId: 's1', mode: 'production', letsencryptEmail: 'ops@example.ch' });
+
+    const res = await instanceInstall(d, {
+      instanceId: 'website1',
+      displayName: 'Website 1',
+      mode: 'production',
+      domain: 'website1.example.ch',
+      registryUrl: 'https://humdek-unibe-ch.github.io/sh2-plugin-registry/',
+      version: 'latest',
+      provision: true,
+      adminEmail: 'qa.admin@selfhelp.test',
+      pluginManifests: ['/srv/plugins/surveyjs/plugin.json'],
+    });
+
+    expect(res.broughtUp).toBe(true);
+    expect(res.provision?.ok).toBe(true);
+    // No password supplied -> a strong one is generated and returned exactly once.
+    expect(res.adminPassword).toBeTruthy();
+    expect(res.adminPassword!.length).toBeGreaterThanOrEqual(20);
+
+    const joined = runner.calls.map((c) => c.args.join(' '));
+    expect(joined).toContain('up -d');
+    expect(joined.some((a) => a.includes('dbal:run-sql SELECT 1'))).toBe(true);
+    expect(joined.some((a) => a.includes('doctrine:migrations:migrate --no-interaction --allow-no-migration'))).toBe(true);
+    expect(joined.some((a) => a.includes('app:create-admin-user qa.admin@selfhelp.test'))).toBe(true);
+    expect(joined.some((a) => a.includes('selfhelp:plugin:install /srv/plugins/surveyjs/plugin.json'))).toBe(true);
+    expect(joined.some((a) => a.includes('cache:clear'))).toBe(true);
+
+    // The generated admin password must never land in the manifest or lock.
+    const manifestText = await readFile(instancePaths('website1', root).manifestPath, 'utf8');
+    const lockText = await readFile(instancePaths('website1', root).lockPath, 'utf8');
+    expect(manifestText).not.toContain(res.adminPassword!);
+    expect(lockText).not.toContain(res.adminPassword!);
+  });
+
+  it('provision fails fast on a failed migration and never creates an admin', async () => {
+    const d = await makeDeps();
+    d.sleep = async () => {};
+    d.dbWaitDelayMs = 0;
+    d.runner = new RecordingComposeRunner((args: string[]): ComposeResult => {
+      if (args.join(' ').includes('doctrine:migrations:migrate')) throw new Error('migration boom');
+      return { stdout: '', stderr: '' };
+    });
+    await serverInit(d, { serverId: 's1', mode: 'production', letsencryptEmail: 'ops@example.ch' });
+
+    const res = await instanceInstall(d, {
+      instanceId: 'website1',
+      displayName: 'Website 1',
+      mode: 'production',
+      domain: 'website1.example.ch',
+      registryUrl: 'https://humdek-unibe-ch.github.io/sh2-plugin-registry/',
+      version: 'latest',
+      provision: true,
+      adminEmail: 'qa.admin@selfhelp.test',
+    });
+
+    expect(res.provision?.ok).toBe(false);
+    expect(res.provision?.steps.find((s) => s.name === 'migrations')?.status).toBe('failed');
+    const joined = (d.runner as RecordingComposeRunner).calls.map((c) => c.args.join(' '));
+    expect(joined.some((a) => a.includes('app:create-admin-user'))).toBe(false);
+  });
 });
 
 describe('instance lifecycle (offline)', () => {
