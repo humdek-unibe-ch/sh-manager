@@ -6,7 +6,7 @@
  * so the offline paths are unit-testable and the real wiring lives in env.ts.
  */
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import semver from 'semver';
 import type {
@@ -25,6 +25,8 @@ import { composeCommands, composeProjectName } from '@shm/docker';
 import type { Fetcher } from '@shm/registry';
 import { RegistryClient } from '@shm/registry';
 import {
+  assertSafeToBootstrap,
+  assessBootstrapTarget,
   buildInstanceInstallArtifacts,
   buildServerBootstrap,
   evaluateHealth,
@@ -35,6 +37,7 @@ import {
   provisionInstance,
   runPreflight,
   type BackendOperationsClient,
+  type BootstrapTargetFacts,
   type HealthReport,
   type OperationExecutor,
   type PreflightResourceFacts,
@@ -49,8 +52,12 @@ import {
   ManifestStore,
   generateCloneSecrets,
   instancePaths,
+  instancesDir,
   planRemove,
+  proxyDir,
   secretsForRestore,
+  serverInventoryPath,
+  validateDomainForInstall,
   writeFileAtomic,
   writeInstanceSecrets,
   type GenerateSecretsOptions,
@@ -100,6 +107,10 @@ export interface ActionDeps {
   /** DB-readiness retry budget for provisioning (defaults: 60 attempts x 2s). */
   dbWaitAttempts?: number;
   dbWaitDelayMs?: number;
+  /** Resolve a domain's A/AAAA records (production DNS-binding check). */
+  resolveDns?: (host: string) => Promise<{ a: string[]; aaaa: string[] }>;
+  /** Best-effort public IP of this server, to confirm a domain points here. */
+  serverPublicIp?: () => Promise<string | undefined>;
   now?: () => string;
 }
 
@@ -128,9 +139,36 @@ export interface ServerInitOptions {
   mode: InstanceMode;
   letsencryptEmail?: string;
   proxyNetwork?: string;
+  /** Acknowledge import/repair of an already-bootstrapped or partial target. */
+  allowImport?: boolean;
+}
+
+async function pathExists(p: string): Promise<boolean> {
+  return stat(p).then(() => true).catch(() => false);
+}
+
+async function listInstanceDirs(root: string): Promise<string[]> {
+  return readdir(instancesDir(root), { withFileTypes: true })
+    .then((entries) => entries.filter((e) => e.isDirectory()).map((e) => e.name))
+    .catch(() => [] as string[]);
+}
+
+/** Filesystem-level bootstrap target discovery (Docker-label scan is optional). */
+async function discoverBootstrapTarget(root: string): Promise<BootstrapTargetFacts> {
+  return {
+    inventoryExists: await pathExists(serverInventoryPath(root)),
+    proxyComposeExists: await pathExists(`${proxyDir(root)}/compose.yaml`),
+    instanceDirsOnDisk: await listInstanceDirs(root),
+  };
 }
 
 export async function serverInit(deps: ActionDeps, opts: ServerInitOptions): Promise<{ proxyComposePath: string; inventoryPath: string }> {
+  // Never overwrite an already-managed or partial/foreign install unless the
+  // operator explicitly acknowledges import/repair.
+  assertSafeToBootstrap(assessBootstrapTarget(await discoverBootstrapTarget(deps.root)), {
+    allowImport: opts.allowImport ?? false,
+  });
+
   const boot = buildServerBootstrap({
     serverId: opts.serverId,
     managerVersion: deps.managerVersion,
@@ -164,6 +202,8 @@ export interface InstanceInstallOptions {
   mode: InstanceMode;
   domain?: string;
   localPort?: number;
+  /** Production: block (not just warn) when DNS does not resolve to this server. */
+  strictDns?: boolean;
   registryUrl: string;
   channel?: ReleaseChannel;
   version?: string;
@@ -207,7 +247,10 @@ function selectCoreRef<T extends { version: string; channel: string; blocked?: b
 export async function instanceInstall(
   deps: ActionDeps,
   opts: InstanceInstallOptions,
-): Promise<{ instanceDir: string; version: string; broughtUp: boolean; provision?: ProvisionReport; adminPassword?: string }> {
+): Promise<{ instanceDir: string; version: string; broughtUp: boolean; provision?: ProvisionReport; adminPassword?: string; domainWarnings: string[] }> {
+  // Fail fast on duplicate domains / bad DNS before touching the registry or disk.
+  const domainWarnings = await assertInstallableDomain(deps, opts);
+
   const channel = opts.channel ?? 'stable';
   const client = registryClient(deps, opts.registryUrl);
   const index = await client.getIndex();
@@ -247,7 +290,7 @@ export async function instanceInstall(
   const res = await installInstance(artifacts, { root: deps.root, runner: deps.runner, bringUp });
 
   if (!opts.provision) {
-    return { instanceDir: res.instanceDir, version: core.version, broughtUp: res.broughtUp };
+    return { instanceDir: res.instanceDir, version: core.version, broughtUp: res.broughtUp, domainWarnings };
   }
 
   // A generated admin password is returned to the caller exactly once and never
@@ -261,8 +304,42 @@ export async function instanceInstall(
     version: core.version,
     broughtUp: res.broughtUp,
     provision,
+    domainWarnings,
     ...(generatedPassword ? { adminPassword: generatedPassword } : {}),
   };
+}
+
+/**
+ * Duplicate-domain prevention + optional production DNS-binding check. Throws a
+ * clear aggregated error when the domain cannot be installed; returns non-fatal
+ * warnings (e.g. DNS not yet pointing here) for the caller to surface.
+ */
+async function assertInstallableDomain(deps: ActionDeps, opts: InstanceInstallOptions): Promise<string[]> {
+  const existingDomains = await new InventoryStore(deps.root)
+    .read()
+    .then((inv) => inv.instances.map((e) => e.domain))
+    .catch(() => [] as string[]);
+
+  let dns: { a: string[]; aaaa: string[] } | undefined;
+  let serverPublicIp: string | undefined;
+  if (opts.mode === 'production' && opts.domain && deps.resolveDns) {
+    dns = await deps.resolveDns(opts.domain).catch(() => ({ a: [], aaaa: [] }));
+    serverPublicIp = deps.serverPublicIp ? await deps.serverPublicIp().catch(() => undefined) : undefined;
+  }
+
+  const check = validateDomainForInstall({
+    mode: opts.mode,
+    ...(opts.domain ? { domain: opts.domain } : {}),
+    ...(opts.localPort !== undefined ? { localPort: opts.localPort } : {}),
+    existingDomains,
+    ...(dns ? { dns } : {}),
+    ...(serverPublicIp ? { serverPublicIp } : {}),
+    ...(opts.strictDns !== undefined ? { strictDns: opts.strictDns } : {}),
+  });
+  if (!check.ok) {
+    throw new Error('Domain validation failed:\n' + check.errors.map((e) => `- ${e}`).join('\n'));
+  }
+  return check.warnings;
 }
 
 /**

@@ -106,6 +106,18 @@ describe('CLI actions (offline)', () => {
     expect(inv.serverId).toBe('s1');
   });
 
+  it('refuses to re-bootstrap an already-managed server unless import is acknowledged', async () => {
+    const d = await makeDeps();
+    await serverInit(d, { serverId: 's1', mode: 'production', letsencryptEmail: 'ops@example.ch' });
+    await expect(
+      serverInit(d, { serverId: 's1', mode: 'production', letsencryptEmail: 'ops@example.ch' }),
+    ).rejects.toThrow(/already bootstrapped/);
+    // Explicit import/repair acknowledgement reconciles instead of refusing.
+    await expect(
+      serverInit(d, { serverId: 's1', mode: 'production', letsencryptEmail: 'ops@example.ch', allowImport: true }),
+    ).resolves.toBeTruthy();
+  });
+
   it('installs an instance from the signed fixture registry', async () => {
     const d = await makeDeps();
     await serverInit(d, { serverId: 's1', mode: 'production', letsencryptEmail: 'ops@example.ch' });
@@ -125,6 +137,58 @@ describe('CLI actions (offline)', () => {
 
     const list = await instanceList(d);
     expect(list.map((i) => i.instanceId)).toContain('website1');
+  });
+
+  it('rejects a second instance that reuses an existing domain', async () => {
+    const d = await makeDeps();
+    await serverInit(d, { serverId: 's1', mode: 'production', letsencryptEmail: 'ops@example.ch' });
+    await instanceInstall(d, {
+      instanceId: 'website1',
+      displayName: 'Website 1',
+      mode: 'production',
+      domain: 'dup.example.ch',
+      registryUrl: 'https://humdek-unibe-ch.github.io/sh2-plugin-registry/',
+      version: 'latest',
+    });
+    await expect(
+      instanceInstall(d, {
+        instanceId: 'website2',
+        displayName: 'Website 2',
+        mode: 'production',
+        domain: 'dup.example.ch',
+        registryUrl: 'https://humdek-unibe-ch.github.io/sh2-plugin-registry/',
+        version: 'latest',
+      }),
+    ).rejects.toThrow(/already used by another instance/);
+  });
+
+  it('warns when DNS does not point at this server and blocks under strictDns', async () => {
+    const d = await makeDeps();
+    d.resolveDns = async () => ({ a: ['203.0.113.9'], aaaa: [] });
+    d.serverPublicIp = async () => '198.51.100.5';
+    await serverInit(d, { serverId: 's1', mode: 'production', letsencryptEmail: 'ops@example.ch' });
+
+    const res = await instanceInstall(d, {
+      instanceId: 'website1',
+      displayName: 'Website 1',
+      mode: 'production',
+      domain: 'dnswarn.example.ch',
+      registryUrl: 'https://humdek-unibe-ch.github.io/sh2-plugin-registry/',
+      version: 'latest',
+    });
+    expect(res.domainWarnings.join(' ')).toMatch(/DNS check/);
+
+    await expect(
+      instanceInstall(d, {
+        instanceId: 'website2',
+        displayName: 'Website 2',
+        mode: 'production',
+        domain: 'dnsblock.example.ch',
+        strictDns: true,
+        registryUrl: 'https://humdek-unibe-ch.github.io/sh2-plugin-registry/',
+        version: 'latest',
+      }),
+    ).rejects.toThrow(/DNS check/);
   });
 
   it('doctor reports ok with healthy resources', async () => {

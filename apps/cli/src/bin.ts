@@ -75,10 +75,11 @@ server
   .requiredOption('--server-id <id>', 'unique server id')
   .option('--mode <mode>', 'production|local', 'production')
   .option('--email <email>', "Let's Encrypt contact email (production)")
+  .option('--import', 'acknowledge import/repair of an existing or partial install', false)
   .action(async (opts) => {
     try {
       const d = await deps(program.opts().root as string);
-      const res = await serverInit(d, { serverId: opts.serverId, mode: opts.mode as InstanceMode, letsencryptEmail: opts.email });
+      const res = await serverInit(d, { serverId: opts.serverId, mode: opts.mode as InstanceMode, letsencryptEmail: opts.email, allowImport: opts.import as boolean });
       console.log(`Proxy compose: ${res.proxyComposePath}`);
       console.log(`Inventory:     ${res.inventoryPath}`);
     } catch (err) {
@@ -109,6 +110,7 @@ instance
   .option('--mode <mode>', 'production|local', 'production')
   .option('--domain <domain>', 'public domain (production)')
   .option('--port <port>', 'localhost port (local)', (v) => parseInt(v, 10))
+  .option('--strict-dns', 'production: block (not just warn) when DNS does not resolve to this server', false)
   .option('--channel <channel>', 'stable|beta|nightly', 'stable')
   .option('--version <version>', "core version or 'latest'", 'latest')
   .option('--up', 'bring the stack up after install', false)
@@ -126,6 +128,7 @@ instance
         mode: opts.mode as InstanceMode,
         domain: opts.domain,
         localPort: opts.port,
+        strictDns: opts.strictDns as boolean,
         registryUrl: opts.registry,
         channel: opts.channel as ReleaseChannel,
         version: opts.version,
@@ -137,6 +140,7 @@ instance
         pluginManifests: opts.pluginManifest as string[] | undefined,
       });
       console.log(`Installed ${opts.id} (SelfHelp ${res.version}) at ${res.instanceDir}${res.broughtUp ? ' [started]' : ''}`);
+      for (const w of res.domainWarnings) console.log(`  warning: ${w}`);
       if (res.provision) {
         console.log(`\nProvisioning: ${res.provision.ok ? 'OK' : 'FAILED'}`);
         for (const s of res.provision.steps) {

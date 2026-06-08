@@ -7,6 +7,7 @@
  * CLI actions; this module is the boundary to the operating system + network.
  */
 import { execFile } from 'node:child_process';
+import { resolve4, resolve6 } from 'node:dns/promises';
 import { createServer } from 'node:net';
 import { readFile, statfs } from 'node:fs/promises';
 import os from 'node:os';
@@ -141,5 +142,17 @@ export function realDeps(root: string, trustedKeys: TrustedKeysFile): ActionDeps
         await execFileAsync('docker', ['volume', 'rm', name]);
       }
     },
+    resolveDns: async (host): Promise<{ a: string[]; aaaa: string[] }> => {
+      const a = await resolve4(host).catch(() => [] as string[]);
+      const aaaa = await resolve6(host).catch(() => [] as string[]);
+      return { a, aaaa };
+    },
+    // Best-effort public IP via the official registry host's view would require a
+    // network round-trip we deliberately avoid here; left undefined so the DNS
+    // check confirms the domain resolves at all (catches typos) without a hard
+    // server-IP comparison. Operators can wire SELFHELP_PUBLIC_IP if needed.
+    ...(process.env.SELFHELP_PUBLIC_IP
+      ? { serverPublicIp: async (): Promise<string | undefined> => process.env.SELFHELP_PUBLIC_IP }
+      : {}),
   };
 }
