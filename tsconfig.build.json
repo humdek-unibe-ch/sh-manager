@@ -9,5 +9,5 @@
     "rootDir": "."
   },
   "include": ["packages/*/src/**/*.ts", "apps/*/src/**/*.ts"],
-  "exclude": ["node_modules", "dist", "coverage", "**/*.test.ts"]
+  "exclude": ["node_modules", "dist", "coverage", "**/*.test.ts", "apps/web/src/ui", "apps/web/dist-web"]
 }

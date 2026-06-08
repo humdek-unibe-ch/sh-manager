@@ -41,5 +41,5 @@
     "scripts/**/*.mts",
     "vitest.config.ts"
   ],
-  "exclude": ["node_modules", "dist", "coverage"]
+  "exclude": ["node_modules", "dist", "coverage", "apps/web/src/ui", "apps/web/dist-web"]
 }
