@@ -41,6 +41,9 @@ ENV SELFHELP_ROOT=/opt/selfhelp
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-workspaces
 COPY --from=build /app/dist ./dist
+# Ship the built web UI (Vite SPA) where the web server's default client dir
+# resolves (path.join(dirname(bin.js), '..', 'dist-web') === dist/apps/web/dist-web).
+COPY --from=build /app/apps/web/dist-web ./dist/apps/web/dist-web
 COPY packages/schemas/examples ./packages/schemas/examples
 ENTRYPOINT ["node", "dist/apps/cli/src/bin.js"]
 CMD ["--help"]

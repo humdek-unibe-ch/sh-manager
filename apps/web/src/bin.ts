@@ -57,6 +57,7 @@ async function main(): Promise<void> {
   const mode = (arg('mode', process.env.SHM_WEB_MODE) ?? 'bootstrap') as ServerMode;
   const allowNonLocal = flag('allow-non-local') || process.env.SHM_WEB_ALLOW_NONLOCAL === 'true';
   const persistAfterBootstrap = flag('persist') || process.env.SHM_WEB_PERSIST === 'true';
+  const clientDir = arg('client-dir', process.env.SHM_WEB_CLIENT_DIR) ?? path.join(here, '..', 'dist-web');
   const trustedKeysPath =
     arg('trusted-keys', process.env.SELFHELP_TRUSTED_KEYS) ??
     path.join(here, '..', '..', '..', 'packages', 'schemas', 'examples', 'trusted-keys.json');
@@ -133,6 +134,7 @@ async function main(): Promise<void> {
     port,
     allowNonLocal,
     persistAfterBootstrap,
+    clientDir,
     ...(operatorStore ? { operatorStore } : {}),
   });
 

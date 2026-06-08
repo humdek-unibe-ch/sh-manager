@@ -16,7 +16,10 @@
  * The server holds one in-memory wizard state and one session table; all
  * side effects go through the injected {@link BootstrapActions}.
  */
+import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { extname, normalize, resolve } from 'node:path';
 import type { OperatorStore } from '@shm/auth';
 import {
   authenticateLocal,
@@ -66,7 +69,40 @@ export interface BootstrapServerOptions {
   /** Keep serving after a successful bootstrap (otherwise routes self-lock). */
   persistAfterBootstrap?: boolean;
   initialConfig?: Partial<WizardConfig>;
+  /** Directory of the built React SPA (Vite `dist-web`). Falls back to the inline shell. */
+  clientDir?: string;
   now?: () => Date;
+}
+
+const STATIC_CONTENT_TYPES: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+  '.png': 'image/png',
+  '.webp': 'image/webp',
+  '.woff2': 'font/woff2',
+  '.map': 'application/json; charset=utf-8',
+};
+
+/**
+ * Serve a file from the built SPA directory. Resolves within `clientDir` only
+ * (no path traversal) and returns false when there is nothing to serve so the
+ * caller can fall back to the inline shell or a 404.
+ */
+async function serveStatic(clientDir: string, urlPath: string, res: ServerResponse): Promise<boolean> {
+  const rel = normalize(urlPath).replace(/^([\\/]|\.\.[\\/])+/, '');
+  const full = resolve(clientDir, rel);
+  if (full !== clientDir && !full.startsWith(clientDir + (process.platform === 'win32' ? '\\' : '/'))) return false;
+  if (!existsSync(full)) return false;
+  const body = await readFile(full);
+  res.statusCode = 200;
+  res.setHeader('Content-Type', STATIC_CONTENT_TYPES[extname(full).toLowerCase()] ?? 'application/octet-stream');
+  res.end(body);
+  return true;
 }
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost', '0.0.0.0']);
@@ -122,6 +158,7 @@ export function createBootstrapServer(options: BootstrapServerOptions): Bootstra
   const host = options.host ?? '127.0.0.1';
   const port = options.port ?? 8765;
   const allowNonLocal = options.allowNonLocal ?? false;
+  const clientDir = options.clientDir ? resolve(options.clientDir) : undefined;
   const now = options.now ?? (() => new Date());
 
   if (!isLoopbackHost(host) && !allowNonLocal) {
@@ -233,13 +270,23 @@ export function createBootstrapServer(options: BootstrapServerOptions): Bootstra
     sendJson(res, 200, snapshot({ outcome, health, publicUrl: outcome.publicUrl }));
   }
 
+  async function serveAppShell(res: ServerResponse): Promise<void> {
+    if (clientDir && (await serveStatic(clientDir, 'index.html', res))) return;
+    // Dev / no-build fallback: the minimal inline shell.
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.statusCode = 200;
+    res.end(renderWizardHtml({ mode }));
+  }
+
   async function route(ctx: RequestContext, res: ServerResponse): Promise<void> {
     const path = ctx.url.pathname;
+    const isApi = path.startsWith('/api/');
 
-    // Persistent-mode authentication gate (everything but login + the UI shell).
+    // Persistent-mode authentication gate. Only the JSON API is gated; the static
+    // SPA shell + assets are always served (they contain no secrets) so the
+    // sign-in screen can load before authentication.
     if (mode === 'persistent') {
-      const isPublic = path === '/' || path === '/login' || path === '/api/login';
-      if (!isPublic && !ctx.session) throw new HttpError(401, 'Authentication required.');
+      if (isApi && path !== '/api/login' && !ctx.session) throw new HttpError(401, 'Authentication required.');
       // CSRF for state-changing requests on authenticated routes.
       if (ctx.session && ctx.method !== 'GET' && path !== '/api/login') {
         if (!ctx.csrf || !verifyCsrf(sessions, ctx.session.id, ctx.csrf, now())) {
@@ -255,18 +302,22 @@ export function createBootstrapServer(options: BootstrapServerOptions): Bootstra
       return sendJson(res, 200, { ok: true });
     }
 
-    // Bootstrap self-lock: once complete (and not persistent), the wizard is gone.
+    // Bootstrap self-lock: once complete (and not persistent), the installer can
+    // no longer change anything. The SPA shell, its assets and a read-only
+    // `/api/state` stay available so the browser can show the success screen.
     const bootstrapLocked = isBootstrapComplete(state) && !options.persistAfterBootstrap && mode === 'bootstrap';
-    if (bootstrapLocked && path !== '/api/state') {
-      throw new HttpError(410, 'Bootstrap complete. The installer UI is disabled. Enable persistent mode to manage the server.');
+    if (bootstrapLocked && ctx.method !== 'GET') {
+      throw new HttpError(410, 'Bootstrap complete. The installer is disabled. Enable persistent mode to manage the server.');
     }
 
-    if (path === '/' && ctx.method === 'GET') {
-      res.setHeader('Content-Type', 'text/html; charset=utf-8');
-      res.statusCode = 200;
-      res.end(renderWizardHtml({ mode }));
-      return;
+    // Static SPA: shell at "/", hashed assets under any other non-API GET path.
+    if (ctx.method === 'GET' && !isApi) {
+      if (path === '/') return serveAppShell(res);
+      if (clientDir && (await serveStatic(clientDir, path, res))) return;
+      // Unknown non-API path: serve the shell so the SPA can render (no client router today, but safe).
+      return serveAppShell(res);
     }
+
     if (path === '/api/state' && ctx.method === 'GET') return sendJson(res, 200, snapshot());
     if (path === '/api/config' && ctx.method === 'POST') {
       state = setConfig(state, (ctx.body ?? {}) as Partial<WizardConfig>);
