@@ -206,10 +206,11 @@ instance
 
 instance
   .command('restore <id> <backupId>')
-  .description('Validate a backup and show the restore plan (changes nothing)')
+  .description('Validate a backup and show the restore plan; --apply materializes the secret policy')
   .option('--mode <mode>', 'same_instance|restore_as_clone', 'same_instance')
   .option('--new-domain <domain>', 'new domain (restore_as_clone)')
   .option('--disaster-recovery-import', 'allow importing a backup from a different instance', false)
+  .option('--apply', 'materialize the restore secret policy on disk (fresh secrets for restore_as_clone)', false)
   .action(async (id: string, backupId: string, opts) => {
     try {
       const d = await deps(program.opts().root as string);
@@ -217,12 +218,20 @@ instance
         mode: opts.mode as RestoreMode,
         newDomain: opts.newDomain,
         disasterRecoveryImport: opts.disasterRecoveryImport,
+        apply: opts.apply,
       });
       if (!res.validation.ok || !res.plan) {
         console.error(formatSteps(`Restore blocked for ${id} <- ${backupId}:`, res.validation.errors));
         process.exit(1);
       }
       console.log(formatSteps(`Restore plan for ${id} <- ${backupId} (${res.plan.mode}):`, res.plan.steps));
+      if (opts.apply) {
+        console.log(
+          res.secretsRegenerated
+            ? `Fresh secrets written: ${res.secretsWritten?.length ?? 0} files (source secrets never reused).`
+            : 'Same-instance restore: existing secrets preserved in place.',
+        );
+      }
     } catch (err) {
       fail(err);
     }
@@ -230,11 +239,12 @@ instance
 
 instance
   .command('clone <source> <target>')
-  .description('Show the clone plan for creating <target> from <source>')
+  .description('Show the clone plan for creating <target> from <source>; --apply writes fresh target secrets')
   .requiredOption('--domain <domain>', 'new domain for the clone')
   .option('--no-preserve-versions', 'resolve latest compatible versions instead of pinning the source lock')
   .option('--no-uploads', 'do not copy uploads')
   .option('--no-plugins', 'do not copy plugin artifacts')
+  .option('--apply', 'materialize fresh, isolated secrets for the target on disk', false)
   .action(async (source: string, target: string, opts) => {
     try {
       const d = await deps(program.opts().root as string);
@@ -243,8 +253,12 @@ instance
         preserveVersions: opts.preserveVersions,
         copyUploads: opts.uploads,
         copyPluginArtifacts: opts.plugins,
+        apply: opts.apply,
       });
       console.log(formatSteps(`Clone plan ${source} -> ${target} (${res.plan.targetDomain}):`, res.plan.steps));
+      if (opts.apply) {
+        console.log(`Fresh secrets written for ${target}: ${res.secretsWritten?.length ?? 0} files (source never copied).`);
+      }
     } catch (err) {
       fail(err);
     }

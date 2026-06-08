@@ -8,7 +8,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { TrustedKeysFile } from '@shm/schemas';
 import { RecordingComposeRunner, type ComposeResult } from '@shm/docker';
 import type { Fetcher, FetchResponse } from '@shm/registry';
-import { LockStore, ManifestStore } from '@shm/instances';
+import {
+  LockStore,
+  ManifestStore,
+  generateInstanceSecrets,
+  instancePaths,
+  writeInstanceSecrets,
+} from '@shm/instances';
 import type { ActionDeps } from './actions.js';
 import {
   doctor,
@@ -25,6 +31,17 @@ import { formatHealth, formatPreflight, formatSteps, formatTable } from './outpu
 
 const examplesDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'packages', 'schemas', 'examples');
 const readExample = (n: string) => readFile(path.join(examplesDir, n), 'utf8');
+
+/** Parse a `KEY=value` secrets.env into a map (values may contain `=`). */
+function parseEnv(text: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const line of text.split('\n')) {
+    if (line.startsWith('#') || !line.includes('=')) continue;
+    const idx = line.indexOf('=');
+    out[line.slice(0, idx)] = line.slice(idx + 1);
+  }
+  return out;
+}
 
 class FixtureFetcher implements Fetcher {
   constructor(private readonly map: Record<string, string>) {}
@@ -230,6 +247,56 @@ describe('instance lifecycle (offline)', () => {
     expect(res.plan.generateNewSecrets).toBe(true);
     expect(res.plan.steps.length).toBeGreaterThan(0);
     expect(formatSteps('Clone:', res.plan.steps)).toContain('Clone:');
+  });
+
+  it('clone --apply writes fresh secrets that share nothing with the source on disk', async () => {
+    const base = await lifecycleDeps();
+    const d: ActionDeps = { ...base.d, jwtModulusLength: 2048 };
+    await installWebsite1(d);
+
+    // Give the source a known secret set; the clone must never read or copy it.
+    const srcPaths = instancePaths('website1', root);
+    await writeInstanceSecrets(srcPaths.secretsDir, generateInstanceSecrets({ jwtModulusLength: 2048 }));
+    const srcEnv = parseEnv(await readFile(path.join(srcPaths.secretsDir, 'secrets.env'), 'utf8'));
+
+    const res = await instanceClone(d, 'website1', 'website1-staging', {
+      targetDomain: 'website1-staging.example.ch',
+      apply: true,
+    });
+    expect(res.secretsWritten?.some((p) => p.replace(/\\/g, '/').endsWith('secrets/secrets.env'))).toBe(true);
+
+    const tgtPaths = instancePaths('website1-staging', root);
+    const tgtEnv = parseEnv(await readFile(path.join(tgtPaths.secretsDir, 'secrets.env'), 'utf8'));
+    for (const key of ['APP_SECRET', 'MYSQL_PASSWORD', 'REDIS_PASSWORD', 'MERCURE_JWT_SECRET', 'JWT_PASSPHRASE']) {
+      expect(tgtEnv[key]).toBeTruthy();
+      expect(tgtEnv[key]).not.toBe(srcEnv[key]);
+    }
+  });
+
+  it('restore --apply preserves same-instance secrets but regenerates for restore_as_clone', async () => {
+    const base = await lifecycleDeps();
+    const d: ActionDeps = { ...base.d, jwtModulusLength: 2048 };
+    await installWebsite1(d);
+
+    const paths = instancePaths('website1', root);
+    await writeInstanceSecrets(paths.secretsDir, generateInstanceSecrets({ jwtModulusLength: 2048 }));
+    const before = parseEnv(await readFile(path.join(paths.secretsDir, 'secrets.env'), 'utf8'));
+    const backup = await instanceBackup(d, 'website1');
+
+    const same = await instanceRestore(d, 'website1', backup.backupId, { mode: 'same_instance', apply: true });
+    expect(same.secretsRegenerated).toBe(false);
+    const afterSame = parseEnv(await readFile(path.join(paths.secretsDir, 'secrets.env'), 'utf8'));
+    expect(afterSame.APP_SECRET).toBe(before.APP_SECRET);
+
+    const asClone = await instanceRestore(d, 'website1', backup.backupId, {
+      mode: 'restore_as_clone',
+      newDomain: 'website1-dr.example.ch',
+      disasterRecoveryImport: true,
+      apply: true,
+    });
+    expect(asClone.secretsRegenerated).toBe(true);
+    const afterClone = parseEnv(await readFile(path.join(paths.secretsDir, 'secrets.env'), 'utf8'));
+    expect(afterClone.APP_SECRET).not.toBe(before.APP_SECRET);
   });
 });
 

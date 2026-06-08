@@ -45,11 +45,16 @@ import {
   InventoryStore,
   LockStore,
   ManifestStore,
+  generateCloneSecrets,
   instancePaths,
   planRemove,
+  secretsForRestore,
   writeFileAtomic,
+  writeInstanceSecrets,
+  type GenerateSecretsOptions,
   type RemoveMode,
   type RemovePlan,
+  type SecretIO,
 } from '@shm/instances';
 import {
   REQUIRED_BACKUP_AREAS,
@@ -84,7 +89,15 @@ export interface ActionDeps {
   archiveVolume?: (volumeName: string, outFile: string) => Promise<void>;
   /** Delete named Docker volumes (full-delete only; real impl uses `docker volume rm`). */
   removeVolumes?: (volumeNames: string[]) => Promise<void>;
+  /** Injected secret-file writer (tests assert isolation without POSIX perms). */
+  secretIO?: SecretIO;
+  /** RSA modulus for clone/restore JWT keygen; tests lower it for speed. */
+  jwtModulusLength?: number;
   now?: () => string;
+}
+
+function secretGenOptions(deps: ActionDeps): GenerateSecretsOptions {
+  return deps.jwtModulusLength === undefined ? {} : { jwtModulusLength: deps.jwtModulusLength };
 }
 
 const DEFAULT_SERVICE_IMAGES = { mysql: 'mysql:8.4', redis: 'redis:7.2', mercure: 'dunglas/mercure:0.18' };
@@ -509,6 +522,8 @@ export interface RestoreCliOptions {
   preserveSecrets?: boolean;
   newDomain?: string;
   disasterRecoveryImport?: boolean;
+  /** When true, materialize the restore's secret policy on disk (else plan only). */
+  apply?: boolean;
 }
 
 export async function instanceRestore(
@@ -516,7 +531,13 @@ export async function instanceRestore(
   instanceId: string,
   backupId: string,
   opts: RestoreCliOptions = {},
-): Promise<{ validation: BackupValidation; plan: RestorePlan | null; backupDir: string }> {
+): Promise<{
+  validation: BackupValidation;
+  plan: RestorePlan | null;
+  backupDir: string;
+  secretsRegenerated?: boolean;
+  secretsWritten?: string[];
+}> {
   const paths = instancePaths(instanceId, deps.root);
   const backupDir = path.join(paths.backupsDir, backupId);
   const raw = await readFile(path.join(backupDir, 'backup-manifest.json'), 'utf8').catch(() => null);
@@ -547,6 +568,19 @@ export async function instanceRestore(
 
   const validation = validateBackupForRestore(req, backupManifest, [...REQUIRED_BACKUP_AREAS], actualHashes);
   const plan = validation.ok ? planRestore(req, backupManifest) : null;
+
+  // A restore-as-clone is a new security boundary: it MUST get fresh secrets and
+  // never reuse the source's. A same-instance restore preserves the existing
+  // on-disk secrets (the data they protect is unchanged) — so we leave them be.
+  if (opts.apply && plan) {
+    if (req.mode === 'restore_as_clone') {
+      const { secrets } = secretsForRestore('restore_as_clone', undefined, secretGenOptions(deps));
+      const secretsWritten = await writeInstanceSecrets(paths.secretsDir, secrets, deps.secretIO);
+      return { validation, plan, backupDir, secretsRegenerated: true, secretsWritten };
+    }
+    return { validation, plan, backupDir, secretsRegenerated: false };
+  }
+
   return { validation, plan, backupDir };
 }
 
@@ -559,6 +593,8 @@ export interface CloneCliOptions {
   preserveVersions?: boolean;
   copyUploads?: boolean;
   copyPluginArtifacts?: boolean;
+  /** When true, materialize the clone's fresh secrets on disk (else plan only). */
+  apply?: boolean;
 }
 
 export async function instanceClone(
@@ -566,7 +602,7 @@ export async function instanceClone(
   sourceInstanceId: string,
   targetInstanceId: string,
   opts: CloneCliOptions,
-): Promise<{ plan: ClonePlan }> {
+): Promise<{ plan: ClonePlan; secretsWritten?: string[] }> {
   const sourceLock = await new LockStore(sourceInstanceId, deps.root).read();
   const sourceManifest = await new ManifestStore(sourceInstanceId, deps.root).read();
   const req: CloneRequest = {
@@ -579,7 +615,19 @@ export async function instanceClone(
     copyPluginArtifacts: opts.copyPluginArtifacts ?? true,
     sourceDomain: sourceManifest.domain,
   };
-  return { plan: planClone(req, sourceLock) };
+  const plan = planClone(req, sourceLock);
+
+  // A clone is a distinct security boundary: always generate fresh secrets and
+  // write them into the target's own secrets/ dir. The source secrets are never
+  // read or copied here.
+  if (opts.apply) {
+    const targetPaths = instancePaths(targetInstanceId, deps.root);
+    const secrets = generateCloneSecrets(secretGenOptions(deps));
+    const secretsWritten = await writeInstanceSecrets(targetPaths.secretsDir, secrets, deps.secretIO);
+    return { plan, secretsWritten };
+  }
+
+  return { plan };
 }
 
 // ---------------------------------------------------------------------------
