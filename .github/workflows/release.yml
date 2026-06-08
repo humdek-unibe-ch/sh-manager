@@ -21,6 +21,10 @@ env:
 jobs:
   release:
     runs-on: ubuntu-latest
+    # Mapped to a job-scoped env so the optional cosign step's `if:` can read it
+    # (the `secrets` context is not available in step `if:` expressions).
+    env:
+      COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -57,10 +61,26 @@ jobs:
           format: spdx-json
           output-file: sbom.spdx.json
 
+      - name: Scan image for vulnerabilities (Trivy)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.IMAGE }}:${{ github.ref_name }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+          # Advisory: attach results to the release; do not block a tagged
+          # release on a freshly disclosed base-image CVE.
+          exit-code: '0'
+
+      - name: Upload Trivy results to code scanning
+        if: ${{ always() && hashFiles('trivy-results.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+
       - name: Sign image (optional)
         if: ${{ env.COSIGN_PRIVATE_KEY != '' }}
         env:
-          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
           COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
         run: |
           curl -sSfL https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64 -o /usr/local/bin/cosign
@@ -72,4 +92,5 @@ jobs:
         with:
           files: |
             sbom.spdx.json
+            trivy-results.sarif
             license-report.txt
