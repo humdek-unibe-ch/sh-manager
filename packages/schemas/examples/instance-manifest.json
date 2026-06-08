@@ -1,0 +1,43 @@
+{
+  "manifestVersion": 1,
+  "instanceId": "website1",
+  "displayName": "Website 1 Study",
+  "domain": "website1.example.ch",
+  "mode": "production",
+  "createdAt": "2026-06-05T10:00:00+00:00",
+  "updatedAt": "2026-06-05T10:00:00+00:00",
+  "registry": {
+    "id": "selfhelp-official",
+    "url": "https://humdek-unibe-ch.github.io/sh2-plugin-registry/",
+    "channel": "stable"
+  },
+  "versions": {
+    "selfhelp": "1.5.0",
+    "backend": "1.5.0",
+    "frontend": "1.5.0",
+    "scheduler": "1.5.0",
+    "worker": "1.5.0",
+    "pluginApi": "2.1"
+  },
+  "images": {
+    "backend": "ghcr.io/humdek-unibe-ch/selfhelp-backend:1.5.0",
+    "frontend": "ghcr.io/humdek-unibe-ch/selfhelp-frontend:1.5.0",
+    "scheduler": "ghcr.io/humdek-unibe-ch/selfhelp-scheduler:1.5.0",
+    "worker": "ghcr.io/humdek-unibe-ch/selfhelp-worker:1.5.0",
+    "mysql": "mysql:8.4",
+    "redis": "redis:7.2",
+    "mercure": "dunglas/mercure:0.18"
+  },
+  "routing": {
+    "publicFrontendUrl": "https://website1.example.ch",
+    "browserApiPrefix": "/api",
+    "internalSymfonyUrl": "http://backend:8080",
+    "symfonyApiPrefix": "/cms-api/v1"
+  },
+  "installedPlugins": [
+    {
+      "id": "survey-js",
+      "version": "1.3.0"
+    }
+  ]
+}

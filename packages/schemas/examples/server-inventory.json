@@ -1,0 +1,23 @@
+{
+  "inventoryVersion": 1,
+  "serverId": "selfhelp-server-001",
+  "manager": {
+    "name": "SelfHelp Manager",
+    "repository": "sh-manager",
+    "version": "0.1.0"
+  },
+  "proxy": {
+    "type": "traefik",
+    "network": "selfhelp_proxy",
+    "composePath": "/opt/selfhelp/proxy/compose.yaml"
+  },
+  "instances": [
+    {
+      "instanceId": "website1",
+      "domain": "website1.example.ch",
+      "path": "/opt/selfhelp/instances/website1",
+      "composeProject": "selfhelp_website1",
+      "status": "active"
+    }
+  ]
+}

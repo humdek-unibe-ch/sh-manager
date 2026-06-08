@@ -1,0 +1,198 @@
+// SPDX-FileCopyrightText: 2026 Humdek, University of Bern
+// SPDX-License-Identifier: MPL-2.0
+/**
+ * Per-instance secret generation + secure secret-file writing.
+ *
+ * Every SelfHelp instance is an isolated security boundary, so it MUST own a
+ * distinct set of runtime secrets: an `APP_SECRET`, a JWT keypair (+ passphrase),
+ * a Mercure JWT secret, a database password (+ root password) and a Redis
+ * password. These are NEVER:
+ *   - shared between instances,
+ *   - copied from the source on clone,
+ *   - written into the manifest / lock / inventory / README,
+ *   - emitted to logs or support bundles (the support redactor strips them).
+ *
+ * Secrets are written as `0600` files under `<instance>/secrets/` (`0700`). The
+ * non-secret `.env` only references the JWT key *paths*; the actual secret
+ * values live in `secrets/secrets.env`, which compose loads through `env_file`.
+ */
+import { generateKeyPairSync, randomBytes } from 'node:crypto';
+import { chmod, mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+
+export const SECRET_FILE_MODE = 0o600;
+export const SECRET_DIR_MODE = 0o700;
+/** Path (relative to the instance dir) of the compose-loaded secret env file. */
+export const SECRETS_ENV_RELATIVE_PATH = 'secrets/secrets.env';
+/** Path (relative to the instance dir) of the JWT keypair directory. */
+export const JWT_KEYS_RELATIVE_DIR = 'secrets/jwt';
+/** Mount target of the JWT keys inside the backend/worker/scheduler containers. */
+export const JWT_CONTAINER_DIR = '/app/config/jwt';
+
+const DEFAULT_DATABASE_NAME = 'selfhelp';
+const DEFAULT_DATABASE_USER = 'selfhelp';
+const DEFAULT_JWT_MODULUS_LENGTH = 4096;
+
+export interface InstanceSecrets {
+  appSecret: string;
+  databaseName: string;
+  databaseUser: string;
+  databasePassword: string;
+  databaseRootPassword: string;
+  redisPassword: string;
+  mercureJwtSecret: string;
+  jwtPassphrase: string;
+  jwtPrivateKeyPem: string;
+  jwtPublicKeyPem: string;
+}
+
+export interface GenerateSecretsOptions {
+  /** RSA modulus for the JWT keypair. Tests may lower it for speed. */
+  jwtModulusLength?: number;
+  databaseName?: string;
+  databaseUser?: string;
+}
+
+function hexToken(bytes: number): string {
+  return randomBytes(bytes).toString('hex');
+}
+
+function urlSafeToken(bytes: number): string {
+  return randomBytes(bytes).toString('base64url');
+}
+
+/** Generates a fresh, fully isolated secret set for one instance. */
+export function generateInstanceSecrets(options: GenerateSecretsOptions = {}): InstanceSecrets {
+  const jwtPassphrase = urlSafeToken(24);
+  const { privateKey, publicKey } = generateKeyPairSync('rsa', {
+    modulusLength: options.jwtModulusLength ?? DEFAULT_JWT_MODULUS_LENGTH,
+    publicKeyEncoding: { type: 'spki', format: 'pem' },
+    privateKeyEncoding: { type: 'pkcs8', format: 'pem', cipher: 'aes-256-cbc', passphrase: jwtPassphrase },
+  });
+  return {
+    appSecret: hexToken(32),
+    databaseName: options.databaseName ?? DEFAULT_DATABASE_NAME,
+    databaseUser: options.databaseUser ?? DEFAULT_DATABASE_USER,
+    databasePassword: urlSafeToken(24),
+    databaseRootPassword: urlSafeToken(24),
+    redisPassword: urlSafeToken(24),
+    mercureJwtSecret: hexToken(32),
+    jwtPassphrase,
+    jwtPrivateKeyPem: String(privateKey),
+    jwtPublicKeyPem: String(publicKey),
+  };
+}
+
+/** A clone always receives freshly generated secrets; the source's are never reused. */
+export function generateCloneSecrets(options: GenerateSecretsOptions = {}): InstanceSecrets {
+  return generateInstanceSecrets(options);
+}
+
+export type RestoreSecretMode = 'same_instance' | 'restore_as_clone';
+
+/**
+ * Restore secret policy: an in-place same-instance restore keeps the existing
+ * secrets (the data they protect is unchanged); a restore-as-clone is a new
+ * security boundary and MUST get fresh secrets.
+ */
+export function secretsForRestore(
+  mode: RestoreSecretMode,
+  existing: InstanceSecrets | undefined,
+  options: GenerateSecretsOptions = {},
+): { secrets: InstanceSecrets; regenerated: boolean } {
+  if (mode === 'same_instance') {
+    if (!existing) {
+      throw new Error('same_instance restore requires the existing instance secrets to preserve.');
+    }
+    return { secrets: existing, regenerated: false };
+  }
+  return { secrets: generateInstanceSecrets(options), regenerated: true };
+}
+
+/** Secret env vars consumed by backend/worker/scheduler/db/redis/mercure containers. */
+export function secretEnvMap(secrets: InstanceSecrets): Record<string, string> {
+  const dbPassword = encodeURIComponent(secrets.databasePassword);
+  const redisPassword = encodeURIComponent(secrets.redisPassword);
+  return {
+    APP_SECRET: secrets.appSecret,
+    DATABASE_URL: `mysql://${secrets.databaseUser}:${dbPassword}@mysql:3306/${secrets.databaseName}?serverVersion=8.4&charset=utf8mb4`,
+    MYSQL_DATABASE: secrets.databaseName,
+    MYSQL_USER: secrets.databaseUser,
+    MYSQL_PASSWORD: secrets.databasePassword,
+    MYSQL_ROOT_PASSWORD: secrets.databaseRootPassword,
+    REDIS_PASSWORD: secrets.redisPassword,
+    // `default:` user so the support-bundle redactor (which keys on `user:pass@`) strips it.
+    REDIS_URL: `redis://default:${redisPassword}@redis:6379`,
+    MERCURE_JWT_SECRET: secrets.mercureJwtSecret,
+    MERCURE_PUBLISHER_JWT_KEY: secrets.mercureJwtSecret,
+    MERCURE_SUBSCRIBER_JWT_KEY: secrets.mercureJwtSecret,
+    JWT_PASSPHRASE: secrets.jwtPassphrase,
+  };
+}
+
+export function renderSecretsEnv(secrets: InstanceSecrets): string {
+  const header =
+    '# Generated by SelfHelp Manager. SECRET runtime config (0600, per-instance).\n' +
+    '# Never commit, log, copy, or include unredacted in a support bundle.\n';
+  const lines = Object.entries(secretEnvMap(secrets)).map(([k, v]) => `${k}=${v}`);
+  return header + lines.join('\n') + '\n';
+}
+
+export interface SecretFileSpec {
+  relPath: string;
+  contents: string;
+  mode: number;
+}
+
+/** Every secret artifact to write under the instance `secrets/` directory. */
+export function instanceSecretFiles(secrets: InstanceSecrets): SecretFileSpec[] {
+  const f = (relPath: string, contents: string): SecretFileSpec => ({ relPath, contents, mode: SECRET_FILE_MODE });
+  return [
+    f('app_secret', `${secrets.appSecret}\n`),
+    f('db_password', `${secrets.databasePassword}\n`),
+    f('db_root_password', `${secrets.databaseRootPassword}\n`),
+    f('redis_password', `${secrets.redisPassword}\n`),
+    f('mercure_jwt_secret', `${secrets.mercureJwtSecret}\n`),
+    f('jwt_passphrase', `${secrets.jwtPassphrase}\n`),
+    f('jwt/private.pem', secrets.jwtPrivateKeyPem),
+    f('jwt/public.pem', secrets.jwtPublicKeyPem),
+    f('secrets.env', renderSecretsEnv(secrets)),
+  ];
+}
+
+/**
+ * Injected IO so secret writing is unit-testable on any OS (Windows cannot
+ * assert POSIX permission bits; the real implementation enforces them).
+ */
+export interface SecretIO {
+  ensureDir(dir: string, mode: number): Promise<void>;
+  writeFile(file: string, contents: string, mode: number): Promise<void>;
+}
+
+export const nodeSecretIO: SecretIO = {
+  async ensureDir(dir, mode) {
+    await mkdir(dir, { recursive: true, mode });
+    await chmod(dir, mode).catch(() => undefined);
+  },
+  async writeFile(file, contents, mode) {
+    await writeFile(file, contents, { mode });
+    await chmod(file, mode).catch(() => undefined);
+  },
+};
+
+/** Writes every secret file under `<secretsDir>` with restrictive permissions. */
+export async function writeInstanceSecrets(
+  secretsDir: string,
+  secrets: InstanceSecrets,
+  io: SecretIO = nodeSecretIO,
+): Promise<string[]> {
+  await io.ensureDir(secretsDir, SECRET_DIR_MODE);
+  await io.ensureDir(path.join(secretsDir, 'jwt'), SECRET_DIR_MODE);
+  const written: string[] = [];
+  for (const spec of instanceSecretFiles(secrets)) {
+    const abs = path.join(secretsDir, spec.relPath);
+    await io.writeFile(abs, spec.contents, spec.mode);
+    written.push(abs);
+  }
+  return written;
+}

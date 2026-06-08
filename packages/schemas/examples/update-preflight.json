@@ -1,0 +1,35 @@
+{
+  "preflightVersion": 1,
+  "status": "warning",
+  "instanceId": "website1",
+  "currentVersion": "1.4.2",
+  "targetVersion": "1.5.0",
+  "checks": [
+    {
+      "code": "docker.available",
+      "severity": "info",
+      "message": "Docker engine is available."
+    },
+    {
+      "code": "database.destructive",
+      "severity": "warning",
+      "message": "Target includes a destructive migration; backup + confirmation required."
+    }
+  ],
+  "options": [
+    {
+      "type": "update_plugin",
+      "version": "1.4.0",
+      "label": "Update survey-js to 1.4.0 first"
+    }
+  ],
+  "database": {
+    "destructive": true,
+    "requiresBackup": true,
+    "manualConfirmationRequired": true
+  },
+  "rollback": {
+    "automaticBeforeMigrations": true,
+    "automaticAfterDestructiveMigrations": false
+  }
+}

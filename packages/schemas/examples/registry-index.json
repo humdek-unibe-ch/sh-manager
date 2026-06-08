@@ -1,0 +1,29 @@
+{
+  "schemaVersion": "1.0",
+  "requiresManager": ">=0.1.0",
+  "publishedAt": "2026-06-05T12:00:00Z",
+  "baseUrl": "https://humdek-unibe-ch.github.io/sh2-plugin-registry/",
+  "publisher": {
+    "name": "SelfHelp (University of Bern)",
+    "url": "https://www.unibe.ch/"
+  },
+  "core": [
+    {
+      "id": "selfhelp-core-1.5.0",
+      "version": "1.5.0",
+      "channel": "stable",
+      "releaseUrl": "releases/core/selfhelp-core-1.5.0.json"
+    }
+  ],
+  "frontend": [
+    {
+      "id": "selfhelp-frontend-1.5.0",
+      "version": "1.5.0",
+      "channel": "stable",
+      "releaseUrl": "releases/frontend/selfhelp-frontend-1.5.0.json"
+    }
+  ],
+  "scheduler": [],
+  "worker": [],
+  "plugins": []
+}

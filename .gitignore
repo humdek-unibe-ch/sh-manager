@@ -1,0 +1,9 @@
+AGENTS.local.md
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.env
+.env.local
+*.log
+.DS_Store
