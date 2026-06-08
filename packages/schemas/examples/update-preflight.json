@@ -2,8 +2,8 @@
   "preflightVersion": 1,
   "status": "warning",
   "instanceId": "website1",
-  "currentVersion": "1.4.2",
-  "targetVersion": "1.5.0",
+  "currentVersion": "8.0.0-dev",
+  "targetVersion": "8.0.0",
   "checks": [
     {
       "code": "docker.available",

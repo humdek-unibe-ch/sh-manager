@@ -1,26 +1,26 @@
 {
   "kind": "selfhelp-core-release",
-  "id": "selfhelp-core-1.5.0",
-  "version": "1.5.0",
+  "id": "selfhelp-core-8.0.0",
+  "version": "8.0.0",
   "channel": "stable",
   "releasedAt": "2026-06-01T00:00:00Z",
-  "minimumDirectUpgradeFrom": "1.0.0",
+  "minimumDirectUpgradeFrom": "8.0.0-dev",
   "pluginApiVersion": "2.1",
   "backend": {
-    "image": "ghcr.io/humdek-unibe-ch/selfhelp-backend:1.5.0",
+    "image": "ghcr.io/humdek-unibe-ch/selfhelp-backend:8.0.0",
     "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
     "phpVersion": "8.4"
   },
   "worker": {
-    "image": "ghcr.io/humdek-unibe-ch/selfhelp-worker:1.5.0",
+    "image": "ghcr.io/humdek-unibe-ch/selfhelp-worker:8.0.0",
     "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
   },
   "scheduler": {
-    "image": "ghcr.io/humdek-unibe-ch/selfhelp-scheduler:1.5.0",
+    "image": "ghcr.io/humdek-unibe-ch/selfhelp-scheduler:8.0.0",
     "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
   },
   "frontendCompatibility": {
-    "requiredFrontendRange": ">=1.5.0 <1.6.0"
+    "requiredFrontendRange": ">=8.0.0 <8.1.0"
   },
   "database": {
     "migrationRange": "Version20260501000000..Version20260605081254",
@@ -29,8 +29,8 @@
     "manualConfirmationRequired": false
   },
   "security": {
-    "signature": "eOS915M2nA6SuSMfYlDzqUSqi/LytAAwDCpoLOsgq6bqQOZtG3kNjaJHjbs8gckXHPqVJfKOpeNwQ4LpOqRcDA==",
+    "signature": "gAtDfyEYFAOiQy9t6iIjpqeEMiOlcHZ2wP9UdpBOA4KBfkouuqwrras4UubE6+IQM9DqiwZOg0cc26MAhqdiDg==",
     "keyId": "selfhelp-official-2026",
-    "signedPayloadSha256": "sha256:ef4794ae1aa91b24770ba8877453aa751f37804fc189bf2433fd8879332a0cc7"
+    "signedPayloadSha256": "sha256:73f184aa32ff6f94224d40340c875492a9a288c6db47684ccc4a60ee874f93f9"
   }
 }

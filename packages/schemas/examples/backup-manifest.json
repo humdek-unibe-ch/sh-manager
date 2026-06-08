@@ -4,7 +4,7 @@
   "instanceId": "website1",
   "createdAt": "2026-06-05T09:00:00Z",
   "mode": "maintenance",
-  "selfhelpVersion": "1.4.2",
+  "selfhelpVersion": "8.0.0",
   "migrationVersion": "Version20260605081254",
   "plugins": [
     {

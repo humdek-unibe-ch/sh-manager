@@ -12,18 +12,18 @@
     "channel": "stable"
   },
   "versions": {
-    "selfhelp": "1.5.0",
-    "backend": "1.5.0",
-    "frontend": "1.5.0",
-    "scheduler": "1.5.0",
-    "worker": "1.5.0",
+    "selfhelp": "8.0.0",
+    "backend": "8.0.0",
+    "frontend": "8.0.0",
+    "scheduler": "8.0.0",
+    "worker": "8.0.0",
     "pluginApi": "2.1"
   },
   "images": {
-    "backend": "ghcr.io/humdek-unibe-ch/selfhelp-backend:1.5.0",
-    "frontend": "ghcr.io/humdek-unibe-ch/selfhelp-frontend:1.5.0",
-    "scheduler": "ghcr.io/humdek-unibe-ch/selfhelp-scheduler:1.5.0",
-    "worker": "ghcr.io/humdek-unibe-ch/selfhelp-worker:1.5.0",
+    "backend": "ghcr.io/humdek-unibe-ch/selfhelp-backend:8.0.0",
+    "frontend": "ghcr.io/humdek-unibe-ch/selfhelp-frontend:8.0.0",
+    "scheduler": "ghcr.io/humdek-unibe-ch/selfhelp-scheduler:8.0.0",
+    "worker": "ghcr.io/humdek-unibe-ch/selfhelp-worker:8.0.0",
     "mysql": "mysql:8.4",
     "redis": "redis:7.2",
     "mercure": "dunglas/mercure:0.18"

@@ -9,18 +9,18 @@
   },
   "core": [
     {
-      "id": "selfhelp-core-1.5.0",
-      "version": "1.5.0",
+      "id": "selfhelp-core-8.0.0",
+      "version": "8.0.0",
       "channel": "stable",
-      "releaseUrl": "releases/core/selfhelp-core-1.5.0.json"
+      "releaseUrl": "releases/core/selfhelp-core-8.0.0.json"
     }
   ],
   "frontend": [
     {
-      "id": "selfhelp-frontend-1.5.0",
-      "version": "1.5.0",
+      "id": "selfhelp-frontend-8.0.0",
+      "version": "8.0.0",
       "channel": "stable",
-      "releaseUrl": "releases/frontend/selfhelp-frontend-1.5.0.json"
+      "releaseUrl": "releases/frontend/selfhelp-frontend-8.0.0.json"
     }
   ],
   "scheduler": [],

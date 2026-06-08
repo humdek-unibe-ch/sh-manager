@@ -4,17 +4,17 @@
   "registry": {
     "id": "selfhelp-official",
     "url": "https://humdek-unibe-ch.github.io/sh2-plugin-registry/",
-    "metadataSha256": "sha256:087683905e5ff610ed30942a41a84c2b97dc29df63db2204280e6690a5efe613"
+    "metadataSha256": "sha256:d32c4476f95a0182db66f7054e23272a40cba307e3cac9c750856f12841f8810"
   },
   "core": {
-    "version": "1.5.0",
+    "version": "8.0.0",
     "backendImageDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
     "frontendImageDigest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
     "schedulerImageDigest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
     "workerImageDigest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
     "migrationVersion": "Version20260605081254",
     "pluginApiVersion": "2.1",
-    "signedPayloadSha256": "sha256:ef4794ae1aa91b24770ba8877453aa751f37804fc189bf2433fd8879332a0cc7"
+    "signedPayloadSha256": "sha256:73f184aa32ff6f94224d40340c875492a9a288c6db47684ccc4a60ee874f93f9"
   },
   "services": {
     "mysql": {
@@ -37,7 +37,7 @@
       "signature": "ZGV2LXNpZ25hdHVyZQ==",
       "keyId": "selfhelp-official-2026",
       "compatibility": {
-        "core": ">=1.0.0 <1.6.0",
+        "core": ">=8.0.0-dev <9.0.0",
         "pluginApi": ">=2.0"
       }
     }
