@@ -360,6 +360,34 @@ export const frontendReleaseSchema: JsonSchema = {
   },
 };
 
+const serviceReleaseSchema = (kind: string): JsonSchema => ({
+  $id: `selfhelp/${kind}.schema.json`,
+  type: 'object',
+  required: ['kind', 'id', 'version', 'channel', 'image', 'digest', 'backendCompatibility', 'security'],
+  properties: {
+    kind: { const: kind },
+    id: { type: 'string' },
+    version: semverField,
+    channel: { enum: ['stable', 'beta', 'nightly'] },
+    image: { type: 'string' },
+    digest: sha256Field,
+    builtFrom: { type: 'object' },
+    backendCompatibility: {
+      type: 'object',
+      required: ['requiredCoreRange'],
+      properties: {
+        requiredCoreRange: { type: 'string' },
+        requiredApiVersion: { type: 'string' },
+      },
+    },
+    security: signatureBlockSchema,
+    blocked: { type: 'boolean' },
+  },
+});
+
+export const schedulerReleaseSchema: JsonSchema = serviceReleaseSchema('selfhelp-scheduler-release');
+export const workerReleaseSchema: JsonSchema = serviceReleaseSchema('selfhelp-worker-release');
+
 export const advisoryFeedSchema: JsonSchema = {
   $id: 'selfhelp/advisory-feed.schema.json',
   type: 'object',
@@ -507,6 +535,8 @@ export const ALL_SCHEMAS: Record<string, JsonSchema> = {
   registryIndex: registryIndexSchema,
   coreRelease: coreReleaseSchema,
   frontendRelease: frontendReleaseSchema,
+  schedulerRelease: schedulerReleaseSchema,
+  workerRelease: workerReleaseSchema,
   advisoryFeed: advisoryFeedSchema,
   updatePreflight: updatePreflightSchema,
   backupManifest: backupManifestSchema,

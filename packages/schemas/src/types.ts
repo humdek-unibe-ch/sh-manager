@@ -248,6 +248,49 @@ export interface FrontendRelease {
   blocked?: boolean;
 }
 
+/** Compatibility descriptor shared by core-coupled service releases. */
+export interface ServiceBackendCompatibility {
+  requiredCoreRange: string;
+  /** Optional CMS API contract version; core-coupled services may omit it. */
+  requiredApiVersion?: string;
+}
+
+/**
+ * Scheduled-jobs runner release. Built from the same core source as the
+ * backend but resolved/pinned as a first-class artifact so an instance can run
+ * a distinct scheduler version.
+ */
+export interface SchedulerRelease {
+  kind: 'selfhelp-scheduler-release';
+  id: string;
+  version: string;
+  channel: ReleaseChannel;
+  image: string;
+  digest: string;
+  builtFrom?: Record<string, unknown>;
+  backendCompatibility: ServiceBackendCompatibility;
+  security: SignatureBlock;
+  blocked?: boolean;
+}
+
+/**
+ * Messenger worker release. Built from the same core source as the backend but
+ * resolved/pinned as a first-class artifact so an instance can run a distinct
+ * worker version.
+ */
+export interface WorkerRelease {
+  kind: 'selfhelp-worker-release';
+  id: string;
+  version: string;
+  channel: ReleaseChannel;
+  image: string;
+  digest: string;
+  builtFrom?: Record<string, unknown>;
+  backendCompatibility: ServiceBackendCompatibility;
+  security: SignatureBlock;
+  blocked?: boolean;
+}
+
 export interface PluginRelease {
   kind: 'selfhelp-plugin-release';
   id: string;

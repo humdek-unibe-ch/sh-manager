@@ -1,8 +1,19 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
 import { describe, expect, it } from 'vitest';
-import type { CoreRelease, FrontendRelease, SecurityAdvisory } from '@shm/schemas';
-import { pickFrontendForCore, resolveCoreTarget } from './core.js';
+import type {
+  CoreRelease,
+  FrontendRelease,
+  SchedulerRelease,
+  SecurityAdvisory,
+  WorkerRelease,
+} from '@shm/schemas';
+import {
+  pickFrontendForCore,
+  pickSchedulerForCore,
+  pickWorkerForCore,
+  resolveCoreTarget,
+} from './core.js';
 
 function core(version: string, minFrom = '1.3.0', blocked = false): CoreRelease {
   return {
@@ -97,5 +108,57 @@ describe('pickFrontendForCore', () => {
     const c = core('1.5.0');
     const f = pickFrontendForCore(c, [frontend('1.4.9', '>=1.4.0 <1.5.0')]);
     expect(f).toBeNull();
+  });
+});
+
+function scheduler(version: string, requiredCoreRange: string, blocked = false): SchedulerRelease {
+  return {
+    kind: 'selfhelp-scheduler-release',
+    id: 'selfhelp-scheduler',
+    version,
+    channel: 'stable',
+    image: 's',
+    digest: 'sha256:s',
+    backendCompatibility: { requiredCoreRange },
+    security: { signature: 's', keyId: 'humdek-2026-01' },
+    blocked,
+  };
+}
+
+function worker(version: string, requiredCoreRange: string, blocked = false): WorkerRelease {
+  return {
+    kind: 'selfhelp-worker-release',
+    id: 'selfhelp-worker',
+    version,
+    channel: 'stable',
+    image: 'w',
+    digest: 'sha256:w',
+    backendCompatibility: { requiredCoreRange },
+    security: { signature: 's', keyId: 'humdek-2026-01' },
+    blocked,
+  };
+}
+
+describe('pickSchedulerForCore / pickWorkerForCore', () => {
+  it('selects the newest scheduler whose requiredCoreRange the core satisfies', () => {
+    const c = core('1.5.0');
+    const s = pickSchedulerForCore(c, [
+      scheduler('1.4.9', '>=1.4.0 <1.5.0'),
+      scheduler('1.5.1', '>=1.5.0 <1.6.0'),
+      scheduler('1.5.4', '>=1.5.0 <1.6.0'),
+    ]);
+    expect(s?.version).toBe('1.5.4');
+  });
+
+  it('selects the newest worker whose requiredCoreRange the core satisfies', () => {
+    const c = core('1.5.0');
+    const w = pickWorkerForCore(c, [worker('1.5.0', '>=1.5.0 <1.6.0'), worker('1.4.0', '>=1.4.0 <1.5.0')]);
+    expect(w?.version).toBe('1.5.0');
+  });
+
+  it('skips blocked releases and returns null when none match', () => {
+    const c = core('1.5.0');
+    expect(pickSchedulerForCore(c, [scheduler('1.5.9', '>=1.5.0 <1.6.0', true)])).toBeNull();
+    expect(pickWorkerForCore(c, [worker('1.4.9', '>=1.4.0 <1.5.0')])).toBeNull();
   });
 });

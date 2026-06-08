@@ -10,9 +10,11 @@ import type {
   InstanceLock,
   InstanceManifest,
   RegistryIndex,
+  SchedulerRelease,
   ServerInventory,
   TrustedKeysFile,
   UpdatePreflightResult,
+  WorkerRelease,
 } from './types.js';
 
 const ajv = new Ajv({ allErrors: true, strict: false });
@@ -56,6 +58,10 @@ export const validateCoreRelease = (d: unknown): ValidationResult<CoreRelease> =
   run('coreRelease', d);
 export const validateFrontendRelease = (d: unknown): ValidationResult<FrontendRelease> =>
   run('frontendRelease', d);
+export const validateSchedulerRelease = (d: unknown): ValidationResult<SchedulerRelease> =>
+  run('schedulerRelease', d);
+export const validateWorkerRelease = (d: unknown): ValidationResult<WorkerRelease> =>
+  run('workerRelease', d);
 export const validateUpdatePreflight = (d: unknown): ValidationResult<UpdatePreflightResult> =>
   run('updatePreflight', d);
 export const validateBackupManifest = (d: unknown): ValidationResult<BackupManifest> =>

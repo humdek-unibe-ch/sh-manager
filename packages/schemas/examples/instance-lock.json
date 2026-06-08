@@ -4,7 +4,7 @@
   "registry": {
     "id": "selfhelp-official",
     "url": "https://humdek-unibe-ch.github.io/sh2-plugin-registry/",
-    "metadataSha256": "sha256:d32c4476f95a0182db66f7054e23272a40cba307e3cac9c750856f12841f8810"
+    "metadataSha256": "sha256:9da62a5aca79092a82b98d2506a055411b54928f841eb49a1e51a074bb46dcaf"
   },
   "core": {
     "version": "8.0.0",

@@ -24,9 +24,11 @@ import {
   validateInstanceLock,
   validateInstanceManifest,
   validateRegistryIndex,
+  validateSchedulerRelease,
   validateServerInventory,
   validateTrustedKeys,
   validateUpdatePreflight,
+  validateWorkerRelease,
   type ValidationResult,
 } from '@shm/schemas';
 
@@ -80,6 +82,30 @@ const frontendNoSec = {
 };
 const frontendRelease = { ...frontendNoSec, security: sign(frontendNoSec) };
 
+const schedulerNoSec = {
+  kind: 'selfhelp-scheduler-release',
+  id: 'selfhelp-scheduler-8.0.0',
+  version: '8.0.0',
+  channel: 'stable',
+  image: coreNoSec.scheduler.image,
+  digest: coreNoSec.scheduler.digest,
+  builtFrom: { coreVersion: '8.0.0' },
+  backendCompatibility: { requiredCoreRange: '>=8.0.0 <8.1.0' },
+};
+const schedulerRelease = { ...schedulerNoSec, security: sign(schedulerNoSec) };
+
+const workerNoSec = {
+  kind: 'selfhelp-worker-release',
+  id: 'selfhelp-worker-8.0.0',
+  version: '8.0.0',
+  channel: 'stable',
+  image: coreNoSec.worker.image,
+  digest: coreNoSec.worker.digest,
+  builtFrom: { coreVersion: '8.0.0' },
+  backendCompatibility: { requiredCoreRange: '>=8.0.0 <8.1.0' },
+};
+const workerRelease = { ...workerNoSec, security: sign(workerNoSec) };
+
 const registryIndex = {
   schemaVersion: '1.0',
   requiresManager: '>=0.1.0',
@@ -88,8 +114,8 @@ const registryIndex = {
   publisher: { name: 'SelfHelp (University of Bern)', url: 'https://www.unibe.ch/' },
   core: [{ id: 'selfhelp-core-8.0.0', version: '8.0.0', channel: 'stable', releaseUrl: 'releases/core/selfhelp-core-8.0.0.json' }],
   frontend: [{ id: 'selfhelp-frontend-8.0.0', version: '8.0.0', channel: 'stable', releaseUrl: 'releases/frontend/selfhelp-frontend-8.0.0.json' }],
-  scheduler: [],
-  worker: [],
+  scheduler: [{ id: 'selfhelp-scheduler-8.0.0', version: '8.0.0', channel: 'stable', releaseUrl: 'releases/scheduler/selfhelp-scheduler-8.0.0.json' }],
+  worker: [{ id: 'selfhelp-worker-8.0.0', version: '8.0.0', channel: 'stable', releaseUrl: 'releases/worker/selfhelp-worker-8.0.0.json' }],
   plugins: [],
 };
 
@@ -192,6 +218,8 @@ const files: { name: string; data: unknown; validate: (d: unknown) => Validation
   { name: 'registry-index.json', data: registryIndex, validate: validateRegistryIndex },
   { name: 'core-release.json', data: coreRelease, validate: validateCoreRelease },
   { name: 'frontend-release.json', data: frontendRelease, validate: validateFrontendRelease },
+  { name: 'scheduler-release.json', data: schedulerRelease, validate: validateSchedulerRelease },
+  { name: 'worker-release.json', data: workerRelease, validate: validateWorkerRelease },
   { name: 'update-preflight.json', data: updatePreflight, validate: validateUpdatePreflight },
   { name: 'backup-manifest.json', data: backupManifest, validate: validateBackupManifest },
   { name: 'trusted-keys.json', data: trustedKeys, validate: validateTrustedKeys },

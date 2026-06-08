@@ -16,9 +16,11 @@ import {
   validateInstanceLock,
   validateInstanceManifest,
   validateRegistryIndex,
+  validateSchedulerRelease,
   validateServerInventory,
   validateTrustedKeys,
   validateUpdatePreflight,
+  validateWorkerRelease,
   type TrustedKeysFile,
   type ValidationResult,
 } from '@shm/schemas';
@@ -33,6 +35,8 @@ const fileSchemas: Record<string, (d: unknown) => ValidationResult<unknown>> = {
   'registry-index.json': validateRegistryIndex,
   'core-release.json': validateCoreRelease,
   'frontend-release.json': validateFrontendRelease,
+  'scheduler-release.json': validateSchedulerRelease,
+  'worker-release.json': validateWorkerRelease,
   'update-preflight.json': validateUpdatePreflight,
   'backup-manifest.json': validateBackupManifest,
   'trusted-keys.json': validateTrustedKeys,
@@ -64,7 +68,7 @@ async function main(): Promise<void> {
   // Signature verification for signed releases against the trusted key set.
   try {
     const trusted = (await readJson('trusted-keys.json')) as TrustedKeysFile;
-    for (const releaseName of ['core-release.json', 'frontend-release.json']) {
+    for (const releaseName of ['core-release.json', 'frontend-release.json', 'scheduler-release.json', 'worker-release.json']) {
       const release = (await readJson(releaseName)) as { security: { signature: string; keyId: string } } & Record<string, unknown>;
       const v = verifyReleaseSignature(release, trusted);
       if (!v.verified) {

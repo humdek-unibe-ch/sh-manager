@@ -1,11 +1,19 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
 import { describe, expect, it } from 'vitest';
-import type { InstanceLock, InstanceManifest, RegistryIndex } from './types.js';
+import type {
+  InstanceLock,
+  InstanceManifest,
+  RegistryIndex,
+  SchedulerRelease,
+  WorkerRelease,
+} from './types.js';
 import {
   validateInstanceLock,
   validateInstanceManifest,
   validateRegistryIndex,
+  validateSchedulerRelease,
+  validateWorkerRelease,
 } from './validate.js';
 
 const validManifest: InstanceManifest = {
@@ -153,5 +161,56 @@ describe('validateRegistryIndex', () => {
     const broken = { ...validRegistry } as Record<string, unknown>;
     delete broken.core;
     expect(validateRegistryIndex(broken).valid).toBe(false);
+  });
+  it('accepts an index with populated scheduler/worker arrays', () => {
+    const idx: RegistryIndex = {
+      ...validRegistry,
+      scheduler: [{ id: 'selfhelp-scheduler-8.0.0', version: '8.0.0', channel: 'stable', releaseUrl: 'releases/scheduler/selfhelp-scheduler-8.0.0.json' }],
+      worker: [{ id: 'selfhelp-worker-8.0.0', version: '8.0.0', channel: 'stable', releaseUrl: 'releases/worker/selfhelp-worker-8.0.0.json' }],
+    };
+    expect(validateRegistryIndex(idx).valid).toBe(true);
+  });
+});
+
+const validScheduler: SchedulerRelease = {
+  kind: 'selfhelp-scheduler-release',
+  id: 'selfhelp-scheduler-8.0.0',
+  version: '8.0.0',
+  channel: 'stable',
+  image: 'ghcr.io/humdek-unibe-ch/selfhelp-scheduler:8.0.0',
+  digest: 'sha256:3333333333333333333333333333333333333333333333333333333333333333',
+  backendCompatibility: { requiredCoreRange: '>=8.0.0 <8.1.0' },
+  security: { signature: 's', keyId: 'selfhelp-official-2026' },
+};
+
+const validWorker: WorkerRelease = {
+  ...validScheduler,
+  kind: 'selfhelp-worker-release',
+  id: 'selfhelp-worker-8.0.0',
+  image: 'ghcr.io/humdek-unibe-ch/selfhelp-worker:8.0.0',
+  digest: 'sha256:2222222222222222222222222222222222222222222222222222222222222222',
+};
+
+describe('validateSchedulerRelease / validateWorkerRelease', () => {
+  it('accepts valid scheduler and worker releases', () => {
+    expect(validateSchedulerRelease(validScheduler).valid).toBe(true);
+    expect(validateWorkerRelease(validWorker).valid).toBe(true);
+  });
+
+  it('rejects the wrong kind', () => {
+    expect(validateSchedulerRelease({ ...validScheduler, kind: 'selfhelp-worker-release' }).valid).toBe(false);
+    expect(validateWorkerRelease({ ...validWorker, kind: 'selfhelp-scheduler-release' }).valid).toBe(false);
+  });
+
+  it('rejects a release missing backendCompatibility.requiredCoreRange', () => {
+    const broken = JSON.parse(JSON.stringify(validScheduler));
+    delete broken.backendCompatibility.requiredCoreRange;
+    expect(validateSchedulerRelease(broken).valid).toBe(false);
+  });
+
+  it('rejects a release missing the signature block', () => {
+    const broken = { ...validWorker } as Record<string, unknown>;
+    delete broken.security;
+    expect(validateWorkerRelease(broken).valid).toBe(false);
   });
 });

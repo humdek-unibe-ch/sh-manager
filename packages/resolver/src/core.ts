@@ -5,7 +5,9 @@ import type {
   CoreRelease,
   FrontendRelease,
   ReleaseChannel,
+  SchedulerRelease,
   SecurityAdvisory,
+  WorkerRelease,
 } from '@shm/schemas';
 import { isBlockedByAdvisory } from './advisories.js';
 import { coerceVersion, satisfiesLoose } from './semver-util.js';
@@ -114,4 +116,38 @@ export function pickFrontendForCore(
     semver.rcompare(coerceVersion(a.version) ?? '0.0.0', coerceVersion(b.version) ?? '0.0.0'),
   );
   return sorted[0] ?? null;
+}
+
+/**
+ * Core-coupled service release (scheduler / worker): the same shape the picker
+ * needs to resolve the newest non-blocked release whose `requiredCoreRange`
+ * the chosen core version satisfies.
+ */
+interface CoreCoupledServiceRelease {
+  version: string;
+  blocked?: boolean;
+  backendCompatibility: { requiredCoreRange: string };
+}
+
+function pickServiceForCore<T extends CoreCoupledServiceRelease>(core: CoreRelease, releases: T[]): T | null {
+  const candidates = releases.filter(
+    (r) => !r.blocked && satisfiesLoose(core.version, r.backendCompatibility.requiredCoreRange),
+  );
+  const sorted = candidates.sort((a, b) =>
+    semver.rcompare(coerceVersion(a.version) ?? '0.0.0', coerceVersion(b.version) ?? '0.0.0'),
+  );
+  return sorted[0] ?? null;
+}
+
+/** Picks the newest scheduler release compatible with the chosen core release. */
+export function pickSchedulerForCore(
+  core: CoreRelease,
+  schedulers: SchedulerRelease[],
+): SchedulerRelease | null {
+  return pickServiceForCore(core, schedulers);
+}
+
+/** Picks the newest worker release compatible with the chosen core release. */
+export function pickWorkerForCore(core: CoreRelease, workers: WorkerRelease[]): WorkerRelease | null {
+  return pickServiceForCore(core, workers);
 }

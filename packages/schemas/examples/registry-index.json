@@ -23,7 +23,21 @@
       "releaseUrl": "releases/frontend/selfhelp-frontend-8.0.0.json"
     }
   ],
-  "scheduler": [],
-  "worker": [],
+  "scheduler": [
+    {
+      "id": "selfhelp-scheduler-8.0.0",
+      "version": "8.0.0",
+      "channel": "stable",
+      "releaseUrl": "releases/scheduler/selfhelp-scheduler-8.0.0.json"
+    }
+  ],
+  "worker": [
+    {
+      "id": "selfhelp-worker-8.0.0",
+      "version": "8.0.0",
+      "channel": "stable",
+      "releaseUrl": "releases/worker/selfhelp-worker-8.0.0.json"
+    }
+  ],
   "plugins": []
 }
