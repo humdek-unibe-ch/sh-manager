@@ -72,10 +72,37 @@ export function resolveLatestCompatiblePlugin(input: PluginResolutionInput): Plu
   return { pluginId, selected, latest, newerExistsButIncompatible, message };
 }
 
+/**
+ * The standardized compatibility-error object, shared verbatim across the
+ * SelfHelp stack so an operator sees identical compat info regardless of which
+ * installer raised it:
+ *   - backend `App\Plugin\Registry\Unified\CompatibilityError::toArray()`,
+ *   - shared `@selfhelp/shared` `ICompatibilityError`,
+ *   - frontend `IPluginCompatibilityError`.
+ * Snake_case is the cross-repo wire contract; the field set MUST match the others
+ * (enforced by the parity tests on both sides).
+ */
+export interface CompatibilityError {
+  component: 'core' | 'frontend' | 'plugin';
+  component_id: string;
+  current_version: string | null;
+  target_version: string | null;
+  required_range: string;
+  blocking: boolean;
+  message: string;
+}
+
 export interface PluginUpdateBlock {
   blocked: boolean;
   message: string;
   options: { type: string; value: string; label: string }[];
+  /**
+   * The standardized compatibility error when `blocked` is true (the installed
+   * plugin does not admit the target core), or null when compatible. Same shape
+   * as the backend/shared/frontend so the core-update preflight and the plugin
+   * install/update render identical compat info.
+   */
+  compatibilityError: CompatibilityError | null;
 }
 
 /**
@@ -97,7 +124,12 @@ export function evaluatePluginAgainstTargetCore(
     isPluginCompatible(installedRelease, targetCoreVersion, pluginApiVersion, advisories);
 
   if (compatibleAtTarget) {
-    return { blocked: false, message: `${installed.id} ${installed.version} is compatible.`, options: [] };
+    return {
+      blocked: false,
+      message: `${installed.id} ${installed.version} is compatible.`,
+      options: [],
+      compatibilityError: null,
+    };
   }
 
   const upgrade = resolveLatestCompatiblePlugin({
@@ -117,9 +149,27 @@ export function evaluatePluginAgainstTargetCore(
   }
   options.push({ type: 'keep_current', value: installed.version, label: 'Keep current version' });
 
+  // The installed plugin blocks the core update: surface the standardized
+  // compatibility error (same shape the backend/frontend use). `required_range`
+  // is the core range the installed plugin declares; `target_version` is the
+  // version it would need to be updated to (when a compatible one exists).
+  const requiredRange = installedRelease?.compatibility.core ?? '*';
+  const compatibilityError: CompatibilityError = {
+    component: 'plugin',
+    component_id: installed.id,
+    current_version: installed.version,
+    target_version: upgrade.selected?.version ?? null,
+    required_range: requiredRange,
+    blocking: true,
+    message:
+      `${installed.id} ${installed.version} requires SelfHelp ${requiredRange} and is not compatible ` +
+      `with SelfHelp ${targetCoreVersion}.`,
+  };
+
   return {
     blocked: true,
     message: `${installed.id} ${installed.version} is not compatible with SelfHelp ${targetCoreVersion}.`,
     options,
+    compatibilityError,
   };
 }
