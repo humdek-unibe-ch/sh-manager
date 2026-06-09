@@ -21,6 +21,26 @@ never controls Docker directly.
   (backup-first, rollback-on-failure), backups, restores, clones, and redacted
   support bundles.
 
+It ships **two interfaces over the same logic**: the `sh-manager` **CLI** (the
+canonical interface) and a localhost **web UI** (`sh-manager-web`) — an install
+wizard, an operations console, and operator login.
+
+## Documentation
+
+Full documentation lives in [`docs/`](docs/README.md):
+
+- Developers: [architecture](docs/architecture.md),
+  [developer guide](docs/developer-guide.md),
+  [release & publishing](docs/release-publishing.md).
+- Operators: [install](docs/operator/install.md),
+  [update](docs/operator/update.md),
+  [backup & restore](docs/operator/backup-restore.md),
+  [clone & remove](docs/operator/clone-remove.md),
+  [safe mode & recovery](docs/operator/safe-mode-and-recovery.md),
+  [support bundle](docs/operator/support-bundle.md),
+  [security hardening](docs/operator/security-hardening.md).
+- [`CHANGELOG.md`](CHANGELOG.md) and the repository contract [`AGENTS.md`](AGENTS.md).
+
 ## Hard rules (enforced in code + tests)
 
 - Production is **Docker-only and connected**. The server never runs
@@ -53,6 +73,7 @@ Docker / network / filesystem side effects live behind injected boundaries.
 | `@shm/support` | Secret redaction + support bundle assembly |
 | `@shm/auth` | Configurable campus/OIDC operator authorization (old PHP plugin is reference-only) |
 | `apps/cli` | `sh-manager` command-line entrypoint |
+| `apps/web` | `sh-manager-web` localhost web UI: Vite React SPA + Node BFF |
 
 ## Requirements
 
@@ -95,6 +116,38 @@ sh-manager doctor
 
 Configuration via env: `SELFHELP_ROOT` (default `/opt/selfhelp`),
 `SELFHELP_TRUSTED_KEYS` (path to the registry trusted-keys file).
+
+## Web UI
+
+`sh-manager-web` serves a localhost web UI over the same actions as the CLI. It is
+a **Vite React SPA + a small Node BFF** (backend-for-frontend), aligned with
+`sh-selfhelp_frontend`: **React 19**, **Mantine 9**, **Tailwind 4**, and
+**@tanstack/react-query**.
+
+- **Install wizard** (bootstrap mode): preflight checks → mode/domain/instance
+  config → review → install, with a success screen. It binds to `127.0.0.1`,
+  guards against DNS-rebinding, and **self-locks** after a successful install.
+- **Operator login + operations console** (persistent mode): an authenticated
+  session (cookie + CSRF) gates the management API; the console shows live server
+  status and the operator actions for instance lifecycle.
+
+The **BFF** is the only thing the SPA talks to. It exposes the CLI actions as a
+tiny JSON API under `/api`, binds to localhost by default (a non-loopback bind
+must be opted into explicitly), and serves the built SPA from `dist-web` (falling
+back to an inline shell if unbuilt). Reach it remotely via an SSH tunnel:
+
+```bash
+# on the server
+sh-manager-web --root /opt/selfhelp        # bootstrap wizard, http://127.0.0.1:8765
+sh-manager-web --root /opt/selfhelp --mode persistent --persist   # management UI
+
+# from your machine
+ssh -L 8765:127.0.0.1:8765 you@your-server # then open http://127.0.0.1:8765
+```
+
+See [docs/operator/install.md](docs/operator/install.md) and
+[docs/operator/security-hardening.md](docs/operator/security-hardening.md) for the
+full flow and the production checklist.
 
 ## Running the manager in Docker
 
