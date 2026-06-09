@@ -2,7 +2,7 @@
 
 Audience: Developers and release engineers
 Status: Active
-Applies to: `sh-manager` (manager tool `0.1.0`) and the SelfHelp 8.x distribution across `sh-selfhelp_backend`, `sh-selfhelp_frontend`, `sh-selfhelp_shared`, and `sh2-plugin-registry`
+Applies to: `sh-manager` (manager tool `0.1.0`) and the SelfHelp 0.x pre-release distribution across `sh-selfhelp_backend`, `sh-selfhelp_frontend`, `sh-selfhelp_shared`, and `sh2-plugin-registry`
 Last verified: 2026-06-09
 Source of truth: the test files cited below, and `sh-selfhelp_backend/docs/archive/core-installation-and-distribution-plan.md` ("Testing And Verification Plan", lines 2972–3120)
 

@@ -163,7 +163,7 @@ These are the canonical SelfHelp testing policy, shared verbatim across the back
 
 ## Release Rules
 
-- Versioning follows the **8.x** SelfHelp scheme tracked in `CHANGELOG.md`; tags are `v*` and drive `manager-release`.
+- The manager tool uses its own semver tracked in `CHANGELOG.md` (currently `0.x`, e.g. `0.1.0`); tags are `v*` and drive `manager-release`. It is independent of the SelfHelp platform version it installs (also `0.x` pre-release).
 - A release MUST pass the quality gate (`npm run check`: typecheck + lint + test + schema/signature validation) and the license report.
 - Released images are built + pushed to GHCR with an SPDX **SBOM**, a Trivy scan (advisory), and **cosign** signing when a signing key is configured. Do not remove the SBOM/scan/signing steps.
 - Keep the **signed release / trusted registry** model intact: never weaken or bypass registry signature/checksum verification, and never add an untrusted key to the trusted-keys set without an explicit governance reason.
@@ -214,5 +214,5 @@ These are the canonical SelfHelp testing policy, shared verbatim across the back
 - Do not display, log, or document secrets; do not commit `dist/`, `apps/web/dist-web/`, or `AGENTS.local.md`.
 - Do not migrate the web UI to Next.js or add a second (hand-rolled) design system; prefer Mantine + Tailwind, custom CSS last.
 - Do not require a real Docker daemon, registry, or network in unit tests.
-- Do not change the 8.x version scheme or bypass the release quality gate, SBOM, scan, or signing.
+- Do not change the manager's semver scheme or bypass the release quality gate, SBOM, scan, or signing.
 - Do not introduce dependencies without a clear need and a lockfile update.

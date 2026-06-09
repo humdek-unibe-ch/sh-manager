@@ -199,6 +199,29 @@ export async function processNextOperation(deps: ProcessOperationsDeps): Promise
   return { result: 'completed', operationId: op.operationId, status, report };
 }
 
+/**
+ * Drains every operation the backend currently has pending for this instance:
+ * repeatedly claims + processes the next one until the backend reports `noop`
+ * (or the per-drain safety cap is reached, so a misbehaving backend that keeps
+ * re-offering the same operation cannot spin forever).
+ *
+ * This is what a supervised trigger (systemd service / cron) runs each tick: a
+ * single invocation empties the queue, so a burst of CMS-requested updates never
+ * stays on "requested". Returns the non-`noop` outcomes in processing order.
+ */
+export async function drainOperations(
+  deps: ProcessOperationsDeps,
+  maxPerDrain = 25,
+): Promise<ProcessOutcome[]> {
+  const outcomes: ProcessOutcome[] = [];
+  for (let i = 0; i < maxPerDrain; i++) {
+    const outcome = await processNextOperation(deps);
+    if (outcome.result === 'noop') break;
+    outcomes.push(outcome);
+  }
+  return outcomes;
+}
+
 /** Maps an {@link UpdateExecutionReport} to the terminal lifecycle status. */
 export function terminalStatus(report: UpdateExecutionReport): OperationLifecycleStatus {
   if (report.ok) return 'succeeded';

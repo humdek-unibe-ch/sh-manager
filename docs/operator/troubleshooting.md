@@ -2,7 +2,7 @@
 
 Audience: Server operators
 Status: Active
-Applies to: `sh-manager` (manager tool `0.1.0`, manages the SelfHelp 8.x platform line)
+Applies to: `sh-manager` (manager tool `0.1.0`, manages the SelfHelp 0.x pre-release platform line)
 Last verified: 2026-06-09
 Source of truth: `apps/cli/src/actions.ts`, `packages/core/src`, `packages/docker/src`, backend `src/EventListener`, `docker/Dockerfile`
 

@@ -3,6 +3,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   processNextOperation,
+  drainOperations,
   terminalStatus,
   type BackendOperationsClient,
   type OperationExecutor,
@@ -19,7 +20,7 @@ function op(overrides: Partial<PendingOperation> = {}): PendingOperation {
   return {
     operationId: 'op_1',
     instanceId: TRUSTED,
-    targetVersion: '8.0.1',
+    targetVersion: '0.1.1',
     preflightId: 'pf_1',
     approvalToken: 'tok_1',
     approvedByUserId: 7,
@@ -46,7 +47,7 @@ function recordingClient(pending: PendingOperation | null): {
 function report(overrides: Partial<UpdateExecutionReport> = {}): UpdateExecutionReport {
   return {
     instanceId: TRUSTED,
-    targetVersion: '8.0.1',
+    targetVersion: '0.1.1',
     ok: true,
     rolledBack: false,
     backupId: 'b1',
@@ -92,7 +93,7 @@ describe('processNextOperation', () => {
     // The executor always receives the TRUSTED instance id, never a forged one.
     const approved = execute.mock.calls[0]![0];
     expect(approved.instanceId).toBe(TRUSTED);
-    expect(approved.targetVersion).toBe('8.0.1');
+    expect(approved.targetVersion).toBe('0.1.1');
 
     // Status progresses through the granular lifecycle and ends succeeded.
     expect(statuses(posts)).toEqual([
@@ -185,6 +186,66 @@ describe('processNextOperation', () => {
 
     expect(outcome).toMatchObject({ result: 'rejected', status: 'failed', reason: 'docker daemon unreachable' });
     expect(statuses(posts)).toEqual(['accepted', 'failed']);
+  });
+});
+
+describe('drainOperations', () => {
+  /** A client that hands out a finite queue of operations, then reports idle. */
+  function queueClient(queue: PendingOperation[]): {
+    client: BackendOperationsClient;
+    posts: OperationStatusUpdate[];
+  } {
+    const posts: OperationStatusUpdate[] = [];
+    let i = 0;
+    const client: BackendOperationsClient = {
+      fetchPending: async () => (i < queue.length ? queue[i++]! : null),
+      postStatus: async (u) => {
+        posts.push(u);
+      },
+    };
+    return { client, posts };
+  }
+
+  it('returns an empty list when nothing is pending', async () => {
+    const { client } = recordingClient(null);
+    const execute = vi.fn();
+    const outcomes = await drainOperations({ trustedInstanceId: TRUSTED, client, execute });
+    expect(outcomes).toEqual([]);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('drains a burst of pending operations in one invocation so none stay on "requested"', async () => {
+    const { client } = queueClient([op({ operationId: 'op_1' }), op({ operationId: 'op_2' }), op({ operationId: 'op_3' })]);
+    const execute = vi.fn(phasingExecutor(report({ ok: true })));
+
+    const outcomes = await drainOperations({ trustedInstanceId: TRUSTED, client, execute });
+
+    expect(execute).toHaveBeenCalledTimes(3);
+    expect(outcomes).toHaveLength(3);
+    expect(outcomes.every((o) => o.result === 'completed')).toBe(true);
+    expect(outcomes.map((o) => (o.result === 'completed' ? o.operationId : null))).toEqual(['op_1', 'op_2', 'op_3']);
+  });
+
+  it('keeps draining past a rejected operation (a bad request never blocks the queue)', async () => {
+    const { client } = queueClient([op({ operationId: 'op_evil', instanceId: 'inst-evil' }), op({ operationId: 'op_ok' })]);
+    const execute = vi.fn(phasingExecutor(report({ ok: true })));
+
+    const outcomes = await drainOperations({ trustedInstanceId: TRUSTED, client, execute });
+
+    expect(outcomes).toHaveLength(2);
+    expect(outcomes[0]).toMatchObject({ result: 'rejected', operationId: 'op_evil' });
+    expect(outcomes[1]).toMatchObject({ result: 'completed', operationId: 'op_ok' });
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops at the per-drain safety cap if a misbehaving backend re-offers work forever', async () => {
+    const { client } = recordingClient(op());
+    const execute = vi.fn(phasingExecutor(report({ ok: true })));
+
+    const outcomes = await drainOperations({ trustedInstanceId: TRUSTED, client, execute }, 3);
+
+    expect(outcomes).toHaveLength(3);
+    expect(execute).toHaveBeenCalledTimes(3);
   });
 });
 

@@ -68,20 +68,27 @@ sh-manager instance health website1
 
 The CMS never controls Docker. When an instance requests an update from its admin
 UI, it records an **instance-scoped** operation. The manager claims and executes
-the next pending operation for exactly that instance:
+every pending operation for exactly that instance (one run drains the queue):
 
 ```bash
 sh-manager instance process-operations website1 \
   --backend-url http://127.0.0.1:PORT \
   --token "$SELFHELP_MANAGER_TOKEN"
+
+# Or run it as a resident, supervised loop:
+sh-manager instance process-operations website1 \
+  --backend-url http://127.0.0.1:PORT --watch --interval 15
 ```
 
 - The per-instance token authenticates the manager to a single instance's
   backend (`--token` or `SELFHELP_MANAGER_TOKEN`).
 - The backend never trusts a browser-provided `instanceId`; cross-instance
   attempts are denied and logged.
-- Wire this command into a scheduler (cron/systemd timer) per instance to process
-  CMS-requested updates automatically.
+- A request stays on `requested` until the manager processes it, so wire this
+  into a supervised trigger per instance — see [`deploy/`](../../deploy/README.md)
+  for the ready-made systemd template unit (`--watch`) and cron example, and
+  [operations-runbook](operations-runbook.md) ("Scheduling the update-operations
+  loop").
 
 ## If an update fails
 

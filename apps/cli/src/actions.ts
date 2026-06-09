@@ -38,6 +38,7 @@ import {
   planUpdate,
   resolveTargetRuntimeImages,
   processNextOperation,
+  drainOperations,
   provisionInstance,
   runPreflight,
   type BackendOperationsClient,
@@ -780,6 +781,26 @@ export async function processInstanceOperations(
 ): Promise<ProcessOutcome> {
   const manifest = await new ManifestStore(instanceId, deps.root).read();
   return processNextOperation({
+    trustedInstanceId: manifest.instanceId,
+    client,
+    execute: buildOperationExecutor(deps),
+    ...(deps.now ? { now: deps.now } : {}),
+  });
+}
+
+/**
+ * Drains every pending CMS-requested operation for an instance in a single
+ * invocation (claim → execute → write-back, repeated until the backend is idle).
+ * A supervised trigger (systemd service / cron) calls this each tick so requests
+ * never stay on "requested".
+ */
+export async function drainInstanceOperations(
+  deps: ActionDeps,
+  instanceId: string,
+  client: BackendOperationsClient,
+): Promise<ProcessOutcome[]> {
+  const manifest = await new ManifestStore(instanceId, deps.root).read();
+  return drainOperations({
     trustedInstanceId: manifest.instanceId,
     client,
     execute: buildOperationExecutor(deps),

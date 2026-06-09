@@ -2,7 +2,7 @@
 
 Audience: Server operators
 Status: Active
-Applies to: `sh-manager` (manager tool `0.1.0`, manages the SelfHelp 8.x platform line)
+Applies to: `sh-manager` (manager tool `0.1.0`, manages the SelfHelp 0.x pre-release platform line)
 Last verified: 2026-06-09
 Source of truth: `apps/cli/src/bin.ts`, `apps/cli/src/actions.ts`, `apps/web/src/bin.ts`
 
@@ -99,12 +99,28 @@ sh-manager instance update website1               # apply (auto backup + rollbac
 sh-manager instance health website1               # verify
 ```
 
-For CMS-requested updates, the manager claims the instance-scoped operation:
+For CMS-requested updates, the manager claims the instance-scoped operation. A
+single run **drains every pending operation** for the instance, then exits:
 
 ```bash
 sh-manager instance process-operations website1 \
   --backend-url http://127.0.0.1:PORT --token "$SELFHELP_MANAGER_TOKEN"
 ```
+
+### Scheduling the update-operations loop
+
+A CMS-requested update only leaves `requested` once the manager processes it, so
+the consumer must run on a schedule. Wire one of the supervised triggers shipped
+in [`deploy/`](../../deploy/README.md):
+
+- **systemd (recommended)** — `sh-manager-operations@<id>.service` runs
+  `process-operations <id> --watch`, a resident loop (`Restart=always`) that
+  drains every `--interval` seconds (default 15s).
+- **cron** — one-shot drain every minute per instance for hosts without systemd.
+
+Both read the per-instance token + backend URL from a `0600` env file so secrets
+never appear in the unit, crontab, or process list. The manager token is
+per-instance, and server-side scope checks reject cross-instance operations.
 
 → Detail: [update](update.md).
 

@@ -1,0 +1,40 @@
+# SPDX-FileCopyrightText: 2026 Humdek, University of Bern
+# SPDX-License-Identifier: MPL-2.0
+#
+# Supervised CMS-update loop for ONE SelfHelp instance (systemd template unit).
+# `%i` is the instance id. Enable one per instance:
+#
+#   sudo systemctl enable --now sh-manager-operations@<instance-id>.service
+#
+# It runs `sh-manager instance process-operations <id> --watch`, which claims and
+# executes every CMS-requested update for that instance, writing live status back
+# so a request never stays on "requested". Restart=always keeps it supervised.
+#
+# Per-instance config (token + backend URL) is read from an EnvironmentFile with
+# 0600 perms (see deploy/README.md) so secrets never live in the unit or process
+# list.
+
+[Unit]
+Description=SelfHelp Manager update-operations loop for instance %i
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+# Manager state root (inventory + per-instance manifests/secrets).
+Environment=SELFHELP_MANAGER_ROOT=/var/lib/sh-manager
+# Provides SELFHELP_MANAGER_TOKEN and SELFHELP_BACKEND_URL for this instance.
+EnvironmentFile=/etc/sh-manager/%i.env
+ExecStart=/usr/bin/sh-manager --root ${SELFHELP_MANAGER_ROOT} instance process-operations %i \
+  --backend-url ${SELFHELP_BACKEND_URL} --watch --interval 15
+Restart=always
+RestartSec=10
+# Hardening: the loop only needs the manager root + Docker socket.
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

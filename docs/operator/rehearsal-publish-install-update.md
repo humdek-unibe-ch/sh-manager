@@ -2,7 +2,7 @@
 
 Audience: Server operators and release engineers
 Status: Active
-Applies to: `sh-manager` (manager tool `0.1.0`, installs SelfHelp 8.x)
+Applies to: `sh-manager` (manager tool `0.1.0`, installs the SelfHelp 0.x pre-release line)
 Last verified: 2026-06-09
 Source of truth: `e2e/build-images.mjs`, `e2e/build-test-registry.mjs`, `e2e/serve-registry.mjs`, `e2e/docker-e2e.test.ts`, `apps/cli/src/bin.ts`
 

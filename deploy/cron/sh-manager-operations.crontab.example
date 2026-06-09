@@ -1,0 +1,19 @@
+# SPDX-FileCopyrightText: 2026 Humdek, University of Bern
+# SPDX-License-Identifier: MPL-2.0
+#
+# Cron alternative to the systemd template unit for hosts without systemd.
+# Each line drains ALL pending CMS-requested operations for one instance every
+# minute (process-operations without --watch is one-shot: claim+execute every
+# pending op, then exit). Add one line per instance.
+#
+# Install for the manager service account:
+#   crontab -u sh-manager deploy/cron/sh-manager-operations.crontab.example
+#
+# Keep the token out of the crontab: source it from a 0600 env file instead
+# (see deploy/README.md). SHELL=/bin/bash is required for the `set -a; . file`.
+
+SHELL=/bin/bash
+SELFHELP_MANAGER_ROOT=/var/lib/sh-manager
+
+# Replace <instance-id> and the backend URL. One line per instance.
+* * * * * set -a; . /etc/sh-manager/<instance-id>.env; set +a; /usr/bin/sh-manager --root "$SELFHELP_MANAGER_ROOT" instance process-operations <instance-id> --backend-url "$SELFHELP_BACKEND_URL" >> /var/log/sh-manager/<instance-id>-operations.log 2>&1

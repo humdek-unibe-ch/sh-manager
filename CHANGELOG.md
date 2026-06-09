@@ -11,16 +11,16 @@ The manager has two version axes (see
 - **The manager tool** uses its own semver (currently `0.1.0`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
-- **The SelfHelp platform** it installs/updates is the **8.x** line (core,
-  frontend, scheduler, worker).
+- **The SelfHelp platform** it installs/updates is currently the pre-release
+  **`0.x`** line (core, frontend, scheduler, worker — all `0.1.0`).
 
-A single manager `0.1.0` installs and manages SelfHelp **8.x** instances.
+A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
 
 ## [0.1.0] - 2026-06-08
 
-Initial release of the SelfHelp Manager for the **SelfHelp 8.x** platform line —
-the official Docker-only, connected installer, updater, and multi-instance server
-manager.
+Initial release of the SelfHelp Manager for the SelfHelp `0.x` pre-release
+platform line — the official Docker-only, connected installer, updater, and
+multi-instance server manager.
 
 ### Added
 

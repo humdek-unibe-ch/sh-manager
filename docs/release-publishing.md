@@ -2,7 +2,7 @@
 
 Audience: Developers / maintainers
 Status: Active
-Applies to: `sh-manager` (manager tool `0.1.0`) and the SelfHelp 8.x platform line
+Applies to: `sh-manager` (manager tool `0.1.0`) and the SelfHelp 0.x pre-release platform line
 Last verified: 2026-06-09
 Source of truth: `packages/registry/src`, `packages/schemas/src`, `scripts/sign-fixtures.mts`, `package.json`, and (registry side) `sh2-plugin-registry/.github/workflows/publish-core-release.yml`
 
@@ -22,11 +22,13 @@ Do not conflate these:
    `>=0.1.0`); the manager refuses artifacts that require a newer manager than is
    installed. Because `requiresManager` is a hard compatibility gate, the tool's
    semver is part of a contract — do not bump it casually.
-2. **The SelfHelp platform** is the **8.x** line. The manager installs and updates
-   the platform artifacts (core, frontend, scheduler, worker) at their own 8.x
-   versions, resolved from the registry.
+2. **The SelfHelp platform** is currently the pre-release **`0.x`** line. The
+   manager installs and updates the platform artifacts (core, frontend,
+   scheduler, worker) at their own `0.x` versions (currently `0.1.0`), resolved
+   from the registry. There is no `8.x` distribution; "SelfHelp 8" was an earlier
+   working label and is not a current version.
 
-A single manager `0.1.0` installs and manages SelfHelp **8.x** instances.
+A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
 
 ## The signing & trust model
 

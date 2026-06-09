@@ -2,7 +2,7 @@
 
 Audience: Server operators
 Status: Active
-Applies to: `sh-manager` (manager tool `0.1.0`, installs SelfHelp 8.x)
+Applies to: `sh-manager` (manager tool `0.1.0`, installs the SelfHelp 0.x pre-release line)
 Last verified: 2026-06-08
 Source of truth: `apps/cli/src/bin.ts`, `apps/web/src/bin.ts`, `apps/web/src/server.ts`
 

@@ -27,7 +27,7 @@ import {
   instanceSafeMode,
   instanceSupportBundle,
   instanceUpdate,
-  processInstanceOperations,
+  drainInstanceOperations,
   serverInit,
 } from './actions.js';
 import { HttpBackendOperationsClient } from './operations-client.js';
@@ -198,9 +198,11 @@ instance
 
 instance
   .command('process-operations <id>')
-  .description('Claim and execute the next pending CMS-requested update operation for an instance')
+  .description('Drain all pending CMS-requested update operations for an instance (--watch runs it as a supervised loop)')
   .requiredOption('--backend-url <url>', "internal base URL of this instance's backend")
   .option('--token <token>', 'per-instance manager token (default: env SELFHELP_MANAGER_TOKEN)')
+  .option('--watch', 'keep running, draining pending operations every --interval seconds (for systemd/supervised use)', false)
+  .option('--interval <seconds>', 'poll interval in --watch mode (default 15)', (v) => parseInt(v, 10), 15)
   .action(async (id: string, opts) => {
     try {
       const token = (opts.token as string | undefined) ?? process.env.SELFHELP_MANAGER_TOKEN;
@@ -213,14 +215,44 @@ instance
         managerToken: token,
         instanceId: id,
       });
-      const outcome = await processInstanceOperations(d, id, client);
-      if (outcome.result === 'noop') {
-        console.log(`No pending operations for ${id}.`);
-      } else if (outcome.result === 'rejected') {
-        console.log(`Operation ${outcome.operationId} rejected (${outcome.status}): ${outcome.reason}`);
-      } else {
-        console.log(`Operation ${outcome.operationId} finished: ${outcome.status}.`);
+      const drainOnce = async () => {
+        const outcomes = await drainInstanceOperations(d, id, client);
+        if (outcomes.length === 0) {
+          console.log(`No pending operations for ${id}.`);
+          return;
+        }
+        for (const outcome of outcomes) {
+          if (outcome.result === 'rejected') {
+            console.log(`Operation ${outcome.operationId} rejected (${outcome.status}): ${outcome.reason}`);
+          } else if (outcome.result === 'completed') {
+            console.log(`Operation ${outcome.operationId} finished: ${outcome.status}.`);
+          }
+        }
+      };
+
+      if (!opts.watch) {
+        await drainOnce();
+        return;
       }
+
+      const intervalMs = Math.max(1, Number(opts.interval) || 15) * 1000;
+      console.log(`Watching ${id} for pending operations every ${intervalMs / 1000}s. Ctrl-C to stop.`);
+      let stopping = false;
+      const stop = () => {
+        stopping = true;
+      };
+      process.on('SIGINT', stop);
+      process.on('SIGTERM', stop);
+      while (!stopping) {
+        try {
+          await drainOnce();
+        } catch (err) {
+          console.error(`process-operations tick failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+        if (stopping) break;
+        await new Promise((resolve) => setTimeout(resolve, intervalMs));
+      }
+      console.log('Stopped.');
     } catch (err) {
       fail(err);
     }
