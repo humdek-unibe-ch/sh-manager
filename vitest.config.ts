@@ -26,7 +26,7 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     setupFiles: ['./apps/web/src/ui/test/setup.ts'],
-    include: ['packages/**/*.test.ts', 'apps/**/*.test.ts', 'apps/**/*.test.tsx'],
+    include: ['packages/**/*.test.ts', 'apps/**/*.test.ts', 'apps/**/*.test.tsx', 'e2e/**/*.test.ts'],
     // React component tests run under jsdom; everything else stays in node.
     // Glob must tolerate absolute (incl. Windows) paths, so prefix with **/.
     environmentMatchGlobs: [['**/apps/web/src/ui/**', 'jsdom']],

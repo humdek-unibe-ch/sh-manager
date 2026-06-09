@@ -1,0 +1,10 @@
+{
+  "//": "Type-check the heavy Docker e2e (which is intentionally OUT of the fast PR-gate tsconfig). Run by .github/workflows/e2e-docker.yml and `npm run typecheck:e2e`. allowJs lets the .ts harness import the sibling .mjs scripts; checkJs stays off so the standalone scripts are not type-checked here.",
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true
+  },
+  "include": ["**/*.ts"]
+}

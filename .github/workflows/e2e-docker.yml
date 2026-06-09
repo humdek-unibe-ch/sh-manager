@@ -1,0 +1,98 @@
+# SPDX-FileCopyrightText: 2026 Humdek, University of Bern
+# SPDX-License-Identifier: MPL-2.0
+#
+# Heavy, real-Docker end-to-end for the SelfHelp Manager. Intentionally OFF the
+# PR gate (manager-check / ci.yml): it checks out the sibling backend + frontend
+# repos, builds the four `:e2e` images, serves a dev-signed `test`-channel
+# registry, and runs the full install/update/backup/restore/clone/rollback/
+# isolation/remove journey against disposable Docker instances (~15-20 min).
+#
+# It NEVER touches the public registry or any production key. Trigger it on
+# demand (workflow_dispatch) or let the nightly schedule run it.
+name: manager-e2e-docker
+
+on:
+  workflow_dispatch:
+    inputs:
+      backend_ref:
+        description: sh-selfhelp_backend ref (branch/tag/sha) to test against
+        required: false
+        default: main
+      frontend_ref:
+        description: sh-selfhelp_frontend ref (branch/tag/sha) to test against
+        required: false
+        default: main
+  schedule:
+    # 03:17 UTC nightly (offset to avoid the top-of-hour runner crush).
+    - cron: '17 3 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: manager-e2e-docker-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout manager
+        uses: actions/checkout@v4
+        with:
+          path: sh-manager
+
+      # Sibling checkouts so e2e/build-images.mjs auto-detects them next to the
+      # manager. E2E_REPO_TOKEN is only needed while the repos are private; for
+      # public repos the default GITHUB_TOKEN is sufficient.
+      - name: Checkout backend (sibling)
+        uses: actions/checkout@v4
+        with:
+          repository: humdek-unibe-ch/sh-selfhelp_backend
+          ref: ${{ github.event.inputs.backend_ref || 'main' }}
+          path: sh-selfhelp_backend
+          token: ${{ secrets.E2E_REPO_TOKEN || github.token }}
+
+      - name: Checkout frontend (sibling)
+        uses: actions/checkout@v4
+        with:
+          repository: humdek-unibe-ch/sh-selfhelp_frontend
+          ref: ${{ github.event.inputs.frontend_ref || 'main' }}
+          path: sh-selfhelp_frontend
+          token: ${{ secrets.E2E_REPO_TOKEN || github.token }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sh-manager/package-lock.json
+
+      - name: Install manager deps
+        working-directory: sh-manager
+        run: npm ci
+
+      - name: Type-check e2e
+        working-directory: sh-manager
+        run: npm run typecheck:e2e
+
+      - name: Docker + compose versions
+        run: |
+          docker --version
+          docker compose version
+
+      # Pre-build for fail-fast + readable logs; the test's beforeAll rebuilds,
+      # but the layer cache makes that a near no-op.
+      - name: Build test images
+        working-directory: sh-manager
+        run: node e2e/build-images.mjs
+
+      - name: Run Docker e2e
+        working-directory: sh-manager
+        env:
+          SHM_E2E: '1'
+        run: npm run e2e
+
+      - name: Dump container state on failure
+        if: failure()
+        run: docker ps -a && docker volume ls && docker network ls

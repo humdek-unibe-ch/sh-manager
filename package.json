@@ -17,10 +17,13 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit && npm -w @shm/web run typecheck",
+    "typecheck:e2e": "tsc -p e2e/tsconfig.json --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "smoke": "vitest run apps/cli/src/smoke.test.ts",
+    "e2e": "vitest run e2e/docker-e2e.test.ts",
     "validate:schemas": "tsx scripts/validate-schemas.mts",
     "fixtures:sign": "tsx scripts/sign-fixtures.mts",
     "license:report": "tsx scripts/license-report.mts",

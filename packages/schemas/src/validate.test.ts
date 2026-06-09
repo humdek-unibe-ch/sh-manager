@@ -170,6 +170,20 @@ describe('validateRegistryIndex', () => {
     };
     expect(validateRegistryIndex(idx).valid).toBe(true);
   });
+  it('accepts the test (staging/rehearsal) channel on release refs', () => {
+    const idx: RegistryIndex = {
+      ...validRegistry,
+      core: [{ id: 'selfhelp-core-8.0.0', version: '8.0.0', channel: 'test', releaseUrl: 'releases/core/selfhelp-core-8.0.0.json' }],
+    };
+    expect(validateRegistryIndex(idx).valid).toBe(true);
+  });
+  it('rejects an unknown release channel', () => {
+    const idx = {
+      ...validRegistry,
+      core: [{ id: 'c', version: '8.0.0', channel: 'alpha', releaseUrl: 'x' }],
+    } as unknown as RegistryIndex;
+    expect(validateRegistryIndex(idx).valid).toBe(false);
+  });
 });
 
 const validScheduler: SchedulerRelease = {

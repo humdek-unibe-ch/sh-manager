@@ -29,3 +29,22 @@ jobs:
         run: npm run license:report
       - name: Build
         run: npm run build
+
+  # Release smoke (plan §10): the release-critical journeys (fresh install,
+  # update-from-previous, two-instance routing isolation) end to end against the
+  # SIGNED fixture registry + recording compose runner — fully offline, no images
+  # pulled, no Docker daemon required. This is the gate that proves an install /
+  # upgrade / isolation regression before a release tag.
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Smoke (install + update + multi-instance isolation)
+        run: npm run smoke

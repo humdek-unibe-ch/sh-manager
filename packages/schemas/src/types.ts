@@ -10,7 +10,7 @@
  * `@selfhelp/shared` and must stay in parity.
  */
 
-export type ReleaseChannel = 'stable' | 'beta' | 'nightly';
+export type ReleaseChannel = 'stable' | 'beta' | 'nightly' | 'test';
 export type InstanceMode = 'production' | 'local';
 export type TrustLevel = 'official' | 'reviewed' | 'untrusted';
 export type AdvisorySeverity = 'low' | 'medium' | 'high' | 'critical';
