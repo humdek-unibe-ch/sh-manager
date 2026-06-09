@@ -12,18 +12,18 @@
     "channel": "stable"
   },
   "versions": {
-    "selfhelp": "8.0.0",
-    "backend": "8.0.0",
-    "frontend": "8.0.0",
-    "scheduler": "8.0.0",
-    "worker": "8.0.0",
-    "pluginApi": "2.1"
+    "selfhelp": "0.1.0",
+    "backend": "0.1.0",
+    "frontend": "0.1.0",
+    "scheduler": "0.1.0",
+    "worker": "0.1.0",
+    "pluginApi": "0.1.0"
   },
   "images": {
-    "backend": "ghcr.io/humdek-unibe-ch/selfhelp-backend:8.0.0",
-    "frontend": "ghcr.io/humdek-unibe-ch/selfhelp-frontend:8.0.0",
-    "scheduler": "ghcr.io/humdek-unibe-ch/selfhelp-scheduler:8.0.0",
-    "worker": "ghcr.io/humdek-unibe-ch/selfhelp-worker:8.0.0",
+    "backend": "ghcr.io/humdek-unibe-ch/selfhelp-backend:0.1.0",
+    "frontend": "ghcr.io/humdek-unibe-ch/selfhelp-frontend:0.1.0",
+    "scheduler": "ghcr.io/humdek-unibe-ch/selfhelp-scheduler:0.1.0",
+    "worker": "ghcr.io/humdek-unibe-ch/selfhelp-worker:0.1.0",
     "mysql": "mysql:8.4",
     "redis": "redis:7.2",
     "mercure": "dunglas/mercure:0.18"
@@ -37,7 +37,7 @@
   "installedPlugins": [
     {
       "id": "survey-js",
-      "version": "1.3.0"
+      "version": "0.1.0"
     }
   ]
 }

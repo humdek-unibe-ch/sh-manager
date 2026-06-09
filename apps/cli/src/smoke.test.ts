@@ -10,14 +10,14 @@
  * real Docker daemon:
  *
  *   1. Fresh install (local mode) brings the stack up and reports healthy.
- *   2. Update-from-previous (8.0.0 -> 8.1.0) takes a real backup, runs the
+ *   2. Update-from-previous (0.1.0 -> 0.2.0) takes a real backup, runs the
  *      maintenance window, migrates, health-checks, and lands the new version
  *      without ever tearing the MySQL data volume down.
  *   3. Two-instance routing isolation: each instance is its own compose project
  *      with private networks/volumes, and ONLY the shared proxy network is
  *      common — the data plane is never shared.
  *
- * The 8.1.0 upgrade target is minted in-memory and signed with the SAME
+ * The 0.2.0 upgrade target is minted in-memory and signed with the SAME
  * deterministic dev key the committed fixtures use (`scripts/sign-fixtures.mts`),
  * so the registry-client signature verification runs for real.
  */
@@ -64,45 +64,45 @@ class FixtureFetcher implements Fetcher {
 }
 
 /**
- * Build a registry that offers BOTH 8.0.0 (committed, already signed) and a
- * freshly minted, dev-signed 8.1.0 upgrade target for core + frontend.
+ * Build a registry that offers BOTH 0.1.0 (committed, already signed) and a
+ * freshly minted, dev-signed 0.2.0 upgrade target for core + frontend.
  */
 async function buildUpgradeRegistry(): Promise<Record<string, string>> {
-  const core800 = await readExample('core-release.json');
-  const frontend800 = await readExample('frontend-release.json');
+  const core010 = await readExample('core-release.json');
+  const frontend010 = await readExample('frontend-release.json');
 
-  const { security: _coreSec, ...core810Body } = JSON.parse(core800) as Record<string, unknown> & { security?: unknown };
-  core810Body.id = 'selfhelp-core-8.1.0';
-  core810Body.version = '8.1.0';
-  core810Body.minimumDirectUpgradeFrom = '8.0.0';
-  core810Body.backend = { image: 'ghcr.io/humdek-unibe-ch/selfhelp-backend:8.1.0', digest: `sha256:${'1'.repeat(64)}`, phpVersion: '8.4' };
-  core810Body.worker = { image: 'ghcr.io/humdek-unibe-ch/selfhelp-worker:8.1.0', digest: `sha256:${'2'.repeat(64)}` };
-  core810Body.scheduler = { image: 'ghcr.io/humdek-unibe-ch/selfhelp-scheduler:8.1.0', digest: `sha256:${'3'.repeat(64)}` };
-  core810Body.frontendCompatibility = { requiredFrontendRange: '>=8.1.0 <8.2.0' };
+  const { security: _coreSec, ...core020Body } = JSON.parse(core010) as Record<string, unknown> & { security?: unknown };
+  core020Body.id = 'selfhelp-core-0.2.0';
+  core020Body.version = '0.2.0';
+  core020Body.minimumDirectUpgradeFrom = '0.1.0';
+  core020Body.backend = { image: 'ghcr.io/humdek-unibe-ch/selfhelp-backend:0.2.0', digest: `sha256:${'1'.repeat(64)}`, phpVersion: '8.4' };
+  core020Body.worker = { image: 'ghcr.io/humdek-unibe-ch/selfhelp-worker:0.2.0', digest: `sha256:${'2'.repeat(64)}` };
+  core020Body.scheduler = { image: 'ghcr.io/humdek-unibe-ch/selfhelp-scheduler:0.2.0', digest: `sha256:${'3'.repeat(64)}` };
+  core020Body.frontendCompatibility = { requiredFrontendRange: '>=0.2.0 <0.3.0' };
   // A clean, non-destructive minor so the smoke update needs no risk acceptance.
-  core810Body.database = { migrationRange: 'Version20260605081254..Version20260606090000', destructive: false, requiresBackup: true, manualConfirmationRequired: false };
-  const core810 = JSON.stringify({ ...core810Body, security: sign(core810Body) });
+  core020Body.database = { migrationRange: 'Version20260605081254..Version20260606090000', destructive: false, requiresBackup: true, manualConfirmationRequired: false };
+  const core020 = JSON.stringify({ ...core020Body, security: sign(core020Body) });
 
-  const { security: _feSec, ...fe810Body } = JSON.parse(frontend800) as Record<string, unknown> & { security?: unknown };
-  fe810Body.id = 'selfhelp-frontend-8.1.0';
-  fe810Body.version = '8.1.0';
-  fe810Body.image = 'ghcr.io/humdek-unibe-ch/selfhelp-frontend:8.1.0';
-  fe810Body.backendCompatibility = { requiredCoreRange: '>=8.1.0 <8.2.0', requiredApiVersion: '2.1' };
-  const fe810 = JSON.stringify({ ...fe810Body, security: sign(fe810Body) });
+  const { security: _feSec, ...fe020Body } = JSON.parse(frontend010) as Record<string, unknown> & { security?: unknown };
+  fe020Body.id = 'selfhelp-frontend-0.2.0';
+  fe020Body.version = '0.2.0';
+  fe020Body.image = 'ghcr.io/humdek-unibe-ch/selfhelp-frontend:0.2.0';
+  fe020Body.backendCompatibility = { requiredCoreRange: '>=0.2.0 <0.3.0', requiredApiVersion: '0.1.0' };
+  const fe020 = JSON.stringify({ ...fe020Body, security: sign(fe020Body) });
 
   const index = JSON.parse(await readExample('registry-index.json')) as {
     core: unknown[];
     frontend: unknown[];
   };
-  index.core.push({ id: 'selfhelp-core-8.1.0', version: '8.1.0', channel: 'stable', releaseUrl: 'releases/core/selfhelp-core-8.1.0.json' });
-  index.frontend.push({ id: 'selfhelp-frontend-8.1.0', version: '8.1.0', channel: 'stable', releaseUrl: 'releases/frontend/selfhelp-frontend-8.1.0.json' });
+  index.core.push({ id: 'selfhelp-core-0.2.0', version: '0.2.0', channel: 'stable', releaseUrl: 'releases/core/selfhelp-core-0.2.0.json' });
+  index.frontend.push({ id: 'selfhelp-frontend-0.2.0', version: '0.2.0', channel: 'stable', releaseUrl: 'releases/frontend/selfhelp-frontend-0.2.0.json' });
 
   return {
     'registry.json': JSON.stringify(index),
-    'selfhelp-core-8.0.0.json': core800,
-    'selfhelp-core-8.1.0.json': core810,
-    'selfhelp-frontend-8.0.0.json': frontend800,
-    'selfhelp-frontend-8.1.0.json': fe810,
+    'selfhelp-core-0.1.0.json': core010,
+    'selfhelp-core-0.2.0.json': core020,
+    'selfhelp-frontend-0.1.0.json': frontend010,
+    'selfhelp-frontend-0.2.0.json': fe020,
   };
 }
 
@@ -200,22 +200,22 @@ describe('release smoke (offline, signed fixture registry)', () => {
       mode: 'local',
       localPort: 8080,
       registryUrl: REGISTRY_URL,
-      version: '8.0.0',
+      version: '0.1.0',
       bringUp: true,
     });
 
-    expect(res.version).toBe('8.0.0');
+    expect(res.version).toBe('0.1.0');
     expect(res.broughtUp).toBe(true);
     expect(runner.calls.map((c) => c.args.join(' '))).toContain('up -d');
 
     const manifest = await new ManifestStore('qa-fresh', root).read();
-    expect(manifest.versions.selfhelp).toBe('8.0.0');
+    expect(manifest.versions.selfhelp).toBe('0.1.0');
 
     const health = await instanceHealth(d, 'qa-fresh');
     expect(health.overall).toBe('healthy');
   });
 
-  it('update-from-previous (8.0.0 -> 8.1.0) backs up, runs maintenance, migrates, and preserves the MySQL volume', async () => {
+  it('update-from-previous (0.1.0 -> 0.2.0) backs up, runs maintenance, migrates, and preserves the MySQL volume', async () => {
     const { d, runner } = await smokeDeps();
     await serverInit(d, { serverId: 'srv-smoke', mode: 'production', letsencryptEmail: 'ops@example.ch' });
     await instanceInstall(d, {
@@ -224,20 +224,20 @@ describe('release smoke (offline, signed fixture registry)', () => {
       mode: 'production',
       domain: 'qa-upd.example.ch',
       registryUrl: REGISTRY_URL,
-      version: '8.0.0',
+      version: '0.1.0',
       bringUp: true,
     });
 
     const { plan, executed, report } = await instanceUpdate(d, 'qa-upd', { target: 'latest' });
-    expect(plan.targetVersion).toBe('8.1.0');
+    expect(plan.targetVersion).toBe('0.2.0');
     expect(executed).toBe(true);
     expect(report?.ok).toBe(true);
     expect(report?.requiresManualRestore).toBeFalsy();
 
     const manifest = await new ManifestStore('qa-upd', root).read();
     const lock = await new LockStore('qa-upd', root).read();
-    expect(manifest.versions.selfhelp).toBe('8.1.0');
-    expect(lock.core.version).toBe('8.1.0');
+    expect(manifest.versions.selfhelp).toBe('0.2.0');
+    expect(lock.core.version).toBe('0.2.0');
 
     const dir = instancePaths('qa-upd', root).dir;
     const joined = runner.calls.filter((c) => c.cwd === dir).map((c) => c.args.join(' '));
@@ -275,7 +275,7 @@ describe('release smoke (offline, signed fixture registry)', () => {
       mode: 'production',
       domain: 'qa-ports.example.ch',
       registryUrl: REGISTRY_URL,
-      version: '8.0.0',
+      version: '0.1.0',
       bringUp: true,
     });
 
@@ -299,12 +299,12 @@ describe('release smoke (offline, signed fixture registry)', () => {
       mode: 'local',
       localPort: 8088,
       registryUrl: REGISTRY_URL,
-      version: '8.0.0',
+      version: '0.1.0',
       bringUp: true,
     });
 
     const { plan, executed, report } = await instanceUpdate(d, 'qa-local-upd', { target: 'latest' });
-    expect(plan.targetVersion).toBe('8.1.0');
+    expect(plan.targetVersion).toBe('0.2.0');
     expect(executed).toBe(true);
     expect(report?.ok).toBe(true);
     expect(report?.rolledBack).toBeFalsy();
@@ -313,7 +313,7 @@ describe('release smoke (offline, signed fixture registry)', () => {
     const frontendPorts = (compose.services.frontend as { ports?: string[] }).ports ?? [];
     expect(frontendPorts.some((p) => p.includes('8088'))).toBe(true);
     const manifest = await new ManifestStore('qa-local-upd', root).read();
-    expect(manifest.versions.selfhelp).toBe('8.1.0');
+    expect(manifest.versions.selfhelp).toBe('0.2.0');
   });
 
   it('two-instance routing isolation: only the shared proxy network is common', async () => {

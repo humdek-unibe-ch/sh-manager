@@ -20,7 +20,7 @@ function fakeActions(overrides: Partial<BootstrapActions> = {}): BootstrapAction
       return { status: 'ok' };
     },
     async runInstall() {
-      return { ok: true, instanceDir: '/opt/selfhelp/instances/clinic-a', version: '8.0.0', publicUrl: 'https://app.example.com' };
+      return { ok: true, instanceDir: '/opt/selfhelp/instances/clinic-a', version: '0.1.0', publicUrl: 'https://app.example.com' };
     },
     async checkHealth() {
       return { healthy: true, degraded: false };

@@ -19,7 +19,7 @@ const SNAPSHOT: Snapshot = {
 };
 
 const RESULT: InstallResult = {
-  outcome: { ok: true, instanceDir: '/opt/selfhelp/instances/clinic-a', version: '8.0.0', publicUrl: 'https://clinic-a.example' },
+  outcome: { ok: true, instanceDir: '/opt/selfhelp/instances/clinic-a', version: '0.1.0', publicUrl: 'https://clinic-a.example' },
   health: { healthy: true, degraded: false },
   publicUrl: 'https://clinic-a.example',
 };
@@ -29,7 +29,7 @@ describe('SuccessStep', () => {
     render(<SuccessStep result={RESULT} config={FULL_CONFIG} snapshot={SNAPSHOT} />);
 
     expect(screen.getByText(/Clinic A is ready/i)).toBeInTheDocument();
-    expect(screen.getByText(/SelfHelp 8\.0\.0 is installed/i)).toBeInTheDocument();
+    expect(screen.getByText(/SelfHelp 0\.1\.0 is installed/i)).toBeInTheDocument();
     expect(screen.getByText(/All services healthy/i)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /open selfhelp/i })).toHaveAttribute('href', 'https://clinic-a.example');
     expect(screen.getByText('/opt/selfhelp/instances/clinic-a/manifest.json')).toBeInTheDocument();

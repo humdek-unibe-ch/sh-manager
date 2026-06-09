@@ -44,15 +44,15 @@ describe('RegistryClient end-to-end with signed fixtures', () => {
   it('fetches + validates + schema-gates the index and records a check', async () => {
     const c = client({ 'registry.json': indexBody });
     const index = await c.getIndex();
-    expect(index.core[0]?.version).toBe('8.0.0');
+    expect(index.core[0]?.version).toBe('0.1.0');
     expect(c.lastSuccessfulCheck?.metadataSha256).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it('verifies a signed core + frontend release', async () => {
     const c = client({
       'registry.json': indexBody,
-      'selfhelp-core-8.0.0.json': coreBody,
-      'selfhelp-frontend-8.0.0.json': frontendBody,
+      'selfhelp-core-0.1.0.json': coreBody,
+      'selfhelp-frontend-0.1.0.json': frontendBody,
     });
     const index = await c.getIndex();
     const core = await c.getCoreRelease(index.core[0]!);
@@ -62,8 +62,8 @@ describe('RegistryClient end-to-end with signed fixtures', () => {
   });
 
   it('rejects a tampered release (signature mismatch)', async () => {
-    const tampered = coreBody.replace('"8.0.0"', '"9.9.9"');
-    const c = client({ 'registry.json': indexBody, 'selfhelp-core-8.0.0.json': tampered });
+    const tampered = coreBody.replace('"0.1.0"', '"9.9.9"');
+    const c = client({ 'registry.json': indexBody, 'selfhelp-core-0.1.0.json': tampered });
     const index = await c.getIndex();
     await expect(c.getCoreRelease(index.core[0]!)).rejects.toMatchObject({ code: 'signature_invalid' });
   });

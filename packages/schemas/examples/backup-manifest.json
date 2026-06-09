@@ -4,12 +4,12 @@
   "instanceId": "website1",
   "createdAt": "2026-06-05T09:00:00Z",
   "mode": "maintenance",
-  "selfhelpVersion": "8.0.0",
+  "selfhelpVersion": "0.1.0",
   "migrationVersion": "Version20260605081254",
   "plugins": [
     {
       "id": "survey-js",
-      "version": "1.3.0"
+      "version": "0.1.0"
     }
   ],
   "includedAreas": [

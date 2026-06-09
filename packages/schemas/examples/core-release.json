@@ -1,26 +1,26 @@
 {
   "kind": "selfhelp-core-release",
-  "id": "selfhelp-core-8.0.0",
-  "version": "8.0.0",
+  "id": "selfhelp-core-0.1.0",
+  "version": "0.1.0",
   "channel": "stable",
   "releasedAt": "2026-06-01T00:00:00Z",
-  "minimumDirectUpgradeFrom": "8.0.0-dev",
-  "pluginApiVersion": "2.1",
+  "minimumDirectUpgradeFrom": "0.1.0",
+  "pluginApiVersion": "0.1.0",
   "backend": {
-    "image": "ghcr.io/humdek-unibe-ch/selfhelp-backend:8.0.0",
+    "image": "ghcr.io/humdek-unibe-ch/selfhelp-backend:0.1.0",
     "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
     "phpVersion": "8.4"
   },
   "worker": {
-    "image": "ghcr.io/humdek-unibe-ch/selfhelp-worker:8.0.0",
+    "image": "ghcr.io/humdek-unibe-ch/selfhelp-worker:0.1.0",
     "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
   },
   "scheduler": {
-    "image": "ghcr.io/humdek-unibe-ch/selfhelp-scheduler:8.0.0",
+    "image": "ghcr.io/humdek-unibe-ch/selfhelp-scheduler:0.1.0",
     "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
   },
   "frontendCompatibility": {
-    "requiredFrontendRange": ">=8.0.0 <8.1.0"
+    "requiredFrontendRange": ">=0.1.0 <0.2.0"
   },
   "database": {
     "migrationRange": "Version20260501000000..Version20260605081254",
@@ -29,8 +29,8 @@
     "manualConfirmationRequired": false
   },
   "security": {
-    "signature": "gAtDfyEYFAOiQy9t6iIjpqeEMiOlcHZ2wP9UdpBOA4KBfkouuqwrras4UubE6+IQM9DqiwZOg0cc26MAhqdiDg==",
+    "signature": "yGfxURRv2hNeXU+A/ek2XeBcClhWaifBP9/C3v02WDZDQ8B984Hh7CxnaeX2HQ/f4WsU7oQ6iTGukInEkJkWBA==",
     "keyId": "selfhelp-official-2026",
-    "signedPayloadSha256": "sha256:73f184aa32ff6f94224d40340c875492a9a288c6db47684ccc4a60ee874f93f9"
+    "signedPayloadSha256": "sha256:295e603ae29a301284312be75c65cd17f7bb735eba2e8d4f29449954f479750b"
   }
 }

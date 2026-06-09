@@ -1,19 +1,19 @@
 {
   "kind": "selfhelp-worker-release",
-  "id": "selfhelp-worker-8.0.0",
-  "version": "8.0.0",
+  "id": "selfhelp-worker-0.1.0",
+  "version": "0.1.0",
   "channel": "stable",
-  "image": "ghcr.io/humdek-unibe-ch/selfhelp-worker:8.0.0",
+  "image": "ghcr.io/humdek-unibe-ch/selfhelp-worker:0.1.0",
   "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
   "builtFrom": {
-    "coreVersion": "8.0.0"
+    "coreVersion": "0.1.0"
   },
   "backendCompatibility": {
-    "requiredCoreRange": ">=8.0.0 <8.1.0"
+    "requiredCoreRange": ">=0.1.0 <0.2.0"
   },
   "security": {
-    "signature": "oXz0CZbova4Qvq5ZLefqNNBnfuHJW9Z3v+eIcHQ6cf5DxXNCy1DeuJ+SIWt+RSLewJCoorZj4g1KFqh6Wb/cDg==",
+    "signature": "JYFJII7kmJaVcxfuHFkGi3E4YmD0YNFkvsX9aBMScwSQNI1RWRm5SnsZpX3HWuxha5WUNi8eLRUTgZuG5xAVAw==",
     "keyId": "selfhelp-official-2026",
-    "signedPayloadSha256": "sha256:670c7b2b55d14da532ae2938a8262c538ad65e94a3a098dd9218ca4de7d2d5c8"
+    "signedPayloadSha256": "sha256:9d8581be3b8c8d24e4a461daf05381a06d4d231ba7abd0ade608e514617dd1fb"
   }
 }

@@ -1,19 +1,19 @@
 {
   "kind": "selfhelp-scheduler-release",
-  "id": "selfhelp-scheduler-8.0.0",
-  "version": "8.0.0",
+  "id": "selfhelp-scheduler-0.1.0",
+  "version": "0.1.0",
   "channel": "stable",
-  "image": "ghcr.io/humdek-unibe-ch/selfhelp-scheduler:8.0.0",
+  "image": "ghcr.io/humdek-unibe-ch/selfhelp-scheduler:0.1.0",
   "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
   "builtFrom": {
-    "coreVersion": "8.0.0"
+    "coreVersion": "0.1.0"
   },
   "backendCompatibility": {
-    "requiredCoreRange": ">=8.0.0 <8.1.0"
+    "requiredCoreRange": ">=0.1.0 <0.2.0"
   },
   "security": {
-    "signature": "2Ou8FI0z0EGTKUkdZqBHmxDFOWIoyQaTYBaQNMPp0lH+DnEvZ4SIK6Qo6JqE+YWHXPpibdugnX7W73CYrPd7Ag==",
+    "signature": "dh6YK+AT0oKe2gBHWjEGifRUHrCSnESKrFqtLOhrqtgSh6I/xPgLeUoX0cfIYLLWhibuOJDva+HXT1Sa8DHeBg==",
     "keyId": "selfhelp-official-2026",
-    "signedPayloadSha256": "sha256:332c9cafeed1df8d4b037437378bcc9f8c398c187632622207c9d383a00f746e"
+    "signedPayloadSha256": "sha256:79bff732ee5de6159d3e6c697cc53f1ba4a5835bfd199c5be8ad16729bd11881"
   }
 }

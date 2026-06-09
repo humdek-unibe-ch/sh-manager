@@ -67,8 +67,8 @@ afterEach(async () => {
 async function makeDeps(): Promise<ActionDeps> {
   const fetcher = new FixtureFetcher({
     'registry.json': await readExample('registry-index.json'),
-    'selfhelp-core-8.0.0.json': await readExample('core-release.json'),
-    'selfhelp-frontend-8.0.0.json': await readExample('frontend-release.json'),
+    'selfhelp-core-0.1.0.json': await readExample('core-release.json'),
+    'selfhelp-frontend-0.1.0.json': await readExample('frontend-release.json'),
   });
   const digest = `sha256:${'a'.repeat(64)}`;
   return {
@@ -129,11 +129,11 @@ describe('CLI actions (offline)', () => {
       registryUrl: 'https://humdek-unibe-ch.github.io/sh2-plugin-registry/',
       version: 'latest',
     });
-    expect(res.version).toBe('8.0.0');
+    expect(res.version).toBe('0.1.0');
     const manifest = await new ManifestStore('website1', root).read();
     const lock = await new LockStore('website1', root).read();
-    expect(manifest.images.frontend).toContain('selfhelp-frontend:8.0.0');
-    expect(lock.core.version).toBe('8.0.0');
+    expect(manifest.images.frontend).toContain('selfhelp-frontend:0.1.0');
+    expect(lock.core.version).toBe('0.1.0');
 
     const list = await instanceList(d);
     expect(list.map((i) => i.instanceId)).toContain('website1');

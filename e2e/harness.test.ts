@@ -33,7 +33,7 @@ const FAKE_DIGEST = `sha256:${'a'.repeat(64)}`;
 
 describe('e2e harness: dev signer', () => {
   it('produces a signature that verifies against the deterministic dev key', () => {
-    const body = { kind: 'selfhelp-core-release', id: 'selfhelp-core-8.0.0', version: '8.0.0', channel: 'test' };
+    const body = { kind: 'selfhelp-core-release', id: 'selfhelp-core-0.1.0', version: '0.1.0', channel: 'test' };
     const security = sign(body);
     const payload = canonicalStringify(body);
     const kp = devKeyPair();
@@ -58,18 +58,18 @@ describe('e2e harness: test-registry release builders match the manager schemas'
   const digests = { backend: FAKE_DIGEST, worker: FAKE_DIGEST, scheduler: FAKE_DIGEST };
 
   it('emits schema-valid, signed core/frontend/scheduler/worker releases on the test channel', () => {
-    const core = coreRelease('8.0.0', tags, digests);
+    const core = coreRelease('0.1.0', tags, digests);
     const signedCore = { ...core, security: sign(core) };
     expect(validateCoreRelease(signedCore).valid).toBe(true);
     expect(signedCore.channel).toBe('test');
 
-    const fe = frontendRelease('8.0.0', tags, FAKE_DIGEST);
+    const fe = frontendRelease('0.1.0', tags, FAKE_DIGEST);
     expect(validateFrontendRelease({ ...fe, security: sign(fe) }).valid).toBe(true);
 
-    const sched = serviceRelease('selfhelp-scheduler-release', 'scheduler', '8.0.0', tags.scheduler, FAKE_DIGEST);
+    const sched = serviceRelease('selfhelp-scheduler-release', 'scheduler', '0.1.0', tags.scheduler, FAKE_DIGEST);
     expect(validateSchedulerRelease({ ...sched, security: sign(sched) }).valid).toBe(true);
 
-    const worker = serviceRelease('selfhelp-worker-release', 'worker', '8.0.0', tags.worker, FAKE_DIGEST);
+    const worker = serviceRelease('selfhelp-worker-release', 'worker', '0.1.0', tags.worker, FAKE_DIGEST);
     expect(validateWorkerRelease({ ...worker, security: sign(worker) }).valid).toBe(true);
   });
 });
@@ -88,7 +88,7 @@ describe('e2e harness: static registry server', () => {
     dir = await mkdtemp(path.join(tmpdir(), 'shm-serve-'));
     await mkdir(path.join(dir, 'releases', 'core'), { recursive: true });
     await writeFile(path.join(dir, 'registry.json'), JSON.stringify({ ok: true }), 'utf8');
-    await writeFile(path.join(dir, 'releases', 'core', 'r.json'), JSON.stringify({ v: '8.0.0' }), 'utf8');
+    await writeFile(path.join(dir, 'releases', 'core', 'r.json'), JSON.stringify({ v: '0.1.0' }), 'utf8');
 
     const s = await serveRegistry(dir, 0);
     server = s;
@@ -99,7 +99,7 @@ describe('e2e harness: static registry server', () => {
     expect(((await idx.json()) as { ok?: boolean }).ok).toBe(true);
 
     const nested = await fetch(`${s.url}releases/core/r.json`);
-    expect(((await nested.json()) as { v?: string }).v).toBe('8.0.0');
+    expect(((await nested.json()) as { v?: string }).v).toBe('0.1.0');
 
     const missing = await fetch(`${s.url}nope.json`);
     expect(missing.status).toBe(404);

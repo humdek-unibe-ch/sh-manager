@@ -26,7 +26,7 @@ const names = (steps: { name: ProvisionStepName }[]): ProvisionStepName[] => ste
 
 describe('provisionInstance', () => {
   it('runs the full required sequence and reports ok when healthy', async () => {
-    const report = await provisionInstance({ instanceId: 'i1', version: '8.0.0' }, baseDeps());
+    const report = await provisionInstance({ instanceId: 'i1', version: '0.1.0' }, baseDeps());
     expect(report.ok).toBe(true);
     expect(report.health?.overall).toBe('healthy');
     // Optional steps are recorded as skipped, in order.
@@ -55,7 +55,7 @@ describe('provisionInstance', () => {
         return healthy;
       }),
     });
-    const report = await provisionInstance({ instanceId: 'i1', version: '8.0.0' }, deps);
+    const report = await provisionInstance({ instanceId: 'i1', version: '0.1.0' }, deps);
     expect(report.ok).toBe(true);
     expect(calls).toEqual(['wait_db', 'migrations', 'seed', 'admin', 'plugins', 'cache_warm', 'health']);
     expect(report.steps.find((s) => s.name === 'admin')?.detail).toBe('qa.admin@selfhelp.test');
@@ -66,7 +66,7 @@ describe('provisionInstance', () => {
     const createAdmin = vi.fn(async () => ({ created: true }));
     const checkHealth = vi.fn(async () => healthy);
     const report = await provisionInstance(
-      { instanceId: 'i1', version: '8.0.0' },
+      { instanceId: 'i1', version: '0.1.0' },
       baseDeps({
         runMigrations: vi.fn(async () => {
           throw new Error('migration boom');
@@ -86,7 +86,7 @@ describe('provisionInstance', () => {
   it('fails fast if the database never becomes ready', async () => {
     const runMigrations = vi.fn(async () => {});
     const report = await provisionInstance(
-      { instanceId: 'i1', version: '8.0.0' },
+      { instanceId: 'i1', version: '0.1.0' },
       baseDeps({
         waitForDatabase: vi.fn(async () => {
           throw new Error('db timeout');
@@ -101,7 +101,7 @@ describe('provisionInstance', () => {
 
   it('treats an unhealthy final check as a hard failure but keeps the report', async () => {
     const report = await provisionInstance(
-      { instanceId: 'i1', version: '8.0.0' },
+      { instanceId: 'i1', version: '0.1.0' },
       baseDeps({ checkHealth: vi.fn(async () => unhealthy) }),
     );
     expect(report.ok).toBe(false);
@@ -111,7 +111,7 @@ describe('provisionInstance', () => {
 
   it('accepts a degraded final check as ok (optional service still settling)', async () => {
     const report = await provisionInstance(
-      { instanceId: 'i1', version: '8.0.0' },
+      { instanceId: 'i1', version: '0.1.0' },
       baseDeps({ checkHealth: vi.fn(async () => degraded) }),
     );
     expect(report.ok).toBe(true);
@@ -121,7 +121,7 @@ describe('provisionInstance', () => {
 
   it('reports admin "already exists" without failing', async () => {
     const report = await provisionInstance(
-      { instanceId: 'i1', version: '8.0.0' },
+      { instanceId: 'i1', version: '0.1.0' },
       baseDeps({ createAdmin: vi.fn(async () => ({ created: false })) }),
     );
     expect(report.ok).toBe(true);
@@ -131,7 +131,7 @@ describe('provisionInstance', () => {
   it('emits a phase callback for every executed step', async () => {
     const phases: ProvisionStepName[] = [];
     await provisionInstance(
-      { instanceId: 'i1', version: '8.0.0' },
+      { instanceId: 'i1', version: '0.1.0' },
       baseDeps({ onPhase: (n) => void phases.push(n) }),
     );
     // Skipped optional steps do not emit a phase.

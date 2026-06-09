@@ -9,34 +9,34 @@
   },
   "core": [
     {
-      "id": "selfhelp-core-8.0.0",
-      "version": "8.0.0",
+      "id": "selfhelp-core-0.1.0",
+      "version": "0.1.0",
       "channel": "stable",
-      "releaseUrl": "releases/core/selfhelp-core-8.0.0.json"
+      "releaseUrl": "releases/core/selfhelp-core-0.1.0.json"
     }
   ],
   "frontend": [
     {
-      "id": "selfhelp-frontend-8.0.0",
-      "version": "8.0.0",
+      "id": "selfhelp-frontend-0.1.0",
+      "version": "0.1.0",
       "channel": "stable",
-      "releaseUrl": "releases/frontend/selfhelp-frontend-8.0.0.json"
+      "releaseUrl": "releases/frontend/selfhelp-frontend-0.1.0.json"
     }
   ],
   "scheduler": [
     {
-      "id": "selfhelp-scheduler-8.0.0",
-      "version": "8.0.0",
+      "id": "selfhelp-scheduler-0.1.0",
+      "version": "0.1.0",
       "channel": "stable",
-      "releaseUrl": "releases/scheduler/selfhelp-scheduler-8.0.0.json"
+      "releaseUrl": "releases/scheduler/selfhelp-scheduler-0.1.0.json"
     }
   ],
   "worker": [
     {
-      "id": "selfhelp-worker-8.0.0",
-      "version": "8.0.0",
+      "id": "selfhelp-worker-0.1.0",
+      "version": "0.1.0",
       "channel": "stable",
-      "releaseUrl": "releases/worker/selfhelp-worker-8.0.0.json"
+      "releaseUrl": "releases/worker/selfhelp-worker-0.1.0.json"
     }
   ],
   "plugins": []

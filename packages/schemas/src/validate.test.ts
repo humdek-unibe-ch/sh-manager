@@ -30,18 +30,18 @@ const validManifest: InstanceManifest = {
     channel: 'stable',
   },
   versions: {
-    selfhelp: '1.4.2',
-    backend: '1.4.2',
-    frontend: '1.4.2',
-    scheduler: '1.4.2',
-    worker: '1.4.2',
-    pluginApi: '2.1',
+    selfhelp: '0.1.0',
+    backend: '0.1.0',
+    frontend: '0.1.0',
+    scheduler: '0.1.0',
+    worker: '0.1.0',
+    pluginApi: '0.1.0',
   },
   images: {
-    backend: 'ghcr.io/humdek-unibe-ch/selfhelp-backend:1.4.2',
-    frontend: 'ghcr.io/humdek-unibe-ch/selfhelp-frontend:1.4.2',
-    scheduler: 'ghcr.io/humdek-unibe-ch/selfhelp-scheduler:1.4.2',
-    worker: 'ghcr.io/humdek-unibe-ch/selfhelp-worker:1.4.2',
+    backend: 'ghcr.io/humdek-unibe-ch/selfhelp-backend:0.1.0',
+    frontend: 'ghcr.io/humdek-unibe-ch/selfhelp-frontend:0.1.0',
+    scheduler: 'ghcr.io/humdek-unibe-ch/selfhelp-scheduler:0.1.0',
+    worker: 'ghcr.io/humdek-unibe-ch/selfhelp-worker:0.1.0',
     mysql: 'mysql:8.4',
     redis: 'redis:7.2',
     mercure: 'dunglas/mercure:0.18',
@@ -52,7 +52,7 @@ const validManifest: InstanceManifest = {
     internalSymfonyUrl: 'http://website1-backend:8080',
     symfonyApiPrefix: '/cms-api/v1',
   },
-  installedPlugins: [{ id: 'survey-js', version: '1.3.0' }],
+  installedPlugins: [{ id: 'survey-js', version: '0.1.0' }],
 };
 
 const validLock: InstanceLock = {
@@ -64,13 +64,13 @@ const validLock: InstanceLock = {
     metadataSha256: 'sha256:abc',
   },
   core: {
-    version: '1.4.2',
+    version: '0.1.0',
     backendImageDigest: 'sha256:b',
     frontendImageDigest: 'sha256:f',
     schedulerImageDigest: 'sha256:s',
     workerImageDigest: 'sha256:w',
     migrationVersion: 'Version20260605081254',
-    pluginApiVersion: '2.1',
+    pluginApiVersion: '0.1.0',
     signedPayloadSha256: 'sha256:p',
   },
   services: {
@@ -80,11 +80,11 @@ const validLock: InstanceLock = {
   },
   plugins: {
     'survey-js': {
-      version: '1.3.0',
+      version: '0.1.0',
       artifactSha256: 'sha256:a',
       signature: 'sig',
       keyId: 'humdek-2026-01',
-      compatibility: { core: '>=1.2.0 <1.5.0', pluginApi: '^2.0' },
+      compatibility: { core: '>=0.1.0 <0.2.0', pluginApi: '0.1.0' },
     },
   },
 };
@@ -98,17 +98,17 @@ const validRegistry: RegistryIndex = {
   core: [
     {
       id: 'selfhelp-core',
-      version: '1.4.2',
+      version: '0.1.0',
       channel: 'stable',
-      releaseUrl: 'core/releases/selfhelp-core-1.4.2.json',
+      releaseUrl: 'core/releases/selfhelp-core-0.1.0.json',
     },
   ],
   frontend: [
     {
       id: 'selfhelp-frontend',
-      version: '1.4.2',
+      version: '0.1.0',
       channel: 'stable',
-      releaseUrl: 'frontend/releases/selfhelp-frontend-1.4.2.json',
+      releaseUrl: 'frontend/releases/selfhelp-frontend-0.1.0.json',
     },
   ],
   scheduler: [],
@@ -165,22 +165,22 @@ describe('validateRegistryIndex', () => {
   it('accepts an index with populated scheduler/worker arrays', () => {
     const idx: RegistryIndex = {
       ...validRegistry,
-      scheduler: [{ id: 'selfhelp-scheduler-8.0.0', version: '8.0.0', channel: 'stable', releaseUrl: 'releases/scheduler/selfhelp-scheduler-8.0.0.json' }],
-      worker: [{ id: 'selfhelp-worker-8.0.0', version: '8.0.0', channel: 'stable', releaseUrl: 'releases/worker/selfhelp-worker-8.0.0.json' }],
+      scheduler: [{ id: 'selfhelp-scheduler-0.1.0', version: '0.1.0', channel: 'stable', releaseUrl: 'releases/scheduler/selfhelp-scheduler-0.1.0.json' }],
+      worker: [{ id: 'selfhelp-worker-0.1.0', version: '0.1.0', channel: 'stable', releaseUrl: 'releases/worker/selfhelp-worker-0.1.0.json' }],
     };
     expect(validateRegistryIndex(idx).valid).toBe(true);
   });
   it('accepts the test (staging/rehearsal) channel on release refs', () => {
     const idx: RegistryIndex = {
       ...validRegistry,
-      core: [{ id: 'selfhelp-core-8.0.0', version: '8.0.0', channel: 'test', releaseUrl: 'releases/core/selfhelp-core-8.0.0.json' }],
+      core: [{ id: 'selfhelp-core-0.1.0', version: '0.1.0', channel: 'test', releaseUrl: 'releases/core/selfhelp-core-0.1.0.json' }],
     };
     expect(validateRegistryIndex(idx).valid).toBe(true);
   });
   it('rejects an unknown release channel', () => {
     const idx = {
       ...validRegistry,
-      core: [{ id: 'c', version: '8.0.0', channel: 'alpha', releaseUrl: 'x' }],
+      core: [{ id: 'c', version: '0.1.0', channel: 'alpha', releaseUrl: 'x' }],
     } as unknown as RegistryIndex;
     expect(validateRegistryIndex(idx).valid).toBe(false);
   });
@@ -188,20 +188,20 @@ describe('validateRegistryIndex', () => {
 
 const validScheduler: SchedulerRelease = {
   kind: 'selfhelp-scheduler-release',
-  id: 'selfhelp-scheduler-8.0.0',
-  version: '8.0.0',
+  id: 'selfhelp-scheduler-0.1.0',
+  version: '0.1.0',
   channel: 'stable',
-  image: 'ghcr.io/humdek-unibe-ch/selfhelp-scheduler:8.0.0',
+  image: 'ghcr.io/humdek-unibe-ch/selfhelp-scheduler:0.1.0',
   digest: 'sha256:3333333333333333333333333333333333333333333333333333333333333333',
-  backendCompatibility: { requiredCoreRange: '>=8.0.0 <8.1.0' },
+  backendCompatibility: { requiredCoreRange: '>=0.1.0 <0.2.0' },
   security: { signature: 's', keyId: 'selfhelp-official-2026' },
 };
 
 const validWorker: WorkerRelease = {
   ...validScheduler,
   kind: 'selfhelp-worker-release',
-  id: 'selfhelp-worker-8.0.0',
-  image: 'ghcr.io/humdek-unibe-ch/selfhelp-worker:8.0.0',
+  id: 'selfhelp-worker-0.1.0',
+  image: 'ghcr.io/humdek-unibe-ch/selfhelp-worker:0.1.0',
   digest: 'sha256:2222222222222222222222222222222222222222222222222222222222222222',
 };
 

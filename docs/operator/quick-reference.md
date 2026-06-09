@@ -55,7 +55,7 @@ Services: `frontend`, `backend`, `worker`, `scheduler`, `mysql`, `redis`,
 | --- | --- |
 | Dry-run (plan + preflight) | `sh-manager instance update website1 --dry-run` |
 | Apply (backup-first, auto-rollback) | `sh-manager instance update website1` |
-| Target a version | `sh-manager instance update website1 --version 8.0.1` |
+| Target a version | `sh-manager instance update website1 --version 0.1.1` |
 | Accept destructive migration | `sh-manager instance update website1 --accept-migration-risk` |
 | Process a CMS-requested update | `sh-manager instance process-operations website1 --backend-url http://127.0.0.1:PORT --token "$SELFHELP_MANAGER_TOKEN"` |
 

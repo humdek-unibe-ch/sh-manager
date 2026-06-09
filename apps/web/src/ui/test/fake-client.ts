@@ -101,7 +101,7 @@ export function makeFakeClient(opts: FakeClientOptions = {}): ApiClient {
       state = recordCheck(state, 'install', { ok: true, severity: 'ok', detail: 'Installed.' });
       state = recordCheck(state, 'health', { ok: true, severity: 'ok', detail: 'Healthy.' });
       return snapshot({
-        outcome: { ok: true, instanceDir: '/opt/selfhelp/instances/clinic-a', version: '8.0.0', publicUrl: 'https://clinic-a.example' },
+        outcome: { ok: true, instanceDir: '/opt/selfhelp/instances/clinic-a', version: '0.1.0', publicUrl: 'https://clinic-a.example' },
         health: { healthy: true, degraded: false },
         publicUrl: 'https://clinic-a.example',
       });

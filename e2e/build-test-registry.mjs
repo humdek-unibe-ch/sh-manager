@@ -3,7 +3,7 @@
 /**
  * Assemble a dev-signed, served-locally TEST registry from the four `:e2e`
  * images built by build-images.mjs. Two versions are emitted on the `test`
- * channel (`8.0.0` base + `8.0.1` next) so the e2e can drive a real
+ * channel (`0.1.0` base + `0.1.1` next) so the e2e can drive a real
  * install-then-update against disposable images — never the public registry.
  *
  * Signing uses a deterministic dev Ed25519 key whose public half is written
@@ -11,7 +11,7 @@
  * verification runs end to end with no production secret.
  *
  * Usage (standalone):
- *   node e2e/build-test-registry.mjs --out <dir> [--owner <o>] [--tag <t>] [--base 8.0.0] [--next 8.0.1]
+ *   node e2e/build-test-registry.mjs --out <dir> [--owner <o>] [--tag <t>] [--base 0.1.0] [--next 0.1.1]
  */
 import { execFileSync } from 'node:child_process';
 import { Buffer } from 'node:buffer';
@@ -25,7 +25,7 @@ import { imageTags, DEFAULT_OWNER, E2E_TAG } from './build-images.mjs';
 
 export const E2E_KEY_ID = 'selfhelp-e2e';
 const E2E_KEY_SEED = 'selfhelp-e2e-registry-signing-key';
-const COMPAT_RANGE = '>=8.0.0 <8.1.0';
+const COMPAT_RANGE = '>=0.1.0 <0.2.0';
 
 export function devKeyPair() {
   const seed = createHash('sha256').update(E2E_KEY_SEED).digest();
@@ -70,8 +70,8 @@ export function coreRelease(version, tags, digests) {
     version,
     channel: 'test',
     releasedAt: '2026-06-09T00:00:00Z',
-    minimumDirectUpgradeFrom: '8.0.0',
-    pluginApiVersion: '2.1',
+    minimumDirectUpgradeFrom: '0.1.0',
+    pluginApiVersion: '0.1.0',
     backend: { image: tags.backend, digest: digests.backend, phpVersion: '8.4' },
     worker: { image: tags.worker, digest: digests.worker },
     scheduler: { image: tags.scheduler, digest: digests.scheduler },
@@ -94,7 +94,7 @@ export function frontendRelease(version, tags, digest) {
     channel: 'test',
     image: tags.frontend,
     digest,
-    backendCompatibility: { requiredCoreRange: COMPAT_RANGE, requiredApiVersion: '2.1' },
+    backendCompatibility: { requiredCoreRange: COMPAT_RANGE, requiredApiVersion: '0.1.0' },
   };
 }
 
@@ -127,8 +127,8 @@ function writeJson(file, obj) {
 export function buildTestRegistry(opts) {
   const owner = opts.owner ?? DEFAULT_OWNER;
   const tag = opts.tag ?? E2E_TAG;
-  const baseVersion = opts.base ?? '8.0.0';
-  const nextVersion = opts.next ?? '8.0.1';
+  const baseVersion = opts.base ?? '0.1.0';
+  const nextVersion = opts.next ?? '0.1.1';
   const outDir = opts.out;
   if (!outDir) throw new Error('out dir is required.');
   const tags = imageTags(owner, tag);

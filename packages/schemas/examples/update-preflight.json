@@ -2,8 +2,8 @@
   "preflightVersion": 1,
   "status": "warning",
   "instanceId": "website1",
-  "currentVersion": "8.0.0-dev",
-  "targetVersion": "8.0.0",
+  "currentVersion": "0.1.0",
+  "targetVersion": "0.1.1",
   "checks": [
     {
       "code": "docker.available",
@@ -19,8 +19,8 @@
   "options": [
     {
       "type": "update_plugin",
-      "version": "1.4.0",
-      "label": "Update survey-js to 1.4.0 first"
+      "version": "0.2.0",
+      "label": "Update survey-js to 0.2.0 first"
     }
   ],
   "database": {

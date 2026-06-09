@@ -45,11 +45,11 @@ SHM_E2E=1 npm run e2e
 ```
 
 This builds the four `:e2e` images, assembles a dev-signed `test`-channel
-registry (versions `8.0.0` + `8.0.1`), serves it on localhost, then drives the
+registry (versions `0.1.0` + `0.1.1`), serves it on localhost, then drives the
 full journey against disposable instances:
 
 - fresh install + provision, HTTP `/cms-api/v1/health`, and admin login;
-- manager-driven update `8.0.0 → 8.0.1` (backup taken, MySQL volume preserved);
+- manager-driven update `0.1.0 → 0.1.1` (backup taken, MySQL volume preserved);
 - CMS-driven update (request → `process-operations` → status `succeeded`);
 - backup → same-instance restore (secrets preserved);
 - clone (fresh secrets, source untouched);
@@ -104,20 +104,20 @@ node e2e/build-test-registry.mjs --out /tmp/sh-test-registry
 
 Reads the real local image digests (`docker image inspect`) and writes
 `test`-channel, **dev-signed** core/frontend/scheduler/worker releases for two
-versions (`8.0.0` and `8.0.1`), plus `registry.json` and a `keys/trusted-keys.json`
+versions (`0.1.0` and `0.1.1`), plus `registry.json` and a `keys/trusted-keys.json`
 holding only the dev **public** key. Expected output:
 
 ```json
 {
   "dir": "/tmp/sh-test-registry",
   "trustedKeysPath": "/tmp/sh-test-registry/keys/trusted-keys.json",
-  "base": "8.0.0",
-  "next": "8.0.1"
+  "base": "0.1.0",
+  "next": "0.1.1"
 }
 ```
 
-The `8.0.1` release is your "published update". To rehearse a real code change,
-edit the source and re-run steps 1–2: the new image digests flow into `8.0.1`.
+The `0.1.1` release is your "published update". To rehearse a real code change,
+edit the source and re-run steps 1–2: the new image digests flow into `0.1.1`.
 
 ### 3. Serve the registry on localhost
 
@@ -145,11 +145,11 @@ dev key; `SELFHELP_ROOT` keeps every file under a throwaway directory.
 sh-manager server init --server-id rehearsal --mode local
 
 sh-manager instance install --id rehearsal1 --mode local --port 8080 \
-  --registry http://127.0.0.1:8787/ --channel test --version 8.0.0 \
+  --registry http://127.0.0.1:8787/ --channel test --version 0.1.0 \
   --provision --admin-email admin@example.test
 ```
 
-The install pulls the dev-signed `8.0.0` release, verifies its signature against
+The install pulls the dev-signed `0.1.0` release, verifies its signature against
 the dev trusted-keys file, brings the stack up, provisions (DB → migrate → admin
 → plugins → caches → health-check), and prints a generated admin password
 **once**. Save it.
@@ -171,21 +171,21 @@ run the readiness probe above is enough.)
 Always dry-run first:
 
 ```bash
-sh-manager instance update rehearsal1 --channel test --version 8.0.1 --dry-run
-sh-manager instance update rehearsal1 --channel test --version 8.0.1
+sh-manager instance update rehearsal1 --channel test --version 0.1.1 --dry-run
+sh-manager instance update rehearsal1 --channel test --version 0.1.1
 sh-manager instance health rehearsal1
 ```
 
-The manager takes a **backup first**, re-pins the `8.0.1` digests in `lock.json`,
+The manager takes a **backup first**, re-pins the `0.1.1` digests in `lock.json`,
 runs migrations, and health-checks; on any failure it **rolls back**. The MySQL
-data volume is never torn down. Confirm the reported version moved to `8.0.1`.
+data volume is never torn down. Confirm the reported version moved to `0.1.1`.
 Full flag reference: [update.md](update.md).
 
 ### 8. Update via the CMS (path B)
 
 The CMS never controls Docker; it records an **instance-scoped** request that the
 manager claims and executes. From the instance's admin UI, open **System →
-Maintenance & updates**, request an update to `8.0.1`, then let the manager
+Maintenance & updates**, request an update to `0.1.1`, then let the manager
 process it:
 
 ```bash
