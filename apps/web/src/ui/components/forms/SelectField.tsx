@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
-import { Field } from './Field';
+import { Select } from '@mantine/core';
 
 export interface SelectOption {
   value: string;
@@ -19,23 +19,17 @@ export interface SelectFieldProps {
 
 export function SelectField({ label, value, options, onChange, help, error, required }: SelectFieldProps): JSX.Element {
   return (
-    <Field label={label} help={help} error={error} required={required}>
-      {({ id, describedBy, invalid }) => (
-        <select
-          id={id}
-          className="shm-select"
-          value={value}
-          aria-describedby={describedBy}
-          aria-invalid={invalid || undefined}
-          onChange={(e) => onChange(e.target.value)}
-        >
-          {options.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
-      )}
-    </Field>
+    <Select
+      label={label}
+      description={help}
+      error={error}
+      required={required}
+      data={options}
+      value={value}
+      onChange={(val) => onChange(val ?? '')}
+      allowDeselect={false}
+      checkIconPosition="right"
+      comboboxProps={{ withinPortal: true }}
+    />
   );
 }

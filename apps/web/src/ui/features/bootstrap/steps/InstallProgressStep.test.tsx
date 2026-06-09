@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen } from '../../../test/render';
 import { InstallProgressStep } from './InstallProgressStep';
 
 describe('InstallProgressStep', () => {

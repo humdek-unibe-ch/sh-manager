@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
+import { Button, Group, Paper, SimpleGrid, Stack, Text, ThemeIcon, Title } from '@mantine/core';
 import { Alert, CommandPreview, KeyValue, StatusBadge, type BadgeTone, type KeyValueRow } from '../../../components';
 import { instanceDir, publicUrlPreview } from '../../../lib/formatting';
 import type { InstallResult, Snapshot, WizardConfig } from '../../../lib/types';
@@ -39,27 +40,35 @@ export function SuccessStep({ result, config, snapshot }: SuccessStepProps): JSX
   ];
 
   return (
-    <div className="shm-frame">
-      <div className="shm-hero">
-        <div className="shm-hero__badge" aria-hidden="true">
-          ✓
-        </div>
-        <h1 className="shm-frame__title">{config.instanceName || 'Your instance'} is ready</h1>
-        <p className="shm-frame__lead" style={{ textAlign: 'center' }}>
+    <Stack gap="lg">
+      <Stack align="center" gap="sm">
+        <ThemeIcon color="teal" variant="light" radius="xl" size={60}>
+          <Text fz={28} aria-hidden="true">
+            ✓
+          </Text>
+        </ThemeIcon>
+        <Title order={2} ta="center">
+          {config.instanceName || 'Your instance'} is ready
+        </Title>
+        <Text c="dimmed" ta="center">
           SelfHelp {version} is installed and the services have been started.
-        </p>
+        </Text>
         <StatusBadge tone={health.tone}>{health.label}</StatusBadge>
-      </div>
+      </Stack>
 
-      <div className="shm-card shm-card--pad shm-stack shm-stack--3">
-        <span className="shm-eyebrow">Open your instance</span>
-        <CommandPreview value={url} label="public URL" />
-        <div className="shm-row shm-row--wrap" style={{ gap: 'var(--shm-space-3)' }}>
-          <a className="shm-btn shm-btn--primary shm-btn--lg" href={url} target="_blank" rel="noreferrer noopener">
-            Open SelfHelp ↗
-          </a>
-        </div>
-      </div>
+      <Paper withBorder radius="md" p="lg">
+        <Stack gap="sm">
+          <Text size="xs" tt="uppercase" fw={700} c="dimmed">
+            Open your instance
+          </Text>
+          <CommandPreview value={url} label="public URL" />
+          <Group>
+            <Button component="a" href={url} target="_blank" rel="noreferrer noopener" size="md">
+              Open SelfHelp ↗
+            </Button>
+          </Group>
+        </Stack>
+      </Paper>
 
       <Alert tone="warning" title="Save your admin password now">
         The generated administrator password is stored in a restricted file inside the instance directory and shown by
@@ -67,20 +76,28 @@ export function SuccessStep({ result, config, snapshot }: SuccessStepProps): JSX
         displayed in this UI.
       </Alert>
 
-      <div className="shm-grid shm-grid--2">
-        <div className="shm-card shm-card--pad shm-stack shm-stack--3">
-          <span className="shm-eyebrow">Important paths</span>
-          <KeyValue rows={paths} />
-        </div>
-        <div className="shm-card shm-card--pad shm-stack shm-stack--3">
-          <span className="shm-eyebrow">Operator commands</span>
-          <CommandPreview value={`sh-manager instance health ${config.instanceId}`} label="health command" />
-          <CommandPreview value={`sh-manager backup create ${config.instanceId}`} label="backup command" />
-          <p className="shm-subtle" style={{ fontSize: '0.82rem' }}>
-            Run these on the server. Full instructions are in the operator README above.
-          </p>
-        </div>
-      </div>
-    </div>
+      <SimpleGrid cols={{ base: 1, sm: 2 }}>
+        <Paper withBorder radius="md" p="lg">
+          <Stack gap="sm">
+            <Text size="xs" tt="uppercase" fw={700} c="dimmed">
+              Important paths
+            </Text>
+            <KeyValue rows={paths} />
+          </Stack>
+        </Paper>
+        <Paper withBorder radius="md" p="lg">
+          <Stack gap="sm">
+            <Text size="xs" tt="uppercase" fw={700} c="dimmed">
+              Operator commands
+            </Text>
+            <CommandPreview value={`sh-manager instance health ${config.instanceId}`} label="health command" />
+            <CommandPreview value={`sh-manager backup create ${config.instanceId}`} label="backup command" />
+            <Text size="xs" c="dimmed">
+              Run these on the server. Full instructions are in the operator README above.
+            </Text>
+          </Stack>
+        </Paper>
+      </SimpleGrid>
+    </Stack>
   );
 }

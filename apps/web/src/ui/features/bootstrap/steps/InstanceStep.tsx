@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
+import { Code, Paper, Stack } from '@mantine/core';
 import { Alert, Button, SelectField, TextField, WizardFrame } from '../../../components';
 import { STEP_COPY } from '../../../lib/wizard-view';
 import { instanceDir, slugify } from '../../../lib/formatting';
@@ -52,50 +53,52 @@ export function InstanceStep({ ctl }: InstanceStepProps): JSX.Element {
         />
       }
     >
-      <div className="shm-card shm-card--pad shm-stack shm-stack--4">
-        <TextField
-          label="Display name"
-          value={cfg.instanceName}
-          onChange={onName}
-          help="A human-friendly name shown in the manager, e.g. “Clinic A”."
-          placeholder="Clinic A"
-          error={pickProblem(problems, 'display name')}
-          required
-        />
-        <TextField
-          label="Instance id"
-          value={cfg.instanceId}
-          onChange={(v) => ctl.patchDraft({ instanceId: v })}
-          help="Lowercase letters, digits and hyphens. Used for folders, containers and routing."
-          placeholder="clinic-a"
-          error={pickProblem(problems, 'instance id')}
-          required
-        />
-        <SelectField
-          label="Release channel"
-          value={cfg.channel}
-          options={CHANNELS}
-          onChange={(v) => ctl.patchDraft({ channel: v as ReleaseChannel })}
-          help="Determines which verified releases are offered."
-        />
-        <TextField
-          label="SelfHelp version"
-          value={cfg.version}
-          onChange={(v) => ctl.patchDraft({ version: v })}
-          help='Use "latest" for the newest compatible release, or pin an exact version.'
-          placeholder="latest"
-        />
-        <TextField
-          label="Registry URL"
-          value={cfg.registryUrl}
-          onChange={(v) => ctl.patchDraft({ registryUrl: v })}
-          help="The official signed release registry. Change only if you run a mirror."
-          error={pickProblem(problems, 'registry')}
-        />
-      </div>
+      <Paper withBorder radius="md" p="lg">
+        <Stack gap="md">
+          <TextField
+            label="Display name"
+            value={cfg.instanceName}
+            onChange={onName}
+            help="A human-friendly name shown in the manager, e.g. “Clinic A”."
+            placeholder="Clinic A"
+            error={pickProblem(problems, 'display name')}
+            required
+          />
+          <TextField
+            label="Instance id"
+            value={cfg.instanceId}
+            onChange={(v) => ctl.patchDraft({ instanceId: v })}
+            help="Lowercase letters, digits and hyphens. Used for folders, containers and routing."
+            placeholder="clinic-a"
+            error={pickProblem(problems, 'instance id')}
+            required
+          />
+          <SelectField
+            label="Release channel"
+            value={cfg.channel}
+            options={CHANNELS}
+            onChange={(v) => ctl.patchDraft({ channel: v as ReleaseChannel })}
+            help="Determines which verified releases are offered."
+          />
+          <TextField
+            label="SelfHelp version"
+            value={cfg.version}
+            onChange={(v) => ctl.patchDraft({ version: v })}
+            help='Use "latest" for the newest compatible release, or pin an exact version.'
+            placeholder="latest"
+          />
+          <TextField
+            label="Registry URL"
+            value={cfg.registryUrl}
+            onChange={(v) => ctl.patchDraft({ registryUrl: v })}
+            help="The official signed release registry. Change only if you run a mirror."
+            error={pickProblem(problems, 'registry')}
+          />
+        </Stack>
+      </Paper>
 
       <Alert tone="info" title="Where it will live">
-        Files: <code>{instanceDir(cfg.root, cfg.instanceId || 'instance')}</code>
+        Files: <Code>{instanceDir(cfg.root, cfg.instanceId || 'instance')}</Code>
       </Alert>
     </WizardFrame>
   );

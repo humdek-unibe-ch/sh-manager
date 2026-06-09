@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
 import { useEffect, useState } from 'react';
+import { Code, Paper, Stack, Text, VisuallyHidden } from '@mantine/core';
 import { Alert, Button, StepProgress, WizardFrame, type ProgressStep } from '../../../components';
 import { redactSecrets } from '../../../lib/formatting';
 import { INSTALL_STEPS } from '../../../lib/wizard-view';
@@ -68,19 +69,18 @@ export function InstallProgressStep({ phase, error, onRetry, onBack }: InstallPr
         ) : undefined
       }
     >
-      <div aria-live="polite" aria-busy={phase === 'running'} className="shm-visually-hidden">
+      <VisuallyHidden role="status" aria-live="polite">
         {phase === 'running' ? `Installing: ${current?.label ?? ''}` : 'Installation failed.'}
-      </div>
+      </VisuallyHidden>
 
       {phase === 'failed' && error ? (
         <Alert tone="error" title="What failed">
-          {redactSecrets(error)}
-          <details className="shm-disclosure" style={{ marginTop: 'var(--shm-space-2)' }}>
-            <summary className="shm-disclosure__btn">Show technical details</summary>
-            <pre className="shm-command__code" style={{ marginTop: 8, whiteSpace: 'pre-wrap' }}>
+          <Stack gap="xs">
+            <Text>{redactSecrets(error)}</Text>
+            <Code block style={{ whiteSpace: 'pre-wrap' }}>
               {redactSecrets(error)}
-            </pre>
-          </details>
+            </Code>
+          </Stack>
         </Alert>
       ) : (
         <Alert tone="info" title="Secrets are generated safely">
@@ -88,9 +88,9 @@ export function InstallProgressStep({ phase, error, onRetry, onBack }: InstallPr
         </Alert>
       )}
 
-      <div className="shm-card shm-card--pad">
+      <Paper withBorder radius="md" p="lg">
         <StepProgress steps={steps} />
-      </div>
+      </Paper>
     </WizardFrame>
   );
 }

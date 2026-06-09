@@ -8,7 +8,6 @@ export { EmptyState, type EmptyStateProps } from './feedback/EmptyState';
 export { Spinner, type SpinnerProps } from './feedback/Spinner';
 
 export { Button, type ButtonProps, type ButtonVariant } from './forms/Button';
-export { Field, type FieldProps, type FieldRenderProps } from './forms/Field';
 export { TextField, type TextFieldProps } from './forms/TextField';
 export { SelectField, type SelectFieldProps, type SelectOption } from './forms/SelectField';
 export { Checkbox, type CheckboxProps } from './forms/Checkbox';

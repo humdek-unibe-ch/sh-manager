@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
+import { Group, List, Paper, Text } from '@mantine/core';
 import { Alert, Button, StatusBadge, WizardFrame } from '../../../components';
 import { WIZARD_PHASES } from '../../../lib/wizard-view';
 import type { BootstrapController } from '../../../hooks/useBootstrap';
@@ -27,29 +28,31 @@ export function WelcomeStep({ ctl }: WelcomeStepProps): JSX.Element {
         />
       }
     >
-      <div className="shm-row shm-row--wrap" style={{ gap: 'var(--shm-space-2)' }}>
+      <Group gap="xs" wrap="wrap">
         <StatusBadge tone="info">Bootstrap mode</StatusBadge>
         <StatusBadge tone="neutral">Localhost / private access</StatusBadge>
         <StatusBadge tone="ok">Docker-only</StatusBadge>
-      </div>
+      </Group>
 
       <Alert tone="info" title="Safe by design">
         The installer is only reachable from this machine. Connect over an SSH tunnel for a remote server. Generated
         passwords and keys are written to restricted files and shown to you once after the install completes.
       </Alert>
 
-      <div className="shm-card shm-card--pad">
-        <div className="shm-eyebrow" style={{ marginBottom: 'var(--shm-space-3)' }}>
+      <Paper withBorder radius="md" p="lg">
+        <Text size="xs" tt="uppercase" fw={700} c="dimmed" mb="sm">
           What happens next
-        </div>
-        <ol className="shm-stack shm-stack--2" style={{ margin: 0, paddingLeft: '1.1em' }}>
+        </Text>
+        <List type="ordered" spacing="xs">
           {phases.map((p) => (
-            <li key={p.id}>
-              <span style={{ fontWeight: 600 }}>{p.label}</span>
-            </li>
+            <List.Item key={p.id}>
+              <Text span fw={600}>
+                {p.label}
+              </Text>
+            </List.Item>
           ))}
-        </ol>
-      </div>
+        </List>
+      </Paper>
     </WizardFrame>
   );
 }

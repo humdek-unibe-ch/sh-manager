@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
-import { Spinner } from '../feedback/Spinner';
+import { Button as MantineButton } from '@mantine/core';
 
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
 
@@ -13,6 +13,14 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   children: ReactNode;
 }
 
+/** Maps the app's button intents onto Mantine `Button` variants/colors. */
+const STYLE: Record<ButtonVariant, { variant: string; color?: string }> = {
+  primary: { variant: 'filled', color: 'blue' },
+  secondary: { variant: 'default' },
+  ghost: { variant: 'subtle', color: 'gray' },
+  danger: { variant: 'filled', color: 'red' },
+};
+
 export function Button({
   variant = 'secondary',
   block = false,
@@ -20,24 +28,22 @@ export function Button({
   loading = false,
   disabled,
   children,
-  className,
   type = 'button',
   ...rest
 }: ButtonProps): JSX.Element {
-  const classes = [
-    'shm-btn',
-    `shm-btn--${variant}`,
-    block ? 'shm-btn--block' : '',
-    size === 'lg' ? 'shm-btn--lg' : '',
-    className ?? '',
-  ]
-    .filter(Boolean)
-    .join(' ');
-
+  const style = STYLE[variant];
   return (
-    <button type={type} className={classes} disabled={disabled || loading} aria-busy={loading || undefined} {...rest}>
-      {loading ? <Spinner /> : null}
+    <MantineButton
+      {...rest}
+      type={type}
+      variant={style.variant}
+      color={style.color}
+      fullWidth={block}
+      size={size === 'lg' ? 'lg' : 'md'}
+      loading={loading}
+      disabled={disabled}
+    >
       {children}
-    </button>
+    </MantineButton>
   );
 }

@@ -1,7 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
 import { useState } from 'react';
-import { Alert, Button, Field, TextField } from '../../components';
+import { Center, Paper, PasswordInput, Stack, Text, TextInput, Title } from '@mantine/core';
+import { useMutation } from '@tanstack/react-query';
+import { Alert, Button } from '../../components';
 import { ApiError, type ApiClient } from '../../lib/api-client';
 
 export interface LoginFormProps {
@@ -12,73 +14,69 @@ export interface LoginFormProps {
 export function LoginForm({ client, onSuccess }: LoginFormProps): JSX.Element {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
 
-  async function submit(): Promise<void> {
-    setBusy(true);
-    setError(null);
-    try {
-      await client.login(email, password);
-      onSuccess();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not sign in. Please try again.');
-    } finally {
-      setBusy(false);
-    }
-  }
+  const login = useMutation({
+    mutationFn: () => client.login(email, password),
+    onSuccess,
+  });
+
+  const error = login.isError
+    ? login.error instanceof ApiError
+      ? login.error.message
+      : 'Could not sign in. Please try again.'
+    : null;
 
   return (
-    <div className="shm-center">
-      <form
-        className="shm-auth shm-card shm-card--pad shm-card--raised shm-stack shm-stack--4"
+    <Center mih="60vh">
+      <Paper
+        component="form"
+        withBorder
+        shadow="sm"
+        radius="md"
+        p="xl"
+        w="100%"
+        maw={420}
         onSubmit={(e) => {
           e.preventDefault();
-          void submit();
+          login.mutate();
         }}
       >
-        <div>
-          <h1 className="shm-card__title" style={{ fontSize: '1.2rem' }}>
-            Sign in to SelfHelp Manager
-          </h1>
-          <p className="shm-muted" style={{ fontSize: '0.9rem', marginTop: 4 }}>
-            Operator access for this server.
-          </p>
-        </div>
+        <Stack gap="md">
+          <div>
+            <Title order={3}>Sign in to SelfHelp Manager</Title>
+            <Text size="sm" c="dimmed" mt={4}>
+              Operator access for this server.
+            </Text>
+          </div>
 
-        {error ? (
-          <Alert tone="error" title="Sign-in failed">
-            {error}
-          </Alert>
-        ) : null}
+          {error ? (
+            <Alert tone="error" title="Sign-in failed">
+              {error}
+            </Alert>
+          ) : null}
 
-        <TextField
-          label="Email"
-          type="email"
-          value={email}
-          onChange={setEmail}
-          autoComplete="username"
-          placeholder="operator@university.edu"
-          required
-        />
-        <Field label="Password">
-          {({ id, describedBy }) => (
-            <input
-              id={id}
-              className="shm-input"
-              type="password"
-              value={password}
-              autoComplete="current-password"
-              aria-describedby={describedBy}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          )}
-        </Field>
+          <TextInput
+            label="Email"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.currentTarget.value)}
+            autoComplete="username"
+            placeholder="operator@university.edu"
+            required
+          />
+          <PasswordInput
+            label="Password"
+            value={password}
+            onChange={(e) => setPassword(e.currentTarget.value)}
+            autoComplete="current-password"
+            required
+          />
 
-        <Button type="submit" variant="primary" block loading={busy} disabled={!email || !password}>
-          Sign in
-        </Button>
-      </form>
-    </div>
+          <Button type="submit" variant="primary" block loading={login.isPending} disabled={!email || !password}>
+            Sign in
+          </Button>
+        </Stack>
+      </Paper>
+    </Center>
   );
 }

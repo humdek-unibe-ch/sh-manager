@@ -1,44 +1,39 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
 /**
- * Top-level router. Detects the server mode from the BFF and shows the right
- * experience: the bootstrap installer (localhost, unauthenticated) or the
- * authenticated operations console (persistent mode). A single API client is
- * shared so the CSRF token captured at login flows into every later request.
+ * Top-level router. Detects the server mode from the BFF (via react-query) and
+ * shows the right experience: the bootstrap installer (localhost,
+ * unauthenticated) or the authenticated operations console (persistent mode). A
+ * single API client is shared so the CSRF token captured at login flows into
+ * every later request.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo } from 'react';
+import { Center, Stack } from '@mantine/core';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, AppShell, Button, Spinner, StatusBadge } from './components';
 import { BootstrapWizard } from './features/bootstrap/BootstrapWizard';
 import { LoginForm } from './features/auth/LoginForm';
 import { OperationsConsole } from './features/manager/OperationsConsole';
-import { ApiError, createApiClient } from './lib/api-client';
+import { ApiError, createApiClient, type ApiClient } from './lib/api-client';
 
 type View = 'loading' | 'bootstrap' | 'login' | 'console' | 'error';
 
-export function App(): JSX.Element {
-  const client = useMemo(() => createApiClient(), []);
-  const [view, setView] = useState<View>('loading');
-  const [error, setError] = useState<string | null>(null);
+const STATE_KEY = ['manager', 'state'] as const;
 
-  const detect = useCallback(async () => {
-    setView('loading');
-    setError(null);
-    try {
-      const snap = await client.getState();
-      setView(snap.mode === 'persistent' ? 'console' : 'bootstrap');
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 401) {
-        setView('login');
-        return;
-      }
-      setError(err instanceof Error ? err.message : 'The manager service is not responding.');
-      setView('error');
-    }
-  }, [client]);
+export interface AppProps {
+  /** Injected for tests; defaults to the real BFF client. */
+  client?: ApiClient;
+}
 
-  useEffect(() => {
-    void detect();
-  }, [detect]);
+export function App({ client: injected }: AppProps = {}): JSX.Element {
+  const client = useMemo(() => injected ?? createApiClient(), [injected]);
+  const queryClient = useQueryClient();
+
+  const stateQuery = useQuery({ queryKey: STATE_KEY, queryFn: () => client.getState() });
+
+  const refetchState = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: STATE_KEY });
+  }, [queryClient]);
 
   const signOut = useCallback(async () => {
     try {
@@ -46,8 +41,21 @@ export function App(): JSX.Element {
     } catch {
       // ignore — we always return to the sign-in screen.
     }
-    setView('login');
-  }, [client]);
+    await queryClient.invalidateQueries({ queryKey: STATE_KEY });
+  }, [client, queryClient]);
+
+  const unauthorized =
+    stateQuery.isError && stateQuery.error instanceof ApiError && stateQuery.error.status === 401;
+
+  const view: View = stateQuery.isPending
+    ? 'loading'
+    : unauthorized
+      ? 'login'
+      : stateQuery.isError
+        ? 'error'
+        : stateQuery.data.mode === 'persistent'
+          ? 'console'
+          : 'bootstrap';
 
   const subtitle =
     view === 'bootstrap'
@@ -70,24 +78,26 @@ export function App(): JSX.Element {
   return (
     <AppShell subtitle={subtitle} headerActions={headerActions}>
       {view === 'loading' ? (
-        <div className="shm-center">
+        <Center mih="50vh">
           <Spinner size="lg" label="Loading manager" />
-        </div>
+        </Center>
       ) : view === 'error' ? (
-        <div className="shm-center">
-          <div className="shm-auth shm-stack shm-stack--4">
+        <Center mih="50vh">
+          <Stack maw={460} w="100%" gap="md">
             <Alert tone="error" title="Cannot reach the manager service">
-              {error}
+              {stateQuery.error instanceof Error
+                ? stateQuery.error.message
+                : 'The manager service is not responding.'}
             </Alert>
-            <Button variant="primary" onClick={() => void detect()}>
+            <Button variant="primary" onClick={refetchState}>
               Try again
             </Button>
-          </div>
-        </div>
+          </Stack>
+        </Center>
       ) : view === 'bootstrap' ? (
         <BootstrapWizard client={client} />
       ) : view === 'login' ? (
-        <LoginForm client={client} onSuccess={() => void detect()} />
+        <LoginForm client={client} onSuccess={refetchState} />
       ) : (
         <OperationsConsole client={client} />
       )}

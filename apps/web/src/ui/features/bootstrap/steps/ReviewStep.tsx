@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
 import { useState } from 'react';
+import { Code, Group, Paper, SimpleGrid, Stack, Text } from '@mantine/core';
 import { Alert, Button, Checkbox, KeyValue, StatusBadge, WizardFrame, type KeyValueRow } from '../../../components';
 import { instanceDir, publicUrlPreview } from '../../../lib/formatting';
 import type { BootstrapController } from '../../../hooks/useBootstrap';
@@ -66,40 +67,50 @@ export function ReviewStep({ ctl }: ReviewStepProps): JSX.Element {
         </Alert>
       ) : null}
 
-      <div className="shm-card shm-card--pad shm-stack shm-stack--3">
-        <span className="shm-eyebrow">Summary</span>
-        <KeyValue rows={summary} />
-      </div>
+      <Paper withBorder radius="md" p="lg">
+        <Stack gap="sm">
+          <Text size="xs" tt="uppercase" fw={700} c="dimmed">
+            Summary
+          </Text>
+          <KeyValue rows={summary} />
+        </Stack>
+      </Paper>
 
-      <div className="shm-grid shm-grid--2">
-        <div className="shm-card shm-card--pad shm-stack shm-stack--3">
-          <span className="shm-eyebrow">Docker services</span>
-          <div className="shm-stack shm-stack--2">
-            {SERVICES.map((s) => (
-              <div key={s} className="shm-row" style={{ gap: 'var(--shm-space-2)' }}>
-                <StatusBadge tone="neutral" dot>
+      <SimpleGrid cols={{ base: 1, sm: 2 }}>
+        <Paper withBorder radius="md" p="lg">
+          <Stack gap="sm">
+            <Text size="xs" tt="uppercase" fw={700} c="dimmed">
+              Docker services
+            </Text>
+            <Group gap="xs">
+              {SERVICES.map((s) => (
+                <StatusBadge key={s} tone="neutral" dot>
                   {s}
                 </StatusBadge>
-              </div>
-            ))}
-          </div>
-        </div>
-        <div className="shm-card shm-card--pad shm-stack shm-stack--3">
-          <span className="shm-eyebrow">Generated paths</span>
-          <KeyValue rows={paths} />
-        </div>
-      </div>
+              ))}
+            </Group>
+          </Stack>
+        </Paper>
+        <Paper withBorder radius="md" p="lg">
+          <Stack gap="sm">
+            <Text size="xs" tt="uppercase" fw={700} c="dimmed">
+              Generated paths
+            </Text>
+            <KeyValue rows={paths} />
+          </Stack>
+        </Paper>
+      </SimpleGrid>
 
       <Alert tone="info" title="About secrets">
         Secrets (database passwords, app keys, the admin password) are generated and stored in restricted files. They are
         never shown in this wizard — the admin password appears once on the success screen.
       </Alert>
 
-      <div className="shm-card shm-card--pad">
+      <Paper withBorder radius="md" p="lg">
         <Checkbox checked={confirmed} onChange={setConfirmed}>
-          I understand this will create Docker resources and write files under <code>{cfg.root || '/opt/selfhelp'}</code>.
+          I understand this will create Docker resources and write files under <Code>{cfg.root || '/opt/selfhelp'}</Code>.
         </Checkbox>
-      </div>
+      </Paper>
     </WizardFrame>
   );
 }

@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
+import { Stack } from '@mantine/core';
 import { Alert, Button, CheckRow, WizardFrame, type CheckStatus } from '../../../components';
 import { CHECK_META } from '../../../lib/wizard-view';
 import type { BootstrapController } from '../../../hooks/useBootstrap';
@@ -35,11 +36,7 @@ export function PreflightStep({ ctl }: PreflightStepProps): JSX.Element {
       Continue
     </Button>
   ) : (
-    <Button
-      variant="primary"
-      onClick={() => void ctl.runCheck(current)}
-      loading={state.runningCheck === current}
-    >
+    <Button variant="primary" onClick={() => void ctl.runCheck(current)} loading={state.runningCheck === current}>
       Run {meta?.title ?? current} check
     </Button>
   );
@@ -57,7 +54,7 @@ export function PreflightStep({ ctl }: PreflightStepProps): JSX.Element {
         </Alert>
       ) : null}
 
-      <div className="shm-stack shm-stack--3">
+      <Stack gap="md">
         {PREFLIGHT.map((c) => {
           const m = CHECK_META[c];
           const result = snap.checks[c];
@@ -73,7 +70,7 @@ export function PreflightStep({ ctl }: PreflightStepProps): JSX.Element {
             />
           );
         })}
-      </div>
+      </Stack>
     </WizardFrame>
   );
 }

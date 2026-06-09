@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
+import { Center, Stack, Text } from '@mantine/core';
 import { Alert, Button, Spinner, WizardStepper } from '../../components';
 import { useBootstrap } from '../../hooks/useBootstrap';
 import type { ApiClient } from '../../lib/api-client';
@@ -28,27 +29,27 @@ export function BootstrapWizard({ client }: BootstrapWizardProps): JSX.Element {
 
   if (state.status === 'loading') {
     return (
-      <div className="shm-center">
-        <div className="shm-stack shm-stack--3" style={{ alignItems: 'center' }}>
+      <Center mih="50vh">
+        <Stack align="center" gap="sm">
           <Spinner size="lg" />
-          <p className="shm-muted">Connecting to the installer…</p>
-        </div>
-      </div>
+          <Text c="dimmed">Connecting to the installer…</Text>
+        </Stack>
+      </Center>
     );
   }
 
   if (state.status === 'error' || !state.snapshot || !effectiveConfig) {
     return (
-      <div className="shm-center">
-        <div className="shm-auth shm-stack shm-stack--4">
+      <Center mih="50vh">
+        <Stack maw={460} w="100%" gap="md">
           <Alert tone="error" title="Cannot reach the installer service">
             {state.loadError ?? 'The manager service is not responding.'}
           </Alert>
           <Button variant="primary" onClick={() => window.location.reload()}>
             Try again
           </Button>
-        </div>
-      </div>
+        </Stack>
+      </Center>
     );
   }
 
@@ -57,10 +58,10 @@ export function BootstrapWizard({ client }: BootstrapWizardProps): JSX.Element {
   const phaseIndex = activePhaseIndex(snapshot.step, state.installing, installed);
 
   return (
-    <div className="shm-stack shm-stack--5">
+    <Stack gap="xl">
       <WizardStepper phases={WIZARD_PHASES} activeIndex={phaseIndex} />
       {renderStep()}
-    </div>
+    </Stack>
   );
 
   function renderStep(): JSX.Element {

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // @vitest-environment jsdom
 import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen } from '../../../test/render';
 import { SuccessStep } from './SuccessStep';
 import { FULL_CONFIG } from '../../../test/fake-client';
 import type { InstallResult, Snapshot } from '../../../lib/types';

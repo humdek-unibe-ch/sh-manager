@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
 import type { ReactNode } from 'react';
-import { Field } from './Field';
+import { TextInput } from '@mantine/core';
 
 export interface TextFieldProps {
   label: string;
@@ -32,31 +32,19 @@ export function TextField({
   suffix,
 }: TextFieldProps): JSX.Element {
   return (
-    <Field label={label} help={help} error={error} required={required}>
-      {({ id, describedBy, invalid }) => {
-        const input = (
-          <input
-            id={id}
-            className="shm-input"
-            type={type}
-            value={value}
-            placeholder={placeholder}
-            inputMode={inputMode}
-            autoComplete={autoComplete}
-            aria-describedby={describedBy}
-            aria-invalid={invalid || undefined}
-            aria-required={required || undefined}
-            onChange={(e) => onChange(e.target.value)}
-          />
-        );
-        if (!suffix) return input;
-        return (
-          <div className="shm-input-group">
-            {input}
-            <span className="shm-input-group__suffix">{suffix}</span>
-          </div>
-        );
-      }}
-    </Field>
+    <TextInput
+      label={label}
+      value={value}
+      onChange={(e) => onChange(e.currentTarget.value)}
+      description={help}
+      error={error}
+      required={required}
+      placeholder={placeholder}
+      type={type}
+      inputMode={inputMode}
+      autoComplete={autoComplete}
+      rightSection={suffix}
+      rightSectionWidth={suffix ? undefined : 0}
+    />
   );
 }

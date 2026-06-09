@@ -8,8 +8,13 @@
  * server status (Docker, connectivity, registry, resources) and the exact
  * operator CLI commands for instance lifecycle actions — it never invents
  * instance data it cannot fetch.
+ *
+ * Reads go through react-query; the per-check "run" is a mutation that writes
+ * the fresh snapshot back into the query cache.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
+import { Center, Group, SimpleGrid, Stack, Text, Title } from '@mantine/core';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Alert,
   Button,
@@ -27,6 +32,7 @@ import { CHECK_META } from '../../lib/wizard-view';
 import type { CheckResult, Snapshot, WizardStepId } from '../../lib/types';
 
 const CHECKS: WizardStepId[] = ['docker', 'internet', 'registry', 'resources'];
+const STATE_KEY = ['manager', 'console', 'state'] as const;
 
 const OPERATOR_COMMANDS: { label: string; command: string }[] = [
   { label: 'Check instance health', command: 'sh-manager instance health <instance-id>' },
@@ -45,47 +51,30 @@ function checkStatus(result: CheckResult | undefined, running: boolean): CheckSt
   return 'ok';
 }
 
+function friendly(err: unknown, fallback: string): string {
+  return err instanceof ApiError ? err.message : fallback;
+}
+
 export interface OperationsConsoleProps {
   client: ApiClient;
 }
 
 export function OperationsConsole({ client }: OperationsConsoleProps): JSX.Element {
-  const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
-  const [running, setRunning] = useState<WizardStepId | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loaded, setLoaded] = useState(false);
+  const queryClient = useQueryClient();
+  const stateQuery = useQuery({ queryKey: STATE_KEY, queryFn: () => client.getState() });
+  const snapshot = stateQuery.data ?? null;
 
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      try {
-        const snap = await client.getState();
-        if (active) setSnapshot(snap);
-      } catch (err) {
-        if (active) setError(err instanceof ApiError ? err.message : 'Could not load server status.');
-      } finally {
-        if (active) setLoaded(true);
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, [client]);
+  const runCheck = useMutation({
+    mutationFn: (step: WizardStepId) => client.runCheck(step),
+    onSuccess: (snap: Snapshot) => queryClient.setQueryData(STATE_KEY, snap),
+  });
+  const runningStep = runCheck.isPending ? (runCheck.variables ?? null) : null;
 
-  const run = useCallback(
-    async (step: WizardStepId) => {
-      setRunning(step);
-      setError(null);
-      try {
-        setSnapshot(await client.runCheck(step));
-      } catch (err) {
-        setError(err instanceof ApiError ? err.message : 'That check could not run.');
-      } finally {
-        setRunning(null);
-      }
-    },
-    [client],
-  );
+  const error = stateQuery.isError
+    ? friendly(stateQuery.error, 'Could not load server status.')
+    : runCheck.isError
+      ? friendly(runCheck.error, 'That check could not run.')
+      : null;
 
   const overall = useMemo<{ tone: BadgeTone; label: string }>(() => {
     if (!snapshot) return { tone: 'pending', label: 'Unknown' };
@@ -96,38 +85,36 @@ export function OperationsConsole({ client }: OperationsConsoleProps): JSX.Eleme
     return { tone: 'ok', label: 'Healthy' };
   }, [snapshot]);
 
-  if (!loaded) {
+  if (stateQuery.isPending) {
     return (
-      <div className="shm-center">
+      <Center mih="40vh">
         <Spinner size="lg" />
-      </div>
+      </Center>
     );
   }
 
   return (
-    <div className="shm-stack shm-stack--5">
-      <div className="shm-row shm-row--between shm-row--wrap">
+    <Stack gap="xl">
+      <Group justify="space-between" align="flex-start" wrap="wrap">
         <div>
-          <h1 className="shm-frame__title" style={{ fontSize: '1.4rem' }}>
-            Server operations
-          </h1>
-          <p className="shm-muted">Live status of this SelfHelp server and the operator actions available to you.</p>
+          <Title order={2}>Server operations</Title>
+          <Text c="dimmed">Live status of this SelfHelp server and the operator actions available to you.</Text>
         </div>
-        <div className="shm-row" style={{ gap: 'var(--shm-space-3)' }}>
+        <Group gap="sm">
           <StatusBadge tone={overall.tone}>{overall.label}</StatusBadge>
           <Button
             variant="secondary"
+            loading={runCheck.isPending}
             onClick={() => {
               void (async () => {
-                for (const c of CHECKS) await run(c);
+                for (const c of CHECKS) await runCheck.mutateAsync(c).catch(() => undefined);
               })();
             }}
-            loading={running !== null}
           >
             Run all checks
           </Button>
-        </div>
-      </div>
+        </Group>
+      </Group>
 
       {error ? (
         <Alert tone="error" title="Something went wrong">
@@ -136,13 +123,13 @@ export function OperationsConsole({ client }: OperationsConsoleProps): JSX.Eleme
       ) : null}
 
       <Card title="Environment status" description="Re-run any check to refresh its status.">
-        <div className="shm-stack shm-stack--3">
+        <Stack gap="md">
           {CHECKS.map((c) => {
             const meta = CHECK_META[c];
             const result = snapshot?.checks[c];
-            const status = checkStatus(result, running === c);
+            const status = checkStatus(result, runningStep === c);
             return (
-              <div key={c} className="shm-row" style={{ gap: 'var(--shm-space-3)', alignItems: 'stretch' }}>
+              <Group key={c} gap="sm" align="stretch" wrap="nowrap">
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <CheckRow
                     status={status}
@@ -152,13 +139,18 @@ export function OperationsConsole({ client }: OperationsConsoleProps): JSX.Eleme
                     fix={meta?.fix}
                   />
                 </div>
-                <Button variant="ghost" onClick={() => void run(c)} loading={running === c} aria-label={`Run ${meta?.title ?? c} check`}>
+                <Button
+                  variant="ghost"
+                  loading={runningStep === c}
+                  onClick={() => void runCheck.mutate(c)}
+                  aria-label={`Run ${meta?.title ?? c} check`}
+                >
                   Run
                 </Button>
-              </div>
+              </Group>
             );
           })}
-        </div>
+        </Stack>
       </Card>
 
       <Card title="Instances" aside={<StatusBadge tone="neutral">CLI-managed</StatusBadge>}>
@@ -166,15 +158,17 @@ export function OperationsConsole({ client }: OperationsConsoleProps): JSX.Eleme
           Listing and updating instances from the web is on the roadmap. For now, use these operator commands on the
           server (replace <code>&lt;instance-id&gt;</code>).
         </EmptyState>
-        <div className="shm-grid shm-grid--2" style={{ marginTop: 'var(--shm-space-4)' }}>
+        <SimpleGrid cols={{ base: 1, sm: 2 }} mt="md">
           {OPERATOR_COMMANDS.map((c) => (
-            <div key={c.label} className="shm-stack shm-stack--2">
-              <span className="shm-field__label">{c.label}</span>
+            <Stack key={c.label} gap={6}>
+              <Text size="sm" fw={500}>
+                {c.label}
+              </Text>
               <CommandPreview value={c.command} label={c.label} />
-            </div>
+            </Stack>
           ))}
-        </div>
+        </SimpleGrid>
       </Card>
-    </div>
+    </Stack>
   );
 }

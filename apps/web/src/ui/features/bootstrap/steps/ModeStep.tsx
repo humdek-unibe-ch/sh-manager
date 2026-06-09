@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
+import { Paper, SimpleGrid } from '@mantine/core';
 import { Alert, Button, ChoiceCard, TextField, WizardFrame } from '../../../components';
 import { STEP_COPY } from '../../../lib/wizard-view';
 import { validateStep } from '../../../../wizard';
@@ -41,7 +42,7 @@ export function ModeStep({ ctl }: ModeStepProps): JSX.Element {
         />
       }
     >
-      <div className="shm-grid shm-grid--2">
+      <SimpleGrid cols={{ base: 1, sm: 2 }}>
         <ChoiceCard
           icon="🖥"
           title="Local Docker test"
@@ -59,9 +60,9 @@ export function ModeStep({ ctl }: ModeStepProps): JSX.Element {
           recommended
           onSelect={() => select('production')}
         />
-      </div>
+      </SimpleGrid>
 
-      <div className="shm-card shm-card--pad">
+      <Paper withBorder radius="md" p="lg">
         <TextField
           label="Server id"
           value={cfg.serverId}
@@ -71,7 +72,7 @@ export function ModeStep({ ctl }: ModeStepProps): JSX.Element {
           error={pickProblem(problems, 'server id')}
           required
         />
-      </div>
+      </Paper>
 
       {cfg.mode === 'production' ? (
         <Alert tone="info" title="Production checklist">

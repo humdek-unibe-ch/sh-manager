@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // @vitest-environment jsdom
 import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { render, screen, userEvent } from '../../test/render';
 import { OperationsConsole } from './OperationsConsole';
 import { makeFakeClient } from '../../test/fake-client';
 

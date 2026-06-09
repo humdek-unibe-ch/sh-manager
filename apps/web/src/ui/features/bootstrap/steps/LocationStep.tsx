@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
+import { Code, Paper } from '@mantine/core';
 import { Alert, Button, TextField, WizardFrame } from '../../../components';
 import { STEP_COPY } from '../../../lib/wizard-view';
 import { validateStep } from '../../../../wizard';
@@ -39,7 +40,7 @@ export function LocationStep({ ctl }: LocationStepProps): JSX.Element {
       }
     >
       {ctl.state.actionError ? <Alert tone="error">{ctl.state.actionError}</Alert> : null}
-      <div className="shm-card shm-card--pad">
+      <Paper withBorder radius="md" p="lg">
         <TextField
           label="Install root"
           value={cfg.root}
@@ -48,10 +49,10 @@ export function LocationStep({ ctl }: LocationStepProps): JSX.Element {
           error={pickProblem(problems, 'root')}
           required
         />
-      </div>
+      </Paper>
       <Alert tone="info" title="One root, many instances">
-        Each instance gets its own subdirectory under <code>{cfg.root || '/opt/selfhelp'}/instances</code>. You can add
-        more instances after the first install.
+        Each instance gets its own subdirectory under <Code>{`${cfg.root || '/opt/selfhelp'}/instances`}</Code>. You can
+        add more instances after the first install.
       </Alert>
     </WizardFrame>
   );

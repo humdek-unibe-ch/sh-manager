@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
-import { useState } from 'react';
+import { Code, CopyButton, Group } from '@mantine/core';
 import { Button } from '../forms/Button';
 
 export interface CommandPreviewProps {
@@ -10,27 +10,22 @@ export interface CommandPreviewProps {
 }
 
 export function CommandPreview({ value, label }: CommandPreviewProps): JSX.Element {
-  const [copied, setCopied] = useState(false);
-
-  async function copy(): Promise<void> {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1600);
-    } catch {
-      // Clipboard may be unavailable (insecure context) — selecting still works.
-      setCopied(false);
-    }
-  }
-
   return (
-    <div className="shm-command">
-      <pre className="shm-command__code" aria-label={label ?? 'command'}>
+    <Group gap="xs" wrap="nowrap" align="stretch">
+      <Code
+        block
+        aria-label={label ?? 'command'}
+        style={{ flex: 1, minWidth: 0, overflowX: 'auto', margin: 0 }}
+      >
         {value}
-      </pre>
-      <Button variant="ghost" onClick={() => void copy()} aria-label={`Copy ${label ?? 'command'}`}>
-        {copied ? 'Copied' : 'Copy'}
-      </Button>
-    </div>
+      </Code>
+      <CopyButton value={value} timeout={1600}>
+        {({ copied, copy }) => (
+          <Button variant="ghost" onClick={copy} aria-label={`Copy ${label ?? 'command'}`}>
+            {copied ? 'Copied' : 'Copy'}
+          </Button>
+        )}
+      </CopyButton>
+    </Group>
   );
 }

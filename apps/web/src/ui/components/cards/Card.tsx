@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
 import type { ReactNode } from 'react';
+import { Card as MantineCard, Group, Text } from '@mantine/core';
 
 export interface CardProps {
   title?: string;
@@ -13,15 +14,19 @@ export interface CardProps {
 
 export function Card({ title, description, aside, raised, children }: CardProps): JSX.Element {
   return (
-    <section className={`shm-card shm-card--pad${raised ? ' shm-card--raised' : ''}`}>
+    <MantineCard withBorder radius="md" padding="lg" shadow={raised ? 'sm' : undefined}>
       {title || aside ? (
-        <div className="shm-row shm-row--between" style={{ marginBottom: description ? 4 : 'var(--shm-space-3)' }}>
-          {title ? <h3 className="shm-card__title">{title}</h3> : <span />}
+        <Group justify="space-between" wrap="nowrap" mb={description ? 4 : 'sm'}>
+          {title ? <Text fw={600}>{title}</Text> : <span />}
           {aside ?? null}
-        </div>
+        </Group>
       ) : null}
-      {description ? <p className="shm-card__desc" style={{ marginBottom: 'var(--shm-space-3)' }}>{description}</p> : null}
+      {description ? (
+        <Text c="dimmed" size="sm" mb="sm">
+          {description}
+        </Text>
+      ) : null}
       {children}
-    </section>
+    </MantineCard>
   );
 }

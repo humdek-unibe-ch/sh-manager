@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
 import type { ReactNode } from 'react';
+import { Group, Stack, Text } from '@mantine/core';
 
 export interface KeyValueRow {
   key: string;
@@ -15,15 +16,22 @@ export interface KeyValueProps {
 /** A compact definition list for review/summary panels. */
 export function KeyValue({ rows }: KeyValueProps): JSX.Element {
   return (
-    <dl className="shm-kv">
+    <Stack gap={6}>
       {rows.map((row) => (
-        <div key={row.key} style={{ display: 'contents' }}>
-          <dt className="shm-kv__k">{row.key}</dt>
-          <dd className={row.mono ? 'shm-kv__v shm-kv__v--mono' : 'shm-kv__v'} style={{ margin: 0 }}>
+        <Group key={row.key} justify="space-between" align="flex-start" wrap="nowrap" gap="md">
+          <Text size="sm" c="dimmed" style={{ flexShrink: 0 }}>
+            {row.key}
+          </Text>
+          <Text
+            size="sm"
+            ta="right"
+            ff={row.mono ? 'monospace' : undefined}
+            style={{ wordBreak: 'break-all' }}
+          >
             {row.value}
-          </dd>
-        </div>
+          </Text>
+        </Group>
       ))}
-    </dl>
+    </Stack>
   );
 }

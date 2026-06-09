@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
+import { Group, List, Paper, Stack, Text } from '@mantine/core';
 import { Alert, Button, WizardFrame } from '../../../components';
 import { STEP_COPY } from '../../../lib/wizard-view';
 import type { BootstrapController } from '../../../hooks/useBootstrap';
@@ -32,24 +33,30 @@ export function ProxyStep({ ctl }: ProxyStepProps): JSX.Element {
         />
       }
     >
-      <div className="shm-card shm-card--pad shm-stack shm-stack--3">
-        <div className="shm-row" style={{ gap: 'var(--shm-space-3)' }}>
-          <span className="shm-choice__icon" aria-hidden="true">
-            🔀
-          </span>
-          <div>
-            <div className="shm-card__title">Traefik router</div>
-            <div className="shm-muted" style={{ fontSize: '0.9rem' }}>
-              One proxy handles routing for every instance on this server.
+      <Paper withBorder radius="md" p="lg">
+        <Stack gap="sm">
+          <Group gap="sm" wrap="nowrap">
+            <Text fz={24} aria-hidden="true">
+              🔀
+            </Text>
+            <div>
+              <Text fw={600}>Traefik router</Text>
+              <Text size="sm" c="dimmed">
+                One proxy handles routing for every instance on this server.
+              </Text>
             </div>
-          </div>
-        </div>
-        <ul className="shm-stack shm-stack--2 shm-muted" style={{ margin: 0, paddingLeft: '1.1em', fontSize: '0.9rem' }}>
-          <li>Routes each instance by its domain or port</li>
-          {isProd ? <li>Obtains and renews TLS certificates automatically</li> : <li>Exposes the instance on its localhost port</li>}
-          <li>Created once and reused by future instances</li>
-        </ul>
-      </div>
+          </Group>
+          <List size="sm" c="dimmed">
+            <List.Item>Routes each instance by its domain or port</List.Item>
+            {isProd ? (
+              <List.Item>Obtains and renews TLS certificates automatically</List.Item>
+            ) : (
+              <List.Item>Exposes the instance on its localhost port</List.Item>
+            )}
+            <List.Item>Created once and reused by future instances</List.Item>
+          </List>
+        </Stack>
+      </Paper>
       <Alert tone="info" title="Nothing to configure here">
         The proxy is set up automatically with safe defaults. Continue when you are ready.
       </Alert>

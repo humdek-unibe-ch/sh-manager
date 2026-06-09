@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
+import { Paper, Stack } from '@mantine/core';
 import { Alert, Button, TextField, WizardFrame } from '../../../components';
 import { STEP_COPY } from '../../../lib/wizard-view';
 import { validateStep } from '../../../../wizard';
@@ -38,24 +39,26 @@ export function AdminStep({ ctl }: AdminStepProps): JSX.Element {
         />
       }
     >
-      <div className="shm-card shm-card--pad shm-stack shm-stack--4">
-        <TextField
-          label="Admin email"
-          type="email"
-          value={cfg.adminEmail ?? ''}
-          onChange={(v) => ctl.patchDraft({ adminEmail: v })}
-          help="Optional. The first administrator account. Leave blank to create it later."
-          placeholder="admin@university.edu"
-          error={pickProblem(problems, 'admin email')}
-        />
-        <TextField
-          label="Admin name"
-          value={cfg.adminName ?? ''}
-          onChange={(v) => ctl.patchDraft({ adminName: v })}
-          help="Optional display name for the first administrator."
-          placeholder="Admin"
-        />
-      </div>
+      <Paper withBorder radius="md" p="lg">
+        <Stack gap="md">
+          <TextField
+            label="Admin email"
+            type="email"
+            value={cfg.adminEmail ?? ''}
+            onChange={(v) => ctl.patchDraft({ adminEmail: v })}
+            help="Optional. The first administrator account. Leave blank to create it later."
+            placeholder="admin@university.edu"
+            error={pickProblem(problems, 'admin email')}
+          />
+          <TextField
+            label="Admin name"
+            value={cfg.adminName ?? ''}
+            onChange={(v) => ctl.patchDraft({ adminName: v })}
+            help="Optional display name for the first administrator."
+            placeholder="Admin"
+          />
+        </Stack>
+      </Paper>
 
       <Alert tone="success" title="Passwords are never entered here">
         The administrator password is generated securely during installation and shown to you once on the success

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
 import type { ReactNode } from 'react';
+import { Group, Stack, Text, Title } from '@mantine/core';
 
 export interface WizardFrameProps {
   eyebrow?: string;
@@ -13,14 +14,24 @@ export interface WizardFrameProps {
 
 export function WizardFrame({ eyebrow, title, lead, children, footer }: WizardFrameProps): JSX.Element {
   return (
-    <div className="shm-frame">
-      <header className="shm-frame__head">
-        {eyebrow ? <span className="shm-eyebrow">{eyebrow}</span> : null}
-        <h1 className="shm-frame__title">{title}</h1>
-        {lead ? <p className="shm-frame__lead">{lead}</p> : null}
-      </header>
-      <div className="shm-frame__body">{children}</div>
-      {footer ? <div className="shm-frame__footer">{footer}</div> : null}
-    </div>
+    <Stack gap="lg">
+      <Stack gap={4}>
+        {eyebrow ? (
+          <Text size="xs" tt="uppercase" fw={700} c="dimmed">
+            {eyebrow}
+          </Text>
+        ) : null}
+        <Title order={2}>{title}</Title>
+        {lead ? <Text c="dimmed">{lead}</Text> : null}
+      </Stack>
+
+      <Stack gap="md">{children}</Stack>
+
+      {footer ? (
+        <Group justify="space-between" mt="sm">
+          {footer}
+        </Group>
+      ) : null}
+    </Stack>
   );
 }

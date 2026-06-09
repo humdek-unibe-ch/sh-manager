@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // @vitest-environment jsdom
 import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { render, screen, userEvent } from '../../test/render';
 import { BootstrapWizard } from './BootstrapWizard';
 import { makeFakeClient } from '../../test/fake-client';
 
@@ -72,5 +71,16 @@ describe('BootstrapWizard flow', () => {
     render(<BootstrapWizard client={makeFakeClient({ startAt: 'domain', config: { mode: 'local', domain: undefined, localPort: 8080 } })} />);
     expect(await screen.findByLabelText(/localhost port/i)).toBeInTheDocument();
     expect(screen.queryByText(/DNS is validated before install/i)).toBeNull();
+  });
+
+  it('keeps Continue disabled until a required field becomes valid', async () => {
+    const user = userEvent.setup();
+    render(<BootstrapWizard client={makeFakeClient({ startAt: 'mode', config: { serverId: '' } })} />);
+
+    const continueBtn = await screen.findByRole('button', { name: /^continue$/i });
+    expect(continueBtn).toBeDisabled();
+
+    await user.type(screen.getByLabelText(/server id/i), 'research-vm-1');
+    expect(continueBtn).toBeEnabled();
   });
 });

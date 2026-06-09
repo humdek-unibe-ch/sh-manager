@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
-import { useId, useState } from 'react';
+import { Box, Code, Group, Loader, Spoiler, Text, ThemeIcon } from '@mantine/core';
 import { redactSecrets } from '../../lib/formatting';
 
 export type CheckStatus = 'pending' | 'running' | 'ok' | 'warning' | 'error';
@@ -33,45 +33,45 @@ const LABEL: Record<CheckStatus, string> = {
   error: 'Failed',
 };
 
+const COLOR: Record<CheckStatus, string> = {
+  pending: 'gray',
+  running: 'blue',
+  ok: 'teal',
+  warning: 'yellow',
+  error: 'red',
+};
+
 export function CheckRow({ status, title, description, detail, fix, technical }: CheckRowProps): JSX.Element {
-  const [open, setOpen] = useState(false);
-  const detailId = useId();
-
   return (
-    <div className="shm-check-row">
-      <div className={`shm-check-row__icon shm-check-row__icon--${status}`} aria-hidden="true">
-        {status === 'running' ? <span className="shm-spinner" /> : ICON[status]}
-      </div>
-      <div className="shm-check-row__body">
-        <div className="shm-row shm-row--between">
-          <span className="shm-check-row__title">{title}</span>
-          <span className="shm-subtle" style={{ fontSize: '0.78rem', fontWeight: 600 }}>
+    <Group align="flex-start" wrap="nowrap" gap="sm">
+      <ThemeIcon color={COLOR[status]} variant="light" radius="xl" size="md" aria-hidden="true">
+        {status === 'running' ? <Loader size="xs" color={COLOR[status]} /> : <span>{ICON[status]}</span>}
+      </ThemeIcon>
+      <Box style={{ flex: 1, minWidth: 0 }}>
+        <Group justify="space-between" wrap="nowrap" gap="sm">
+          <Text fw={600}>{title}</Text>
+          <Text size="xs" fw={600} c="dimmed">
             {LABEL[status]}
-          </span>
-        </div>
-        <div className="shm-check-row__detail">{detail ? redactSecrets(detail) : description}</div>
+          </Text>
+        </Group>
+        <Text size="sm" c="dimmed">
+          {detail ? redactSecrets(detail) : description}
+        </Text>
 
-        {status === 'error' && fix ? <div className="shm-check-row__fix">Suggested fix: {fix}</div> : null}
+        {status === 'error' && fix ? (
+          <Text size="sm" c="red" mt={4}>
+            Suggested fix: {fix}
+          </Text>
+        ) : null}
 
         {technical ? (
-          <div className="shm-disclosure">
-            <button
-              type="button"
-              className="shm-disclosure__btn"
-              aria-expanded={open}
-              aria-controls={detailId}
-              onClick={() => setOpen((v) => !v)}
-            >
-              {open ? '▾' : '▸'} {open ? 'Hide technical details' : 'Show technical details'}
-            </button>
-            {open ? (
-              <pre id={detailId} className="shm-command__code" style={{ marginTop: 8, whiteSpace: 'pre-wrap' }}>
-                {redactSecrets(technical)}
-              </pre>
-            ) : null}
-          </div>
+          <Spoiler maxHeight={0} showLabel="Show technical details" hideLabel="Hide technical details" mt={4}>
+            <Code block style={{ whiteSpace: 'pre-wrap' }}>
+              {redactSecrets(technical)}
+            </Code>
+          </Spoiler>
         ) : null}
-      </div>
-    </div>
+      </Box>
+    </Group>
   );
 }
