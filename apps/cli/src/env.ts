@@ -6,7 +6,7 @@
  * host resource probing. The pure decision logic lives in @shm/core and the
  * CLI actions; this module is the boundary to the operating system + network.
  */
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { resolve4, resolve6 } from 'node:dns/promises';
 import { createServer } from 'node:net';
 import { readFile, statfs } from 'node:fs/promises';
@@ -97,7 +97,14 @@ export function realDeps(root: string, trustedKeys: TrustedKeysFile): ActionDeps
     }),
     probeHealth: async (publicUrl, apiPrefix): Promise<ServiceProbeResult[]> => {
       const probes: ServiceProbeResult[] = [];
-      const healthUrl = `${publicUrl}${apiPrefix}/cms-api/v1/health`;
+      // `apiPrefix` is the BFF-relative prefix (`/api`). The Next.js catch-all
+      // proxy (`/api/[...path]`) RE-ADDS the Symfony API prefix (`/cms-api/v1`)
+      // to whatever follows it, exactly like every browser call (`/api/auth/login`
+      // -> upstream `/cms-api/v1/auth/login`). So the health probe must use the
+      // BFF-relative `/health`; the BFF maps it to the backend's
+      // `/cms-api/v1/health`. Appending `/cms-api/v1/health` here instead would
+      // double the prefix (`/cms-api/v1/cms-api/v1/health`) and 404 the probe.
+      const healthUrl = `${publicUrl}${apiPrefix}/health`;
       try {
         const res = await fetch(healthUrl);
         probes.push({ service: 'backend', ok: res.ok, detail: `HTTP ${res.status}` });
@@ -141,6 +148,55 @@ export function realDeps(root: string, trustedKeys: TrustedKeysFile): ActionDeps
       for (const name of volumeNames) {
         await execFileAsync('docker', ['volume', 'rm', name]);
       }
+    },
+    extractVolume: async (tgz, volumeName): Promise<void> => {
+      const dir = path.dirname(tgz);
+      const base = path.basename(tgz);
+      // Mounting a named volume auto-creates it. Replace any existing contents
+      // first so a same-instance restore does not leave stale files behind.
+      await execFileAsync('docker', [
+        'run',
+        '--rm',
+        '-v',
+        `${volumeName}:/data`,
+        '-v',
+        `${dir}:/backup:ro`,
+        'busybox',
+        'sh',
+        '-lc',
+        `rm -rf /data/* /data/.[!.]* /data/..?* 2>/dev/null; tar xzf /backup/${base} -C /data`,
+      ]);
+    },
+    copyVolume: async (sourceVolume, destVolume): Promise<void> => {
+      await execFileAsync('docker', [
+        'run',
+        '--rm',
+        '-v',
+        `${sourceVolume}:/from:ro`,
+        '-v',
+        `${destVolume}:/to`,
+        'busybox',
+        'sh',
+        '-lc',
+        'cp -a /from/. /to/',
+      ]);
+    },
+    importDatabase: async (instanceDir, sqlFile): Promise<void> => {
+      const sql = await readFile(sqlFile);
+      await new Promise<void>((resolveImport, rejectImport) => {
+        const child = spawn(
+          'docker',
+          ['compose', 'exec', '-T', 'mysql', 'sh', '-lc', 'exec mysql -uroot -p"$MYSQL_ROOT_PASSWORD"'],
+          { cwd: instanceDir, stdio: ['pipe', 'inherit', 'inherit'] },
+        );
+        child.on('error', rejectImport);
+        child.on('close', (code) =>
+          code === 0
+            ? resolveImport()
+            : rejectImport(new Error(`Database import exited with code ${code ?? 'null'}.`)),
+        );
+        child.stdin?.end(sql);
+      });
     },
     resolveDns: async (host): Promise<{ a: string[]; aaaa: string[] }> => {
       const a = await resolve4(host).catch(() => [] as string[]);

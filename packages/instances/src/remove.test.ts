@@ -66,6 +66,7 @@ describe('planRemove', () => {
       'selfhelp_website1_mysql_data',
       'selfhelp_website1_uploads',
       'selfhelp_website1_plugin_artifacts',
+      'selfhelp_website1_plugin_artifacts_public',
     ]);
   });
 

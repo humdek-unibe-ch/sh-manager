@@ -58,6 +58,15 @@ describe('buildInstanceCompose (production)', () => {
     expect(volumes.mysql_data!.name).toBe('selfhelp_website1_mysql_data');
   });
 
+  it('trusts function creators so the baseline migration can install routines as the app user', () => {
+    // Regression: without this flag MySQL 8.x (binary logging on by default)
+    // rejects the baseline's CREATE FUNCTION/PROCEDURE statements for the
+    // non-root app user with error 1419, breaking the install migration.
+    expect((svc(doc, 'mysql').command as string[]).join(' ')).toContain(
+      '--log-bin-trust-function-creators=1',
+    );
+  });
+
   it('configures log rotation for every long-running service', () => {
     for (const name of ['frontend', 'backend', 'worker', 'scheduler', 'mysql', 'redis', 'mercure']) {
       const logging = svc(doc, name).logging as { driver: string; options: Record<string, string> };
@@ -82,6 +91,22 @@ describe('buildInstanceCompose (production)', () => {
     for (const name of ['backend', 'worker', 'scheduler']) {
       expect(svc(doc, name).volumes).toContain('./secrets/jwt:/app/config/jwt:ro');
     }
+  });
+
+  it('mounts persistent uploads + plugin-artifact volumes on every Symfony service', () => {
+    for (const name of ['backend', 'worker', 'scheduler']) {
+      const volumes = svc(doc, name).volumes as string[];
+      expect(volumes).toContain('uploads:/app/public/uploads');
+      expect(volumes).toContain('plugin_artifacts:/app/var/plugins');
+      expect(volumes).toContain('plugin_artifacts_public:/app/public/plugin-artifacts');
+    }
+  });
+
+  it('declares per-instance named volumes for uploads + both plugin-artifact paths', () => {
+    const volumes = doc.volumes as Record<string, { name: string }>;
+    expect(volumes.uploads!.name).toBe('selfhelp_website1_uploads');
+    expect(volumes.plugin_artifacts!.name).toBe('selfhelp_website1_plugin_artifacts');
+    expect(volumes.plugin_artifacts_public!.name).toBe('selfhelp_website1_plugin_artifacts_public');
   });
 
   it('enforces a Redis password without inlining it', () => {

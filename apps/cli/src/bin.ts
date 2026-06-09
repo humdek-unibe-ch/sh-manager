@@ -174,6 +174,7 @@ instance
   .option('--channel <channel>', 'stable|beta|nightly')
   .option('--version <version>', "target core version or 'latest'")
   .option('--accept-migration-risk', 'accept destructive migration risk', false)
+  .option('--approve-mysql-major', 'approve a one-way MySQL major-version upgrade required by the target', false)
   .action(async (id: string, opts) => {
     try {
       const d = await deps(program.opts().root as string);
@@ -182,6 +183,7 @@ instance
         channel: opts.channel as ReleaseChannel | undefined,
         target: opts.version,
         acceptMigrationRisk: opts.acceptMigrationRisk,
+        approveMysqlMajor: opts.approveMysqlMajor,
       });
       if (res.plan.preflight) console.log(formatPreflight(res.plan.preflight));
       else console.log(`Update status: ${res.plan.status} - ${res.plan.reasons.join('; ')}`);
@@ -241,11 +243,11 @@ instance
 
 instance
   .command('restore <id> <backupId>')
-  .description('Validate a backup and show the restore plan; --apply materializes the secret policy')
+  .description('Validate a backup and show the restore plan; --apply executes the restore (DB + volumes)')
   .option('--mode <mode>', 'same_instance|restore_as_clone', 'same_instance')
   .option('--new-domain <domain>', 'new domain (restore_as_clone)')
   .option('--disaster-recovery-import', 'allow importing a backup from a different instance', false)
-  .option('--apply', 'materialize the restore secret policy on disk (fresh secrets for restore_as_clone)', false)
+  .option('--apply', 'execute the restore: stop, restore DB + volumes, migrate if needed, health-check', false)
   .action(async (id: string, backupId: string, opts) => {
     try {
       const d = await deps(program.opts().root as string);
@@ -260,12 +262,14 @@ instance
         process.exit(1);
       }
       console.log(formatSteps(`Restore plan for ${id} <- ${backupId} (${res.plan.mode}):`, res.plan.steps));
-      if (opts.apply) {
+      if (opts.apply && res.executed) {
         console.log(
           res.secretsRegenerated
             ? `Fresh secrets written: ${res.secretsWritten?.length ?? 0} files (source secrets never reused).`
             : 'Same-instance restore: existing secrets preserved in place.',
         );
+        if (res.migrated) console.log('Ran forward migrations (restored DB head differed from running code).');
+        if (res.health) console.log(formatHealth(res.health));
       }
     } catch (err) {
       fail(err);
@@ -274,25 +278,28 @@ instance
 
 instance
   .command('clone <source> <target>')
-  .description('Show the clone plan for creating <target> from <source>; --apply writes fresh target secrets')
+  .description('Show the clone plan for creating <target> from <source>; --apply builds + populates the clone')
   .requiredOption('--domain <domain>', 'new domain for the clone')
+  .option('--target-local-port <port>', 'published localhost port (cloning a local instance)', (v) => Number(v))
   .option('--no-preserve-versions', 'resolve latest compatible versions instead of pinning the source lock')
   .option('--no-uploads', 'do not copy uploads')
   .option('--no-plugins', 'do not copy plugin artifacts')
-  .option('--apply', 'materialize fresh, isolated secrets for the target on disk', false)
+  .option('--apply', 'execute the clone: fresh secrets, copy DB + volumes, bring up, health-check', false)
   .action(async (source: string, target: string, opts) => {
     try {
       const d = await deps(program.opts().root as string);
       const res = await instanceClone(d, source, target, {
         targetDomain: opts.domain,
+        ...(opts.targetLocalPort !== undefined ? { targetLocalPort: opts.targetLocalPort as number } : {}),
         preserveVersions: opts.preserveVersions,
         copyUploads: opts.uploads,
         copyPluginArtifacts: opts.plugins,
         apply: opts.apply,
       });
       console.log(formatSteps(`Clone plan ${source} -> ${target} (${res.plan.targetDomain}):`, res.plan.steps));
-      if (opts.apply) {
+      if (opts.apply && res.executed) {
         console.log(`Fresh secrets written for ${target}: ${res.secretsWritten?.length ?? 0} files (source never copied).`);
+        if (res.health) console.log(formatHealth(res.health));
       }
     } catch (err) {
       fail(err);
@@ -338,25 +345,27 @@ instance
     }
   });
 
-const safeMode = instance.command('safe-mode').description('Toggle plugin safe-mode for an instance');
+const safeMode = instance
+  .command('safe-mode')
+  .description('Toggle system safe mode (boot backend with core bundles only — no plugins) for an instance');
 safeMode
   .command('enable <id>')
-  .description('Enable plugin safe-mode')
+  .description('Enable system safe mode (no plugins load on next boot)')
   .action(async (id: string) => {
     try {
       await instanceSafeMode(await deps(program.opts().root as string), id, true);
-      console.log(`Safe-mode enabled for ${id}.`);
+      console.log(`Safe mode enabled for ${id}.`);
     } catch (err) {
       fail(err);
     }
   });
 safeMode
   .command('disable <id>')
-  .description('Disable plugin safe-mode')
+  .description('Disable system safe mode (plugins load again)')
   .action(async (id: string) => {
     try {
       await instanceSafeMode(await deps(program.opts().root as string), id, false);
-      console.log(`Safe-mode disabled for ${id}.`);
+      console.log(`Safe mode disabled for ${id}.`);
     } catch (err) {
       fail(err);
     }

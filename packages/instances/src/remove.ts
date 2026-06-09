@@ -151,7 +151,12 @@ export function planRemove(req: RemoveRequest, inventory: ServerInventory, root:
   }
 
   const deleteVolumes = req.deleteVolumes
-    ? [`${composeProject}_mysql_data`, `${composeProject}_uploads`, `${composeProject}_plugin_artifacts`]
+    ? [
+        `${composeProject}_mysql_data`,
+        `${composeProject}_uploads`,
+        `${composeProject}_plugin_artifacts`,
+        `${composeProject}_plugin_artifacts_public`,
+      ]
     : [];
   const preserveBackups = req.deleteBackups !== true;
 

@@ -60,7 +60,7 @@ sh-manager instance restore ${id} <backupId>
 
 ## Health endpoint
 
-- Backend readiness: \`${manifest.routing.publicFrontendUrl}${manifest.routing.browserApiPrefix}/cms-api/v1/health\` (via the BFF)
+- Backend readiness: \`${manifest.routing.publicFrontendUrl}${manifest.routing.browserApiPrefix}/health\` (via the BFF, which maps it to the backend's \`/cms-api/v1/health\`)
 
 ## Update notes
 

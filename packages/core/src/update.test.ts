@@ -3,7 +3,15 @@
 import { describe, expect, it } from 'vitest';
 import type { CoreRelease, FrontendRelease, PluginRelease } from '@shm/schemas';
 import { RecordingComposeRunner } from '@shm/docker';
-import { executeUpdate, planUpdate, type UpdatePlan } from './update.js';
+import {
+  evaluateMysqlMajorUpgrade,
+  executeUpdate,
+  imageMajor,
+  planUpdate,
+  resolveTargetRuntimeImages,
+  type UpdatePlan,
+} from './update.js';
+import type { RuntimeServicePolicy } from '@shm/schemas';
 import type { PreflightResourceFacts } from './preflight.js';
 import type { ApprovedUpdate } from './instance-scope.js';
 import type { HealthReport } from './health.js';
@@ -121,12 +129,13 @@ describe('executeUpdate', () => {
   const healthy: HealthReport = { instanceId: 'website1', overall: 'healthy', services: [], checkedAt: 'now' };
   const unhealthy: HealthReport = { instanceId: 'website1', overall: 'unhealthy', services: [], checkedAt: 'now' };
 
-  it('runs backup -> pull -> up -> migrate -> health in order', async () => {
+  it('runs backup -> snapshot -> pull -> up -> migrate -> health in order', async () => {
     const runner = new RecordingComposeRunner();
     const order: string[] = [];
     const report = await executeUpdate(approved, okPlan(), {
       runner, instanceDir: '/tmp/website1',
       takeBackup: async () => { order.push('backup'); return { backupId: 'backup-1' }; },
+      snapshot: async () => { order.push('snapshot'); },
       applyArtifacts: async () => { order.push('apply'); },
       runMigrations: async () => { order.push('migrate'); },
       checkHealth: async () => { order.push('health'); return healthy; },
@@ -134,8 +143,46 @@ describe('executeUpdate', () => {
     });
     expect(report.ok).toBe(true);
     expect(report.rolledBack).toBe(false);
-    expect(order).toEqual(['backup', 'apply', 'migrate', 'health']);
+    expect(order).toEqual(['backup', 'snapshot', 'apply', 'migrate', 'health']);
     expect(runner.calls.map((c) => c.args[0])).toEqual(['pull', 'up']);
+  });
+
+  it('snapshots before mutating and aborts (no pull) when the snapshot fails', async () => {
+    const runner = new RecordingComposeRunner();
+    let applied = false;
+    const report = await executeUpdate(approved, okPlan(), {
+      runner, instanceDir: '/tmp/website1',
+      takeBackup: async () => ({ backupId: 'backup-1' }),
+      snapshot: async () => { throw new Error('snap failed'); },
+      applyArtifacts: async () => { applied = true; },
+      runMigrations: async () => undefined,
+      checkHealth: async () => healthy,
+      rollback: async () => undefined,
+    });
+    expect(report.ok).toBe(false);
+    expect(report.rolledBack).toBe(false);
+    expect(applied).toBe(false);
+    expect(runner.calls).toHaveLength(0);
+  });
+
+  it('rolls back the snapshot on a pre-migration failure and does not require manual restore', async () => {
+    const runner = new RecordingComposeRunner();
+    const order: string[] = [];
+    let rollbackCtx: { backupId: string; migrated: boolean; destructive: boolean } | null = null;
+    const report = await executeUpdate(approved, okPlan(), {
+      runner, instanceDir: '/tmp/website1',
+      takeBackup: async () => { order.push('backup'); return { backupId: 'backup-1' }; },
+      snapshot: async () => { order.push('snapshot'); },
+      applyArtifacts: async () => { order.push('apply'); throw new Error('apply boom'); },
+      runMigrations: async () => { order.push('migrate'); },
+      checkHealth: async () => healthy,
+      rollback: async (ctx) => { rollbackCtx = ctx; order.push('rollback'); },
+    });
+    expect(order).toEqual(['backup', 'snapshot', 'apply', 'rollback']);
+    expect(report.ok).toBe(false);
+    expect(report.rolledBack).toBe(true);
+    expect(report.requiresManualRestore).toBeUndefined();
+    expect(rollbackCtx).toMatchObject({ backupId: 'backup-1', migrated: false });
   });
 
   it('rolls back when health fails after the update', async () => {
@@ -144,6 +191,7 @@ describe('executeUpdate', () => {
     const report = await executeUpdate(approved, okPlan(), {
       runner, instanceDir: '/tmp/website1',
       takeBackup: async () => ({ backupId: 'backup-1' }),
+      snapshot: async () => undefined,
       applyArtifacts: async () => undefined,
       runMigrations: async () => undefined,
       checkHealth: async () => unhealthy,
@@ -154,12 +202,120 @@ describe('executeUpdate', () => {
     expect(rolledBackTo).toBe('backup-1');
   });
 
+  it('flags a manual restore when a destructive migration fails', async () => {
+    const destructivePlan = planUpdate({
+      instanceId: 'website1', currentVersion: '1.4.0',
+      coreReleases: [mkCore('1.5.0', { database: { migrationRange: 'V1..V3', destructive: true, requiresBackup: true, manualConfirmationRequired: true } })],
+      frontendReleases: [mkFrontend('1.5.0', '>=1.5.0 <1.6.0')], pluginReleases: [], installedPlugins: [], resources,
+    });
+    let rollbackCtx: { migrated: boolean; destructive: boolean } | null = null;
+    const report = await executeUpdate(approved, destructivePlan, {
+      runner: new RecordingComposeRunner(), instanceDir: '/tmp/website1',
+      takeBackup: async () => ({ backupId: 'backup-1' }),
+      snapshot: async () => undefined,
+      applyArtifacts: async () => undefined,
+      runMigrations: async () => { throw new Error('migration boom'); },
+      checkHealth: async () => healthy,
+      rollback: async (ctx) => { rollbackCtx = ctx; },
+    });
+    expect(report.ok).toBe(false);
+    expect(report.rolledBack).toBe(true);
+    expect(report.requiresManualRestore).toBe(true);
+    expect(rollbackCtx).toMatchObject({ migrated: true, destructive: true });
+  });
+
+  it('enters maintenance + stops traffic producers before mutating, re-asserts after up, and exits only after health', async () => {
+    const runner = new RecordingComposeRunner();
+    const order: string[] = [];
+    let stopped: readonly string[] = [];
+    const report = await executeUpdate(approved, okPlan(), {
+      runner, instanceDir: '/tmp/website1',
+      takeBackup: async () => { order.push('backup'); return { backupId: 'backup-1' }; },
+      snapshot: async () => { order.push('snapshot'); },
+      enterMaintenance: async () => { order.push('enter'); },
+      stopServices: async (names) => { stopped = names; order.push(`stop:${names.join(',')}`); },
+      applyArtifacts: async () => { order.push('apply'); },
+      runMigrations: async () => { order.push('migrate'); },
+      checkHealth: async () => { order.push('health'); return healthy; },
+      exitMaintenance: async () => { order.push('exit'); },
+      rollback: async () => { order.push('rollback'); },
+    });
+    expect(report.ok).toBe(true);
+    expect(stopped).toEqual(['frontend', 'worker', 'scheduler']);
+    // enter (old backend) -> stop -> apply -> enter (new backend) -> migrate -> health -> exit
+    expect(order).toEqual([
+      'backup', 'snapshot', 'enter', 'stop:frontend,worker,scheduler', 'apply', 'enter', 'migrate', 'health', 'exit',
+    ]);
+    expect(order.indexOf('exit')).toBeGreaterThan(order.indexOf('health'));
+  });
+
+  it('clears maintenance even when the update fails and rolls back', async () => {
+    const order: string[] = [];
+    const report = await executeUpdate(approved, okPlan(), {
+      runner: new RecordingComposeRunner(), instanceDir: '/tmp/website1',
+      takeBackup: async () => ({ backupId: 'backup-1' }),
+      snapshot: async () => undefined,
+      enterMaintenance: async () => { order.push('enter'); },
+      stopServices: async () => { order.push('stop'); },
+      applyArtifacts: async () => { throw new Error('apply boom'); },
+      runMigrations: async () => undefined,
+      checkHealth: async () => healthy,
+      exitMaintenance: async () => { order.push('exit'); },
+      rollback: async () => { order.push('rollback'); },
+    });
+    expect(report.ok).toBe(false);
+    expect(report.rolledBack).toBe(true);
+    // maintenance is always cleared after rollback
+    expect(order).toEqual(['enter', 'stop', 'rollback', 'exit']);
+  });
+
+  it('resolves runtime images from the target core, falling back to current images', () => {
+    const current = { mysql: 'mysql:8.4', redis: 'redis:7.2', mercure: 'dunglas/mercure:0.18' };
+    // No runtime policy -> keep current images.
+    expect(resolveTargetRuntimeImages(undefined, current)).toEqual(current);
+    // Policy present -> use its recommended images.
+    const runtime: RuntimeServicePolicy = {
+      mysql: { supportedVersions: '>=8.0.0 <10.0.0', recommendedImage: 'mysql:9.0' },
+      redis: { supportedVersions: '>=7.0.0 <8.0.0', recommendedImage: 'redis:7.4' },
+      mercure: { supportedVersions: '>=0.15.0 <1.0.0', recommendedImage: 'dunglas/mercure:0.18' },
+    };
+    expect(resolveTargetRuntimeImages(runtime, current)).toEqual({
+      mysql: 'mysql:9.0', redis: 'redis:7.4', mercure: 'dunglas/mercure:0.18',
+    });
+  });
+
+  it('parses the major version from an image reference', () => {
+    expect(imageMajor('mysql:8.4')).toBe(8);
+    expect(imageMajor('mysql:9.0.1')).toBe(9);
+    expect(imageMajor('dunglas/mercure:0.18')).toBe(0);
+    expect(imageMajor('mysql:8.4@sha256:abc')).toBe(8);
+    expect(imageMajor('mysql')).toBeNull();
+  });
+
+  it('flags a MySQL major upgrade only when the policy requires approval', () => {
+    const requireApproval: RuntimeServicePolicy = {
+      mysql: { supportedVersions: '>=8.0.0 <10.0.0', recommendedImage: 'mysql:9.0', majorUpgradeRequiresManualApproval: true },
+      redis: { supportedVersions: '*', recommendedImage: 'redis:7.2' },
+      mercure: { supportedVersions: '*', recommendedImage: 'dunglas/mercure:0.18' },
+    };
+    const major = evaluateMysqlMajorUpgrade(requireApproval, 'mysql:8.4', 'mysql:9.0');
+    expect(major).toMatchObject({ isMajorUpgrade: true, requiresApproval: true, fromMajor: 8, toMajor: 9 });
+
+    // Same major -> not an upgrade, no approval.
+    const minor = evaluateMysqlMajorUpgrade(requireApproval, 'mysql:8.0', 'mysql:8.4');
+    expect(minor).toMatchObject({ isMajorUpgrade: false, requiresApproval: false });
+
+    // Major jump but policy does not require approval.
+    const noPolicy = evaluateMysqlMajorUpgrade(undefined, 'mysql:8.4', 'mysql:9.0');
+    expect(noPolicy).toMatchObject({ isMajorUpgrade: true, requiresApproval: false });
+  });
+
   it('refuses to execute a blocked plan', async () => {
     const blocked: UpdatePlan = { ...okPlan(), status: 'blocked' };
     await expect(
       executeUpdate(approved, blocked, {
         runner: new RecordingComposeRunner(), instanceDir: '/tmp/x',
-        takeBackup: async () => ({ backupId: 'b' }), applyArtifacts: async () => undefined,
+        takeBackup: async () => ({ backupId: 'b' }), snapshot: async () => undefined, applyArtifacts: async () => undefined,
         runMigrations: async () => undefined, checkHealth: async () => healthy, rollback: async () => undefined,
       }),
     ).rejects.toThrow(/blocked/i);

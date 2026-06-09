@@ -13,6 +13,8 @@ import type {
   FrontendRelease,
   PluginRelease,
   PreflightOption,
+  ReleaseChannel,
+  RuntimeServicePolicy,
   SecurityAdvisory,
   UpdatePreflightResult,
 } from '@shm/schemas';
@@ -32,7 +34,7 @@ export type UpdateStatus = 'ok' | 'warning' | 'blocked' | 'up_to_date';
 export interface UpdatePlanInput {
   instanceId: string;
   currentVersion: string;
-  channel?: 'stable' | 'beta' | 'nightly';
+  channel?: ReleaseChannel;
   target?: 'latest' | string;
   coreReleases: CoreRelease[];
   frontendReleases: FrontendRelease[];
@@ -168,14 +170,55 @@ function buildSteps(core: CoreRelease, frontend: FrontendRelease | null): string
 // Execution
 // ---------------------------------------------------------------------------
 
+export interface UpdateRollbackContext {
+  backupId: string;
+  reason: string;
+  /** True when database migrations were attempted before the failure. */
+  migrated: boolean;
+  /** True when the target's migrations were flagged destructive. */
+  destructive: boolean;
+}
+
+/**
+ * Traffic-producing services taken offline during the maintenance window. The
+ * backend + mysql stay up so the instance can serve a clean 503 (and the Manager
+ * loop, health probe, auth, and admin.system routes stay reachable) while the
+ * stack is replaced and migrated.
+ */
+export const MAINTENANCE_STOP_SERVICES = ['frontend', 'worker', 'scheduler'] as const;
+
 export interface UpdateExecutionDeps {
   runner: ComposeRunner;
   instanceDir: string;
   takeBackup: () => Promise<{ backupId: string }>;
+  /**
+   * Capture the pre-update instance state (compose.yaml, manifest, lock, image
+   * digests, migration head). Called AFTER the backup and BEFORE any mutation
+   * so a failure can be rolled back to exactly the prior config. A failure here
+   * aborts the update before anything is mutated.
+   */
+  snapshot: () => Promise<void>;
   applyArtifacts: () => Promise<void>;
   runMigrations: () => Promise<void>;
   checkHealth: () => Promise<HealthReport>;
-  rollback: (ctx: { backupId: string; reason: string }) => Promise<void>;
+  /**
+   * Restore the snapshot captured by {@link snapshot} (previous config +
+   * containers). Data is only truly rolled back when `migrated` is false; once
+   * destructive migrations have run the caller must restore from the backup.
+   */
+  rollback: (ctx: UpdateRollbackContext) => Promise<void>;
+  /**
+   * Turn the backend's maintenance gate on (clean 503 for normal traffic). Called
+   * once before stopping the traffic producers and re-asserted after the stack is
+   * recreated (the lock lives in the backend container's ephemeral filesystem, so
+   * it must be re-set on the fresh container to cover the migrate + health window).
+   * Optional: omitted in unit tests that do not exercise the maintenance window.
+   */
+  enterMaintenance?: () => Promise<void>;
+  /** Turn the maintenance gate off. Only called on the success path after health passes (and best-effort during rollback so the instance never stays stuck in maintenance). */
+  exitMaintenance?: () => Promise<void>;
+  /** Stop the given services (`docker compose stop <names>`) without removing them or any volume. */
+  stopServices?: (names: readonly string[]) => Promise<void>;
   now?: () => string;
 }
 
@@ -191,6 +234,11 @@ export interface UpdateExecutionReport {
   targetVersion: string;
   ok: boolean;
   rolledBack: boolean;
+  /**
+   * Set when rollback only restored configuration but data must still be
+   * recovered from the backup (failure after destructive migrations ran).
+   */
+  requiresManualRestore?: boolean;
   backupId?: string;
   steps: UpdateStepResult[];
 }
@@ -229,6 +277,37 @@ export async function executeUpdate(
     return report;
   }
 
+  // Snapshot the pre-update state next, still before any mutation. If we cannot
+  // capture the snapshot we cannot guarantee a config rollback, so abort now.
+  try {
+    await deps.snapshot();
+    steps.push({ name: 'snapshot', status: 'done' });
+  } catch (err) {
+    steps.push({ name: 'snapshot', status: 'failed', detail: errMessage(err) });
+    return report;
+  }
+
+  // Enter maintenance and take the traffic producers offline BEFORE any
+  // mutation. Nothing is mutated yet, so a failure here aborts cleanly (with a
+  // best-effort exit so the instance is never left stuck in maintenance).
+  try {
+    if (deps.enterMaintenance) {
+      await deps.enterMaintenance();
+      steps.push({ name: 'maintenance-enter', status: 'done' });
+    }
+    if (deps.stopServices) {
+      await deps.stopServices(MAINTENANCE_STOP_SERVICES);
+      steps.push({ name: 'stop-services', status: 'done', detail: MAINTENANCE_STOP_SERVICES.join(',') });
+    }
+  } catch (err) {
+    steps.push({ name: 'maintenance-enter', status: 'failed', detail: errMessage(err) });
+    await safeExitMaintenance(deps);
+    return report;
+  }
+
+  const destructive = plan.preflight?.database.destructive ?? false;
+  let migrationsAttempted = false;
+
   try {
     await deps.runner.run(deps.instanceDir, composeCommands.pull());
     steps.push({ name: 'pull', status: 'done' });
@@ -239,34 +318,162 @@ export async function executeUpdate(
     await deps.runner.run(deps.instanceDir, composeCommands.upDetached());
     steps.push({ name: 'up', status: 'done' });
 
+    // `up` recreated the backend (new image) AND restarted the frontend, so the
+    // maintenance lock (ephemeral container fs) is gone. Re-assert it on the
+    // fresh backend so the migrate + health window is still gated.
+    if (deps.enterMaintenance) {
+      await deps.enterMaintenance();
+      steps.push({ name: 'maintenance-reassert', status: 'done' });
+    }
+
+    migrationsAttempted = true;
     await deps.runMigrations();
     steps.push({ name: 'migrate', status: 'done' });
 
     const health = await deps.checkHealth();
     if (!isHealthy(health)) {
       steps.push({ name: 'health', status: 'failed', detail: `overall=${health.overall}` });
-      await deps.rollback({ backupId, reason: `health ${health.overall}` });
-      steps.push({ name: 'rollback', status: 'done', detail: backupId });
-      report.rolledBack = true;
+      await runRollback(deps, steps, report, {
+        backupId,
+        reason: `health ${health.overall}`,
+        migrated: migrationsAttempted,
+        destructive,
+      });
       return report;
     }
     steps.push({ name: 'health', status: 'done', detail: 'healthy' });
+
+    // Leave maintenance only after health passes.
+    if (deps.exitMaintenance) {
+      await deps.exitMaintenance();
+      steps.push({ name: 'maintenance-exit', status: 'done' });
+    }
 
     report.ok = true;
     return report;
   } catch (err) {
     steps.push({ name: 'update', status: 'failed', detail: errMessage(err) });
-    try {
-      await deps.rollback({ backupId, reason: errMessage(err) });
-      steps.push({ name: 'rollback', status: 'done', detail: backupId });
-      report.rolledBack = true;
-    } catch (rollbackErr) {
-      steps.push({ name: 'rollback', status: 'failed', detail: errMessage(rollbackErr) });
-    }
+    await runRollback(deps, steps, report, {
+      backupId,
+      reason: errMessage(err),
+      migrated: migrationsAttempted,
+      destructive,
+    });
     return report;
+  }
+}
+
+/**
+ * Restores the pre-update snapshot and records the outcome. When the failure
+ * happened after destructive migrations ran, configuration is restored but the
+ * data must still be recovered from the backup, so we flag `requiresManualRestore`
+ * instead of pretending the data was rolled back.
+ */
+async function runRollback(
+  deps: UpdateExecutionDeps,
+  steps: UpdateStepResult[],
+  report: UpdateExecutionReport,
+  ctx: UpdateRollbackContext,
+): Promise<void> {
+  try {
+    await deps.rollback(ctx);
+    report.rolledBack = true;
+    if (ctx.migrated && ctx.destructive) {
+      report.requiresManualRestore = true;
+      steps.push({
+        name: 'rollback',
+        status: 'done',
+        detail: `config restored; destructive migrations ran - restore backup ${ctx.backupId} to recover data`,
+      });
+    } else {
+      steps.push({ name: 'rollback', status: 'done', detail: ctx.backupId });
+    }
+  } catch (rollbackErr) {
+    steps.push({ name: 'rollback', status: 'failed', detail: errMessage(rollbackErr) });
+  } finally {
+    // The restored stack may reuse the same backend container (unchanged image),
+    // which could still hold the maintenance lock. Always clear it so a failed
+    // update never leaves the instance stuck in maintenance.
+    await safeExitMaintenance(deps);
+  }
+}
+
+/** Best-effort maintenance exit used on the abort/rollback paths. Never throws. */
+async function safeExitMaintenance(deps: UpdateExecutionDeps): Promise<void> {
+  if (!deps.exitMaintenance) return;
+  try {
+    await deps.exitMaintenance();
+  } catch {
+    // best-effort: the rollback already restored config + containers
   }
 }
 
 function errMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+// ---------------------------------------------------------------------------
+// Runtime service (mysql/redis/mercure) image resolution + MySQL major gate
+// ---------------------------------------------------------------------------
+
+export interface RuntimeServiceImages {
+  mysql: string;
+  redis: string;
+  mercure: string;
+}
+
+/**
+ * Resolve the target runtime-service images for an update. Prefer the target
+ * core's `runtime` recommended images (so a release can move MySQL/Redis/Mercure
+ * forward), and fall back to the instance's CURRENT images when the target core
+ * declares no runtime policy (never silently reset to manager defaults).
+ */
+export function resolveTargetRuntimeImages(
+  runtime: RuntimeServicePolicy | undefined,
+  current: RuntimeServiceImages,
+): RuntimeServiceImages {
+  return {
+    mysql: runtime?.mysql.recommendedImage ?? current.mysql,
+    redis: runtime?.redis.recommendedImage ?? current.redis,
+    mercure: runtime?.mercure.recommendedImage ?? current.mercure,
+  };
+}
+
+/**
+ * Best-effort major-version parse from a docker image reference such as
+ * `mysql:8.4`, `mysql:8.4.1`, or `mysql:8.4@sha256:...`. Returns null when the
+ * tag is missing or not numeric (e.g. a bare digest pin).
+ */
+export function imageMajor(image: string): number | null {
+  const beforeDigest = image.split('@', 1)[0] ?? image;
+  const colon = beforeDigest.lastIndexOf(':');
+  if (colon < 0) return null;
+  const tag = beforeDigest.slice(colon + 1);
+  const major = Number.parseInt(tag.split('.', 1)[0] ?? '', 10);
+  return Number.isFinite(major) ? major : null;
+}
+
+export interface MysqlMajorUpgradeDecision {
+  isMajorUpgrade: boolean;
+  requiresApproval: boolean;
+  fromMajor: number | null;
+  toMajor: number | null;
+}
+
+/**
+ * Decide whether a MySQL image change is a major-version upgrade and whether the
+ * target core's policy demands explicit operator approval. The data volume is
+ * always preserved, but a major MySQL jump is effectively one-way, so a release
+ * can require a deliberate opt-in (plus a verified backup).
+ */
+export function evaluateMysqlMajorUpgrade(
+  runtime: RuntimeServicePolicy | undefined,
+  currentMysqlImage: string,
+  targetMysqlImage: string,
+): MysqlMajorUpgradeDecision {
+  const fromMajor = imageMajor(currentMysqlImage);
+  const toMajor = imageMajor(targetMysqlImage);
+  const isMajorUpgrade = fromMajor !== null && toMajor !== null && toMajor > fromMajor;
+  const requiresApproval = isMajorUpgrade && (runtime?.mysql.majorUpgradeRequiresManualApproval ?? false);
+  return { isMajorUpgrade, requiresApproval, fromMajor, toMajor };
 }

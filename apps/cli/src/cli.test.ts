@@ -227,7 +227,12 @@ describe('CLI actions (offline)', () => {
     expect(joined.some((a) => a.includes('doctrine:migrations:migrate --no-interaction --allow-no-migration'))).toBe(true);
     expect(joined.some((a) => a.includes('app:create-admin-user qa.admin@selfhelp.test'))).toBe(true);
     expect(joined.some((a) => a.includes('selfhelp:plugin:install /srv/plugins/surveyjs/plugin.json'))).toBe(true);
+    expect(joined.some((a) => a.includes('cache:clear-api-routes'))).toBe(true);
     expect(joined.some((a) => a.includes('cache:clear'))).toBe(true);
+    // Regression: the long-lived FrankenPHP backend compiled its router before
+    // migrations seeded the DB-backed routes, so provisioning must restart it
+    // (otherwise every migrated route, incl. /cms-api/v1/health, 404s).
+    expect(joined).toContain('restart backend');
 
     // The generated admin password must never land in the manifest or lock.
     const manifestText = await readFile(instancePaths('website1', root).manifestPath, 'utf8');
@@ -265,23 +270,43 @@ describe('CLI actions (offline)', () => {
 });
 
 describe('instance lifecycle (offline)', () => {
-  /** A deps variant whose runner answers mysqldump and that can archive/remove volumes. */
-  async function lifecycleDeps(): Promise<{ d: ActionDeps; removedVolumes: string[] }> {
+  /** A deps variant whose runner answers mysqldump and that can archive/remove/restore volumes. */
+  async function lifecycleDeps(): Promise<{
+    d: ActionDeps;
+    runner: RecordingComposeRunner;
+    removedVolumes: string[];
+    extracted: { tgz: string; volumeName: string }[];
+    copied: { from: string; to: string }[];
+    imported: string[];
+  }> {
     const base = await makeDeps();
     const removedVolumes: string[] = [];
+    const extracted: { tgz: string; volumeName: string }[] = [];
+    const copied: { from: string; to: string }[] = [];
+    const imported: string[] = [];
     const respond = (args: string[]): ComposeResult =>
       args.join(' ').includes('mysqldump') ? { stdout: '-- dump\n', stderr: '' } : { stdout: '', stderr: '' };
+    const lifecycleRunner = new RecordingComposeRunner(respond);
     const d: ActionDeps = {
       ...base,
-      runner: new RecordingComposeRunner(respond),
+      runner: lifecycleRunner,
       archiveVolume: async (_volumeName, outFile) => {
         await writeFile(outFile, 'archive-bytes');
       },
       removeVolumes: async (names) => {
         removedVolumes.push(...names);
       },
+      extractVolume: async (tgz, volumeName) => {
+        extracted.push({ tgz: path.basename(tgz), volumeName });
+      },
+      copyVolume: async (from, to) => {
+        copied.push({ from, to });
+      },
+      importDatabase: async (_instanceDir, sqlFile) => {
+        imported.push(path.basename(sqlFile));
+      },
     };
-    return { d, removedVolumes };
+    return { d, runner: lifecycleRunner, removedVolumes, extracted, copied, imported };
   }
 
   async function installWebsite1(d: ActionDeps): Promise<void> {
@@ -427,6 +452,73 @@ describe('instance lifecycle (offline)', () => {
     expect(asClone.secretsRegenerated).toBe(true);
     const afterClone = parseEnv(await readFile(path.join(paths.secretsDir, 'secrets.env'), 'utf8'));
     expect(afterClone.APP_SECRET).not.toBe(before.APP_SECRET);
+  });
+
+  it('restore --apply executes: stop (no -v), DB import, volume extract, health', async () => {
+    const base = await lifecycleDeps();
+    const d: ActionDeps = { ...base.d, jwtModulusLength: 2048 };
+    await installWebsite1(d);
+    const backup = await instanceBackup(d, 'website1');
+
+    const res = await instanceRestore(d, 'website1', backup.backupId, { mode: 'same_instance', apply: true });
+    expect(res.executed).toBe(true);
+    expect(res.health?.overall).toBe('healthy');
+    // same-version restore restores the point-in-time compose -> no forward migration
+    expect(res.migrated).toBe(false);
+
+    // The database dump was imported and all three persistent volumes restored.
+    expect(base.imported).toContain('database.sql');
+    expect(base.extracted.map((e) => e.volumeName)).toEqual(
+      expect.arrayContaining([
+        'selfhelp_website1_uploads',
+        'selfhelp_website1_plugin_artifacts',
+        'selfhelp_website1_plugin_artifacts_public',
+      ]),
+    );
+    // Restore quiesces with `stop` and never tears volumes down with `-v`.
+    const website1Dir = instancePaths('website1', root).dir;
+    const restoreCalls = base.runner.calls.filter((c) => c.cwd === website1Dir);
+    expect(restoreCalls.some((c) => c.args[0] === 'stop')).toBe(true);
+    expect(restoreCalls.some((c) => c.args.includes('-v') || c.args.includes('--volumes'))).toBe(false);
+  });
+
+  it('clone --apply copies the source into an isolated target and leaves the source untouched', async () => {
+    const base = await lifecycleDeps();
+    const d: ActionDeps = { ...base.d, jwtModulusLength: 2048 };
+    await installWebsite1(d);
+
+    const sourceDir = instancePaths('website1', root).dir;
+    const sourceCallsBefore = base.runner.calls.filter((c) => c.cwd === sourceDir).length;
+
+    const res = await instanceClone(d, 'website1', 'website1-staging', {
+      targetDomain: 'website1-staging.example.ch',
+      apply: true,
+    });
+    expect(res.executed).toBe(true);
+    expect(res.health?.overall).toBe('healthy');
+
+    // The clone is registered in the inventory and pins the source's versions.
+    const list = await instanceList(d);
+    expect(list.find((i) => i.instanceId === 'website1-staging')?.status).toBe('active');
+    const sourceLock = await new LockStore('website1', root).read();
+    const cloneLock = await new LockStore('website1-staging', root).read();
+    expect(cloneLock.core.version).toBe(sourceLock.core.version);
+    expect(cloneLock.core.backendImageDigest).toBe(sourceLock.core.backendImageDigest);
+
+    // Uploads + both plugin volumes were copied into the target's volumes.
+    expect(base.copied.map((c) => `${c.from}->${c.to}`)).toEqual(
+      expect.arrayContaining([
+        'selfhelp_website1_uploads->selfhelp_website1-staging_uploads',
+        'selfhelp_website1_plugin_artifacts->selfhelp_website1-staging_plugin_artifacts',
+        'selfhelp_website1_plugin_artifacts_public->selfhelp_website1-staging_plugin_artifacts_public',
+      ]),
+    );
+    expect(base.imported).toContain('clone-source.sql');
+
+    // The SOURCE was only read (a mysqldump exec); it was never stopped/downed/recreated.
+    const sourceCalls = base.runner.calls.filter((c) => c.cwd === sourceDir).slice(sourceCallsBefore);
+    expect(sourceCalls.every((c) => c.args[0] === 'exec')).toBe(true);
+    expect(sourceCalls.some((c) => ['stop', 'down', 'up'].includes(c.args[0]!))).toBe(false);
   });
 });
 

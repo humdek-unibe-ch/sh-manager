@@ -30,6 +30,25 @@ const JWT_KEYS_CONTAINER_DIR = '/app/config/jwt';
 const NON_SECRET_ENV = ['.env'];
 const SECRET_AWARE_ENV = ['.env', SECRETS_ENV_FILE];
 
+/**
+ * Persistent application data the Symfony services (backend/worker/scheduler)
+ * read and write. These MUST be named volumes so user uploads and installed
+ * plugin artifacts survive container replacement during updates, and so backups
+ * archive real data instead of an empty volume.
+ *
+ * The backend writes uploads under `public/uploads` (admin assets +
+ * form-file uploads) and plugin artifacts to two distinct container paths:
+ * `var/plugins` (installed packages) and `public/plugin-artifacts`
+ * (web-served ESM/CSS bundles). See backend `AdminAssetService`,
+ * `FormFileUploadService`, and `PluginArchivePromoter`.
+ */
+const UPLOADS_VOLUME = 'uploads';
+const UPLOADS_CONTAINER_DIR = '/app/public/uploads';
+const PLUGIN_ARTIFACTS_VOLUME = 'plugin_artifacts';
+const PLUGIN_ARTIFACTS_CONTAINER_DIR = '/app/var/plugins';
+const PLUGIN_ARTIFACTS_PUBLIC_VOLUME = 'plugin_artifacts_public';
+const PLUGIN_ARTIFACTS_PUBLIC_CONTAINER_DIR = '/app/public/plugin-artifacts';
+
 export interface InstanceComposeSpec {
   instanceId: string;
   mode: InstanceMode;
@@ -120,19 +139,28 @@ export function buildInstanceCompose(spec: InstanceComposeSpec): ComposeDocument
   // mount the per-instance JWT keypair read-only.
   const jwtMount = `${JWT_KEYS_HOST_DIR}:${JWT_KEYS_CONTAINER_DIR}:ro`;
 
+  // Persistent application data shared by all three Symfony services so uploads
+  // and installed plugin artifacts survive container replacement and are
+  // captured by backups.
+  const persistentMounts = [
+    `${UPLOADS_VOLUME}:${UPLOADS_CONTAINER_DIR}`,
+    `${PLUGIN_ARTIFACTS_VOLUME}:${PLUGIN_ARTIFACTS_CONTAINER_DIR}`,
+    `${PLUGIN_ARTIFACTS_PUBLIC_VOLUME}:${PLUGIN_ARTIFACTS_PUBLIC_CONTAINER_DIR}`,
+  ];
+
   const backend = baseService(spec.images.backend, ['instance'], spec.resources, SECRET_AWARE_ENV);
-  backend.volumes = [jwtMount];
+  backend.volumes = [jwtMount, ...persistentMounts];
   backend.depends_on = {
     mysql: { condition: 'service_healthy' },
     redis: { condition: 'service_healthy' },
   };
 
   const worker = baseService(spec.images.worker, ['instance'], spec.resources, SECRET_AWARE_ENV);
-  worker.volumes = [jwtMount];
+  worker.volumes = [jwtMount, ...persistentMounts];
   worker.depends_on = { backend: { condition: 'service_started' } };
 
   const scheduler = baseService(spec.images.scheduler, ['instance'], spec.resources, SECRET_AWARE_ENV);
-  scheduler.volumes = [jwtMount];
+  scheduler.volumes = [jwtMount, ...persistentMounts];
   scheduler.command = [
     'sh',
     '-lc',
@@ -141,6 +169,14 @@ export function buildInstanceCompose(spec: InstanceComposeSpec): ComposeDocument
 
   const mysql = baseService(spec.images.mysql, ['instance'], spec.resources, SECRET_AWARE_ENV);
   mysql.volumes = ['mysql_data:/var/lib/mysql'];
+  // The canonical baseline migration creates stored functions/procedures. With
+  // MySQL 8.x binary logging enabled (the default), the non-root application
+  // user cannot create routines unless the server trusts function creators, so
+  // the install-time `doctrine:migrations:migrate` would otherwise abort with
+  // error 1419 ("You do not have the SUPER privilege and binary logging is
+  // enabled"). Passing the flag here (the entrypoint prepends `mysqld`) keeps
+  // the app DB user non-privileged while letting the baseline install.
+  mysql.command = ['--log-bin-trust-function-creators=1'];
   mysql.healthcheck = {
     test: ['CMD', 'mysqladmin', 'ping', '-h', 'localhost'],
     interval: '10s',
@@ -186,8 +222,11 @@ export function buildInstanceCompose(spec: InstanceComposeSpec): ComposeDocument
 
   const volumes: Record<string, unknown> = {
     mysql_data: { name: `${composeProjectName(id)}_mysql_data` },
-    uploads: { name: `${composeProjectName(id)}_uploads` },
-    plugin_artifacts: { name: `${composeProjectName(id)}_plugin_artifacts` },
+    [UPLOADS_VOLUME]: { name: `${composeProjectName(id)}_${UPLOADS_VOLUME}` },
+    [PLUGIN_ARTIFACTS_VOLUME]: { name: `${composeProjectName(id)}_${PLUGIN_ARTIFACTS_VOLUME}` },
+    [PLUGIN_ARTIFACTS_PUBLIC_VOLUME]: {
+      name: `${composeProjectName(id)}_${PLUGIN_ARTIFACTS_PUBLIC_VOLUME}`,
+    },
   };
 
   return { name: composeProjectName(id), services, networks, volumes };
