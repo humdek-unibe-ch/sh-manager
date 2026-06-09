@@ -26,7 +26,21 @@ below go deeper.
 
 ## For operators
 
-Task-based runbooks live under [`operator/`](operator/):
+Task-based runbooks live under [`operator/`](operator/).
+
+**Start here** for the whole picture:
+
+- [Operations runbook (end to end)](operator/operations-runbook.md) — the single
+  walkthrough of the full lifecycle: install → configure → operate → update →
+  back up → recover.
+- [Quick reference](operator/quick-reference.md) — the command cheat-sheet for
+  common daily tasks (health, logs, restart, update, backup).
+- [Post-install checklist](operator/post-install-checklist.md) — what to do right
+  after a successful install (secrets, access, backups, monitoring).
+- [Troubleshooting](operator/troubleshooting.md) — symptom → cause → fix
+  (won't start, DNS/TLS, ports, disk space, updates, 503, health).
+
+**Task runbooks:**
 
 - [Install](operator/install.md) — bootstrap a server and install the first
   instance, via the web wizard or the CLI.
