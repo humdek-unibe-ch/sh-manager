@@ -7,9 +7,9 @@
  * (`dist/packages/schemas/...`); without this copy the Docker image fails at
  * startup with ENOENT (the v0.1.1 regression).
  */
-import { console } from 'node:console';
 import { cpSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
+import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -19,5 +19,5 @@ for (const rel of ['packages/schemas/examples', 'packages/schemas/keys']) {
   const to = path.join(root, 'dist', rel);
   mkdirSync(path.dirname(to), { recursive: true });
   cpSync(from, to, { recursive: true });
-  console.log(`copied ${rel} -> dist/${rel}`);
+  process.stdout.write(`copied ${rel} -> dist/${rel}\n`);
 }

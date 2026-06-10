@@ -8,7 +8,7 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `0.1.2`). Registry releases
+- **The manager tool** uses its own semver (currently `0.1.3`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
@@ -18,10 +18,14 @@ A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instanc
 
 ## [Unreleased]
 
-## [0.1.2] - 2026-06-10
+## [0.1.3] - 2026-06-10
 
 The first actually *runnable* Docker image. `v0.1.1` built and pushed fine but
-every container invocation died at startup (see Fixed).
+every container invocation died at startup (see Fixed). The interim `v0.1.2`
+tag never produced an image either: its new build step crashed on CI's Node
+(`import { console } from 'node:console'` is not a named export there), so the
+release failed at the image build — fixed here by writing to
+`process.stdout` instead.
 
 ### Fixed
 - **Docker image was unusable** — any command (`instance list`, `--help`, the
