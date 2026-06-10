@@ -139,6 +139,7 @@ export function buildInstanceInstallArtifacts(input: InstanceInstallInput): Inst
     instanceId: input.instanceId,
     mode: input.mode,
     selfhelpVersion: input.core.version,
+    frontendVersion: input.frontend.version,
     publicFrontendUrl,
     mercurePublicUrl: input.mercurePublicUrl,
   });
@@ -200,6 +201,7 @@ export function buildInstanceInstallArtifacts(input: InstanceInstallInput): Inst
       instanceId: input.instanceId,
       mode: input.mode,
       selfhelpVersion: input.core.version,
+      frontendVersion: input.frontend.version,
       publicFrontendUrl,
       mercurePublicUrl: input.mercurePublicUrl,
     }),

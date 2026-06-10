@@ -16,6 +16,15 @@ The manager has two version axes (see
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
 
+## [Unreleased]
+
+### Fixed
+- Generated instance `.env` files now emit the version env names the backend
+  actually reads: `SELFHELP_CMS_VERSION` (was the unconsumed `SELFHELP_VERSION`)
+  and the new `SELFHELP_FRONTEND_VERSION` (deployed frontend image version).
+  Without these the CMS admin system page reported the image's baked default and
+  `Frontend: unknown` on managed installs.
+
 ## [0.1.0] - 2026-06-08
 
 Initial release of the SelfHelp Manager for the SelfHelp `0.x` pre-release

@@ -1060,6 +1060,7 @@ export async function instanceRestore(
       instanceId,
       mode: 'production',
       selfhelpVersion: restoredManifest.versions.selfhelp,
+      frontendVersion: restoredManifest.versions.frontend,
       publicFrontendUrl,
       mercurePublicUrl: `${publicFrontendUrl}/.well-known/mercure`,
     });

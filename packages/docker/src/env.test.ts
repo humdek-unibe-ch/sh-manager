@@ -7,6 +7,7 @@ const input = {
   instanceId: 'website1',
   mode: 'production' as const,
   selfhelpVersion: '1.5.0',
+  frontendVersion: '1.4.2',
   publicFrontendUrl: 'https://website1.example.ch',
   mercurePublicUrl: 'https://website1.example.ch/.well-known/mercure',
 };
@@ -31,5 +32,14 @@ describe('BFF URL invariant', () => {
     expect(dotenv).toContain('SELFHELP_INSTANCE_ID=website1');
     expect(dotenv.toLowerCase()).not.toContain('password');
     expect(dotenv.toLowerCase()).not.toContain('secret=');
+  });
+
+  it('injects the version env names the backend reads', () => {
+    // config/services.yaml reads SELFHELP_CMS_VERSION + SELFHELP_FRONTEND_VERSION;
+    // without these the admin system page reports the baked default / "unknown".
+    const env = buildInstanceEnv(input);
+    expect(env.SELFHELP_CMS_VERSION).toBe('1.5.0');
+    expect(env.SELFHELP_FRONTEND_VERSION).toBe('1.4.2');
+    expect(env).not.toHaveProperty('SELFHELP_VERSION');
   });
 });

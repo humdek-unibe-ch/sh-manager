@@ -18,6 +18,12 @@ export interface InstanceEnvInput {
   instanceId: string;
   mode: InstanceMode;
   selfhelpVersion: string;
+  /**
+   * Version of the deployed frontend image. The backend cannot know which
+   * frontend build is running, so the manager injects it; the CMS surfaces it
+   * on the admin system page (`SELFHELP_FRONTEND_VERSION`, else "unknown").
+   */
+  frontendVersion: string;
   publicFrontendUrl: string;
   mercurePublicUrl: string;
   browserApiPrefix?: string;
@@ -48,7 +54,12 @@ export function buildInstanceEnv(input: InstanceEnvInput): Record<string, string
     APP_ENV: 'prod',
     SELFHELP_INSTANCE_ID: input.instanceId,
     SELFHELP_MODE: input.mode,
-    SELFHELP_VERSION: input.selfhelpVersion,
+    // The env names the backend actually reads (config/services.yaml):
+    // SELFHELP_CMS_VERSION feeds plugin-compatibility checks + the version
+    // summary; SELFHELP_FRONTEND_VERSION feeds the admin system page (it
+    // reports "unknown" when unset, e.g. source/dev checkouts).
+    SELFHELP_CMS_VERSION: input.selfhelpVersion,
+    SELFHELP_FRONTEND_VERSION: input.frontendVersion,
     // Browser path (BFF). Never the internal URL.
     NEXT_PUBLIC_API_URL: routing.browserApiPrefix,
     // Server-side frontend -> Symfony over the internal Docker network.
