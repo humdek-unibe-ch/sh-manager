@@ -15,13 +15,17 @@ on:
   workflow_dispatch:
     inputs:
       backend_ref:
-        description: sh-selfhelp_backend ref (branch/tag/sha) to test against
+        description: >-
+          sh-selfhelp_backend ref (branch/tag/sha). Leave empty for
+          same-branch-or-main auto-resolution.
         required: false
-        default: main
+        default: ''
       frontend_ref:
-        description: sh-selfhelp_frontend ref (branch/tag/sha) to test against
+        description: >-
+          sh-selfhelp_frontend ref (branch/tag/sha). Leave empty for
+          same-branch-or-main auto-resolution.
         required: false
-        default: main
+        default: ''
   schedule:
     # 03:17 UTC nightly (offset to avoid the top-of-hour runner crush).
     - cron: '17 3 * * *'
@@ -46,11 +50,45 @@ jobs:
       # Sibling checkouts so e2e/build-images.mjs auto-detects them next to the
       # manager. E2E_REPO_TOKEN is only needed while the repos are private; for
       # public repos the default GITHUB_TOKEN is sufficient.
+      # Same-branch-or-main: an explicit dispatch input wins; otherwise use
+      # the sibling branch matching this build's branch name when it exists,
+      # else main. Nightly schedule runs from main and keeps testing
+      # main-vs-main. See sh-selfhelp_backend/docs/developer/branch-merge-order.md.
+      - name: Resolve sibling refs (input, else same branch, else main)
+        id: refs
+        env:
+          GH_TOKEN: ${{ secrets.E2E_REPO_TOKEN || github.token }}
+          BACKEND_INPUT: ${{ github.event.inputs.backend_ref }}
+          FRONTEND_INPUT: ${{ github.event.inputs.frontend_ref }}
+        run: |
+          set -euo pipefail
+          BRANCH="${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
+          resolve_ref() {
+            local repo="$1" explicit="$2"
+            if [ -n "$explicit" ]; then
+              echo "$explicit"
+              return
+            fi
+            if [ -n "$BRANCH" ] && [ "$BRANCH" != "main" ] && \
+               git ls-remote --exit-code --heads \
+                 "https://x-access-token:${GH_TOKEN}@github.com/humdek-unibe-ch/${repo}.git" \
+                 "refs/heads/${BRANCH}" > /dev/null 2>&1; then
+              echo "$BRANCH"
+              return
+            fi
+            echo "main"
+          }
+          BACKEND_REF="$(resolve_ref sh-selfhelp_backend "${BACKEND_INPUT}")"
+          FRONTEND_REF="$(resolve_ref sh-selfhelp_frontend "${FRONTEND_INPUT}")"
+          echo "backend=${BACKEND_REF}" >> "$GITHUB_OUTPUT"
+          echo "frontend=${FRONTEND_REF}" >> "$GITHUB_OUTPUT"
+          echo "Resolved refs (build branch: ${BRANCH}): backend=${BACKEND_REF} frontend=${FRONTEND_REF}"
+
       - name: Checkout backend (sibling)
         uses: actions/checkout@v4
         with:
           repository: humdek-unibe-ch/sh-selfhelp_backend
-          ref: ${{ github.event.inputs.backend_ref || 'main' }}
+          ref: ${{ steps.refs.outputs.backend }}
           path: sh-selfhelp_backend
           token: ${{ secrets.E2E_REPO_TOKEN || github.token }}
 
@@ -58,7 +96,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: humdek-unibe-ch/sh-selfhelp_frontend
-          ref: ${{ github.event.inputs.frontend_ref || 'main' }}
+          ref: ${{ steps.refs.outputs.frontend }}
           path: sh-selfhelp_frontend
           token: ${{ secrets.E2E_REPO_TOKEN || github.token }}
 
