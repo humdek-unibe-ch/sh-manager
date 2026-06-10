@@ -65,7 +65,7 @@ function fail(err: unknown): never {
 }
 
 const program = new Command();
-program.name('sh-manager').description('SelfHelp Manager: Docker-only connected installer/updater/server manager.').version('0.1.0');
+program.name('sh-manager').description('SelfHelp Manager: Docker-only connected installer/updater/server manager.').version('0.1.1');
 program.option('--root <dir>', 'SelfHelp root directory', DEFAULT_ROOT);
 
 const server = program.command('server').description('Server-level operations');

@@ -61,7 +61,7 @@ async function main(): Promise<void> {
   const trustedKeysPath =
     arg('trusted-keys', process.env.SELFHELP_TRUSTED_KEYS) ??
     path.join(here, '..', '..', '..', 'packages', 'schemas', 'examples', 'trusted-keys.json');
-  const managerVersion = process.env.SHM_MANAGER_VERSION ?? '0.1.0';
+  const managerVersion = process.env.SHM_MANAGER_VERSION ?? '0.1.1';
 
   const trustedKeys = await loadTrustedKeys(trustedKeysPath);
   const deps = realDeps(root, trustedKeys);

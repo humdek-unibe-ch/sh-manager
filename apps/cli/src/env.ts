@@ -21,7 +21,7 @@ import type { PreflightResourceFacts, ServiceProbeResult } from '@shm/core';
 import type { ActionDeps } from './actions.js';
 
 const execFileAsync = promisify(execFile);
-const MANAGER_VERSION = '0.1.0';
+const MANAGER_VERSION = '0.1.1';
 
 class HttpFetcher implements Fetcher {
   async fetch(url: string): Promise<FetchResponse> {

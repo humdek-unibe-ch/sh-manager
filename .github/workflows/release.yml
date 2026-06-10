@@ -14,6 +14,10 @@ permissions:
   contents: write
   packages: write
   id-token: write
+  # Required by github/codeql-action/upload-sarif to push the Trivy scan into
+  # the repo's code-scanning view; without it the upload fails with
+  # "Resource not accessible by integration" and kills the tag release.
+  security-events: write
 
 env:
   IMAGE: ghcr.io/${{ github.repository }}
@@ -63,8 +67,14 @@ jobs:
           format: spdx-json
           output-file: sbom.spdx.json
 
+      # SHA-pinned to the 0.35.0 immutable release — the only tag guaranteed
+      # safe after the March 2026 Trivy supply-chain compromise
+      # (GHSA-69fq-xp46-6x23). Older tags (incl. the previous 0.28.0 pin) were
+      # force-pushed to malicious commits and later deleted, which made this
+      # workflow fail with "unable to find version 0.28.0"; never pin this
+      # action by mutable tag.
       - name: Scan image for vulnerabilities (Trivy)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
         with:
           image-ref: ${{ env.IMAGE }}:${{ github.ref_name }}
           format: sarif
@@ -76,7 +86,10 @@ jobs:
 
       - name: Upload Trivy results to code scanning
         if: ${{ always() && hashFiles('trivy-results.sarif') != '' }}
-        uses: github/codeql-action/upload-sarif@v3
+        # Advisory by design: the SARIF still ships as a release artifact, so
+        # a code-scanning hiccup must never block a tagged release.
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-results.sarif
 

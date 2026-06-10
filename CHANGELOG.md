@@ -8,7 +8,7 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `0.1.0`). Registry releases
+- **The manager tool** uses its own semver (currently `0.1.1`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
@@ -18,6 +18,12 @@ A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instanc
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-06-10
+
+First release whose Docker image actually shipped — the `v0.1.0` tag never
+produced an image because the release workflow failed before its first step
+(see Fixed below).
+
 ### Added
 - **Local Windows walkthrough** (`docs/operator/local-windows-walkthrough.md`):
   beginner-friendly, copy-paste guide for Windows + Docker Desktop — install the
@@ -26,6 +32,14 @@ A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instanc
   instance via the manager and via the CMS request flow.
 
 ### Fixed
+- **`manager-release` workflow could not run at all**: `aquasecurity/trivy-action`
+  was pinned to the mutable `0.28.0` tag, which was deleted upstream after the
+  March 2026 Trivy supply-chain compromise (GHSA-69fq-xp46-6x23), so GitHub
+  failed the run at action-resolution time ("unable to find version 0.28.0").
+  The action is now SHA-pinned to the immutable `0.35.0` release commit, the
+  SARIF upload got the missing `security-events: write` permission, moved to
+  `codeql-action/upload-sarif@v4` (v3 is deprecated December 2026), and is
+  `continue-on-error` so an advisory upload can never block a tag release.
 - Generated instance `.env` files now emit the version env names the backend
   actually reads: `SELFHELP_CMS_VERSION` (was the unconsumed `SELFHELP_VERSION`)
   and the new `SELFHELP_FRONTEND_VERSION` (deployed frontend image version).

@@ -13,7 +13,7 @@
 import semver from 'semver';
 
 /** Running manager version. Kept in sync with the root package version. */
-export const MANAGER_VERSION = '0.1.0';
+export const MANAGER_VERSION = '0.1.1';
 
 /** Document kinds that carry a `*Version`/`schemaVersion` field. */
 export type SchemaDocKind =
