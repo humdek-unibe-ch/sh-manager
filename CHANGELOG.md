@@ -18,6 +18,13 @@ A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instanc
 
 ## [Unreleased]
 
+### Added
+- **Local Windows walkthrough** (`docs/operator/local-windows-walkthrough.md`):
+  beginner-friendly, copy-paste guide for Windows + Docker Desktop — install the
+  manager from source, install an instance with the GUI wizard and the CLI,
+  publish a small update to a local dev-signed test registry, then update the
+  instance via the manager and via the CMS request flow.
+
 ### Fixed
 - Generated instance `.env` files now emit the version env names the backend
   actually reads: `SELFHELP_CMS_VERSION` (was the unconsumed `SELFHELP_VERSION`)

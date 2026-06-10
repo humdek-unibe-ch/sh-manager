@@ -60,6 +60,10 @@ Task-based runbooks live under [`operator/`](operator/).
   — a safe, disposable `test`-channel rehearsal of the whole pipeline (build test
   images → serve a dev-signed registry → install → update via manager and CMS →
   backup/restore/clone/rollback), automated as `SHM_E2E=1 npm run e2e`.
+- [Local Windows walkthrough](operator/local-windows-walkthrough.md) — the
+  beginner-friendly, copy-paste version of the rehearsal for Windows + Docker
+  Desktop: install the manager, install an instance with the GUI wizard,
+  publish a small update to a local test registry, update via manager and CMS.
 
 ## Conventions
 
