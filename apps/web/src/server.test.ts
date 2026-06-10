@@ -145,6 +145,31 @@ describe('bootstrap wizard over HTTP', () => {
     expect(res.status).toBe(409);
     expect(((await res.json()) as { error: string }).error).toMatch(/Docker/i);
   });
+
+  it('exposes the manager self-update check as GET /api/manager/update-check', async () => {
+    const base = await start(
+      createBootstrapServer({
+        actions: fakeActions({
+          checkManagerUpdate: async () => ({
+            currentVersion: '0.1.4',
+            latestVersion: '0.2.0',
+            updateAvailable: true,
+            runtime: 'docker',
+            instructions: ['docker pull ghcr.io/humdek-unibe-ch/sh-manager:v0.2.0'],
+          }),
+        }),
+      }),
+    );
+    const res = await fetch(base + '/api/manager/update-check');
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { updateAvailable: boolean; latestVersion: string };
+    expect(body.updateAvailable).toBe(true);
+    expect(body.latestVersion).toBe('0.2.0');
+
+    // Without a wired action the route is simply absent.
+    const bare = await start(createBootstrapServer({ actions: fakeActions(), port: 0 }));
+    expect((await fetch(bare + '/api/manager/update-check')).status).toBe(404);
+  });
 });
 
 describe('persistent mode authentication', () => {

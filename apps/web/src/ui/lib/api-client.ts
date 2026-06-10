@@ -10,7 +10,7 @@
  *   human message — never a stack trace. Callers turn these into friendly UI.
  * - `fetch` is injectable so the client is unit-testable without a network.
  */
-import type { LoginResult, Snapshot, WizardConfig, WizardStepId } from './types';
+import type { LoginResult, ManagerUpdateCheck, Snapshot, WizardConfig, WizardStepId } from './types';
 
 export class ApiError extends Error {
   constructor(
@@ -36,6 +36,7 @@ export interface ApiClient {
   back(): Promise<Snapshot>;
   runCheck(step: WizardStepId): Promise<Snapshot>;
   install(): Promise<Snapshot>;
+  managerUpdateCheck(): Promise<ManagerUpdateCheck>;
   login(email: string, password: string): Promise<LoginResult>;
   logout(): Promise<void>;
 }
@@ -88,6 +89,7 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     back: () => request<Snapshot>('/api/back', 'POST'),
     runCheck: (step) => request<Snapshot>(`/api/check/${step}`, 'POST'),
     install: () => request<Snapshot>('/api/install', 'POST'),
+    managerUpdateCheck: () => request<ManagerUpdateCheck>('/api/manager/update-check', 'GET'),
     async login(email, password) {
       const result = await request<LoginResult>('/api/login', 'POST', { email, password });
       csrfToken = result.csrfToken;

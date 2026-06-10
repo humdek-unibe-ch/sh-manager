@@ -23,7 +23,7 @@ import type {
   TrustedKeysFile,
 } from '@shm/schemas';
 import type { ComposeRunner } from '@shm/docker';
-import { buildInstanceRouting, composeCommands, composeProjectName, generateInstanceComposeYaml } from '@shm/docker';
+import { DEFAULT_PROXY_NETWORK, buildInstanceRouting, composeCommands, composeProjectName, generateInstanceComposeYaml } from '@shm/docker';
 import type { Fetcher } from '@shm/registry';
 import { RegistryClient } from '@shm/registry';
 import {
@@ -99,6 +99,8 @@ export interface ActionDeps {
   }) => Promise<{ mysql: LockServiceEntry; redis: LockServiceEntry; mercure: LockServiceEntry }>;
   probeHealth: (publicUrl: string, apiPrefix: string) => Promise<ServiceProbeResult[]>;
   resourceFacts: (requiredPorts: number[]) => Promise<PreflightResourceFacts>;
+  /** Idempotently create a Docker network (real impl uses `docker network create`). */
+  ensureNetwork?: (name: string) => Promise<void>;
   /** Archive a named Docker volume into `outFile` (real impl uses `docker run … tar`). */
   archiveVolume?: (volumeName: string, outFile: string) => Promise<void>;
   /** Delete named Docker volumes (full-delete only; real impl uses `docker volume rm`). */
@@ -247,6 +249,17 @@ export async function serverInit(deps: ActionDeps, opts: ServerInitOptions): Pro
   await writeFileAtomic(boot.proxyComposePath, boot.proxyComposeYaml);
   const store = new InventoryStore(deps.root);
   await store.write(boot.inventory);
+
+  // Every instance compose references the shared proxy network as `external`,
+  // so bootstrap must guarantee it exists — otherwise the very first
+  // `instance install --up` fails with "network … declared as external, but
+  // could not be found". In production the shared Traefik proxy is started
+  // here too; local mode routes via published ports and needs no proxy
+  // container (and must not grab 80/443 on a dev machine).
+  await deps.ensureNetwork?.(boot.inventory.proxy.network);
+  if (opts.mode === 'production') {
+    await deps.runner.run(proxyDir(deps.root), composeCommands.upDetached());
+  }
   return { proxyComposePath: boot.proxyComposePath, inventoryPath: store.path };
 }
 
@@ -354,6 +367,15 @@ export async function instanceInstall(
 
   // Provisioning requires a running stack, so it implies bringUp.
   const bringUp = (opts.bringUp ?? false) || (opts.provision ?? false);
+  // The instance compose declares the shared proxy network as external; make
+  // sure it exists even on servers bootstrapped by an older manager.
+  if (bringUp && deps.ensureNetwork) {
+    const network = await new InventoryStore(deps.root)
+      .read()
+      .then((inv) => inv.proxy.network)
+      .catch(() => DEFAULT_PROXY_NETWORK);
+    await deps.ensureNetwork(network);
+  }
   const res = await installInstance(artifacts, { root: deps.root, runner: deps.runner, bringUp });
 
   if (!opts.provision) {

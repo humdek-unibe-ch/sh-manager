@@ -14,7 +14,7 @@ collect a [support bundle](support-bundle.md).
 ```bash
 sh-manager doctor                      # host: disk, memory, CPU, ports 80/443, Docker + Compose
 sh-manager instance health website1    # instance: backend + frontend probes
-docker compose -f <root>/instances/website1/docker-compose.yml ps   # container states
+docker compose -f <root>/instances/website1/compose.yaml ps   # container states
 ```
 
 `<root>` defaults to `/opt/selfhelp`. Replace `website1` with your instance id.
@@ -24,8 +24,8 @@ docker compose -f <root>/instances/website1/docker-compose.yml ps   # container 
 1. **See which container is down or restarting:**
 
 ```bash
-docker compose -f <root>/instances/website1/docker-compose.yml ps
-docker compose -f <root>/instances/website1/docker-compose.yml logs --tail=200 backend
+docker compose -f <root>/instances/website1/compose.yaml ps
+docker compose -f <root>/instances/website1/compose.yaml logs --tail=200 backend
 ```
 
 2. **Common causes by service:**
@@ -66,7 +66,7 @@ Certificates are issued by the shared Traefik proxy via Let's Encrypt.
 - **DNS must resolve first** (see above) — Let's Encrypt validates over the
   domain.
 - A bootstrap `--email` must have been provided to `server init` for production.
-- Inspect the proxy: `docker compose -f <root>/proxy/docker-compose.yml logs --tail=200`.
+- Inspect the proxy: `docker compose -f <root>/proxy/compose.yaml logs --tail=200`.
 - Let's Encrypt rate-limits repeated failures; fix DNS/ports first, then retry
   rather than looping.
 
@@ -118,7 +118,7 @@ sets it around updates; the readiness probe, auth, the manager loop, and
   the backend container:
 
 ```bash
-docker compose -f <root>/instances/website1/docker-compose.yml \
+docker compose -f <root>/instances/website1/compose.yaml \
   exec backend php bin/console selfhelp:maintenance --disable
 ```
 

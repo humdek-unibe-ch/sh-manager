@@ -80,8 +80,8 @@ sh-manager instance health website1      # backend + frontend probes
 sh-manager doctor                        # host resources / ports / Docker
 
 # transient inspection / restart (read-only host access; not a config change)
-docker compose -f <root>/instances/website1/docker-compose.yml ps
-docker compose -f <root>/instances/website1/docker-compose.yml logs -f --tail=200
+docker compose -f <root>/instances/website1/compose.yaml ps
+docker compose -f <root>/instances/website1/compose.yaml logs -f --tail=200
 ```
 
 Admins also get an in-CMS view at **`/admin/system`** (version, aggregated

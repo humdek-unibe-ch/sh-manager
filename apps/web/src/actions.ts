@@ -42,6 +42,17 @@ export interface HealthOutcome {
   detail?: string;
 }
 
+/** Result of the manager self-update check (mirrors the CLI's SelfUpdateCheck). */
+export interface ManagerUpdateCheck {
+  currentVersion: string;
+  latestVersion: string | null;
+  updateAvailable: boolean;
+  runtime: 'docker' | 'source';
+  releaseUrl?: string;
+  instructions: string[];
+  error?: string;
+}
+
 export interface BootstrapActions {
   checkDocker(): Promise<DockerCheck>;
   checkInternet(): Promise<CheckResult>;
@@ -49,6 +60,8 @@ export interface BootstrapActions {
   checkResources(requiredPorts: number[]): Promise<ResourceCheck>;
   runInstall(plan: BootstrapPlan): Promise<InstallOutcome>;
   checkHealth(plan: BootstrapPlan): Promise<HealthOutcome>;
+  /** Optional: "is a newer manager released?" surfaced in the UI header. */
+  checkManagerUpdate?(): Promise<ManagerUpdateCheck>;
 }
 
 /** Map the typed sub-results onto the wizard's generic {@link CheckResult}. */

@@ -2,8 +2,8 @@
 
 Audience: Developers / maintainers
 Status: Active
-Applies to: `sh-manager` (manager tool `0.1.0`) and the SelfHelp 0.x pre-release platform line
-Last verified: 2026-06-09
+Applies to: `sh-manager` (manager tool `0.1.4`) and the SelfHelp 0.x pre-release platform line
+Last verified: 2026-06-10
 Source of truth: `packages/registry/src`, `packages/schemas/src`, `scripts/sign-fixtures.mts`, `package.json`, and (registry side) `sh2-plugin-registry/.github/workflows/publish-core-release.yml`
 
 This page explains how versions, signatures, and the registry fit together, and
@@ -76,13 +76,22 @@ release.
 The manager ships as the single privileged Docker image
 (`ghcr.io/humdek-unibe-ch/sh-manager`). Release flow:
 
-1. Land changes with the gate green: `npm run check`
+1. Bump the version in exactly **two** places (they must match):
+   - `packages/schemas/src/version.ts` → `MANAGER_VERSION` — the single
+     source of truth the CLI (`--version`), web UI, inventory stamps, and
+     `requiresManager` checks all import;
+   - the root `package.json` `version`.
+2. Land changes with the gate green: `npm run check`
    (typecheck + lint + test + schema validation) and `npm run build`.
-2. Update [`CHANGELOG.md`](../CHANGELOG.md).
-3. Tag the release and let CI build and publish the image.
-4. If the change alters a compatibility contract (`requiresManager`, schema
+3. Update [`CHANGELOG.md`](../CHANGELOG.md) (versioning blurb + a new section).
+4. Tag the release (`v<version>`) and let CI build and publish the image.
+5. If the change alters a compatibility contract (`requiresManager`, schema
    versions, lock/manifest shape), coordinate it with the registry catalogue and
    the platform repos per the cross-repo compatibility process.
+
+Operators discover a new release via `sh-manager self-update` (CLI, exit `2`
+when an update exists) or the "Manager version" card in the web operations
+console — both check the GitHub releases feed of this repository.
 
 ## Publishing platform artifacts (core / frontend / scheduler / worker / plugins)
 

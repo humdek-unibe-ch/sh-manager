@@ -106,6 +106,50 @@ describe('CLI actions (offline)', () => {
     expect(inv.serverId).toBe('s1');
   });
 
+  it('server init (production) creates the shared proxy network and starts Traefik', async () => {
+    const d = await makeDeps();
+    const networks: string[] = [];
+    d.ensureNetwork = async (name) => {
+      networks.push(name);
+    };
+    await serverInit(d, { serverId: 's1', mode: 'production', letsencryptEmail: 'ops@example.ch' });
+    expect(networks).toEqual(['selfhelp_proxy']);
+    expect(runner.calls).toEqual([{ cwd: path.join(root, 'proxy'), args: ['up', '-d'] }]);
+  });
+
+  it('server init (local) creates the network but does not start the proxy container', async () => {
+    const d = await makeDeps();
+    const networks: string[] = [];
+    d.ensureNetwork = async (name) => {
+      networks.push(name);
+    };
+    await serverInit(d, { serverId: 'dev', mode: 'local' });
+    expect(networks).toEqual(['selfhelp_proxy']);
+    expect(runner.calls).toEqual([]);
+  });
+
+  it('instance install --up ensures the proxy network exists before compose up', async () => {
+    const d = await makeDeps();
+    const networks: string[] = [];
+    d.ensureNetwork = async (name) => {
+      networks.push(name);
+    };
+    await serverInit(d, { serverId: 'dev', mode: 'local' });
+    await instanceInstall(d, {
+      instanceId: 'qa1',
+      displayName: 'QA 1',
+      mode: 'local',
+      localPort: 8080,
+      registryUrl: 'https://humdek-unibe-ch.github.io/sh2-plugin-registry/',
+      version: 'latest',
+      bringUp: true,
+    });
+    // Once from server init, once defensively before bringing the stack up.
+    expect(networks).toEqual(['selfhelp_proxy', 'selfhelp_proxy']);
+    const upCall = runner.calls.find((c) => c.cwd.includes('qa1'));
+    expect(upCall?.args).toEqual(['up', '-d']);
+  });
+
   it('refuses to re-bootstrap an already-managed server unless import is acknowledged', async () => {
     const d = await makeDeps();
     await serverInit(d, { serverId: 's1', mode: 'production', letsencryptEmail: 'ops@example.ch' });

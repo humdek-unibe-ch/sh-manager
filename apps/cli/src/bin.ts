@@ -31,8 +31,9 @@ import {
   serverInit,
 } from './actions.js';
 import { HttpBackendOperationsClient } from './operations-client.js';
-import { loadTrustedKeys, realDeps } from './env.js';
+import { MANAGER_VERSION, loadTrustedKeys, realDeps } from './env.js';
 import { formatHealth, formatPreflight, formatSteps, formatTable } from './output.js';
+import { checkSelfUpdate, formatSelfUpdate } from './self-update.js';
 import type { ManagerRole } from '@shm/auth';
 import {
   adminAllowEmailAdd,
@@ -68,7 +69,11 @@ function fail(err: unknown): never {
     if (message.includes('ENOENT') && message.includes('selfhelp.server.json')) {
       console.error(
         'This server is not initialized yet. Run first:\n' +
-          '  sh-manager server init --server-id <id> --mode production --email <letsencrypt-email>',
+          '  sh-manager server init --server-id <id> --mode production --email <letsencrypt-email>\n' +
+          '  (local/testing: sh-manager server init --server-id <id> --mode local)\n' +
+          'If you DID initialize and run the manager via Docker, the state volume is not mounted at\n' +
+          '/opt/selfhelp inside the container - reuse the exact same -v flag for every command\n' +
+          '(Windows Git Bash: prefix commands with MSYS_NO_PATHCONV=1 or use a named volume).',
       );
     }
   }
@@ -76,8 +81,49 @@ function fail(err: unknown): never {
 }
 
 const program = new Command();
-program.name('sh-manager').description('SelfHelp Manager: Docker-only connected installer/updater/server manager.').version('0.1.3');
+program.name('sh-manager').description('SelfHelp Manager: Docker-only connected installer/updater/server manager.').version(MANAGER_VERSION);
 program.option('--root <dir>', 'SelfHelp root directory', DEFAULT_ROOT);
+
+program
+  .command('self-update')
+  .description('Check whether a newer manager release is available and print how to update')
+  .action(async () => {
+    try {
+      const check = await checkSelfUpdate({ currentVersion: MANAGER_VERSION });
+      console.log(formatSelfUpdate(check));
+      // Scripts can branch on the exit code: 0 = up to date, 2 = update available.
+      if (check.updateAvailable) process.exitCode = 2;
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program
+  .command('web')
+  .description('Start the manager web UI (install wizard / operations console)')
+  .option('--host <host>', 'bind host (use 0.0.0.0 when running inside Docker with -p)', '127.0.0.1')
+  .option('--port <port>', 'bind port', (v) => parseInt(v, 10), 8765)
+  .option('--mode <mode>', 'bootstrap|persistent', 'bootstrap')
+  .option('--persist', 'keep the UI running after a successful bootstrap', false)
+  .option('--allow-non-local', 'allow binding to a non-loopback host (auth required; prefer an SSH tunnel)', false)
+  .action(async (opts) => {
+    try {
+      // Lazy import: keeps every other CLI command free of the web app's deps.
+      const { startWebUi } = await import('../../web/src/main.js');
+      await startWebUi({
+        root: program.opts().root as string,
+        host: opts.host as string,
+        port: opts.port as number,
+        mode: opts.mode as 'bootstrap' | 'persistent',
+        persistAfterBootstrap: opts.persist as boolean,
+        allowNonLocal: opts.allowNonLocal as boolean,
+        trustedKeysPath: DEFAULT_TRUSTED_KEYS,
+      });
+      // Keep the process alive; the HTTP server holds the event loop open.
+    } catch (err) {
+      fail(err);
+    }
+  });
 
 const server = program.command('server').description('Server-level operations');
 server

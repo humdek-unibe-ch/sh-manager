@@ -25,4 +25,23 @@ describe('OperationsConsole', () => {
 
     expect((await screen.findAllByText(/passed/i)).length).toBeGreaterThan(0);
   });
+
+  it('shows the installed manager version and "up to date" when no newer release exists', async () => {
+    render(<OperationsConsole client={makeFakeClient()} />);
+
+    expect(await screen.findByText('Manager version')).toBeInTheDocument();
+    expect(await screen.findByText(/sh-manager 0\.1\.4/)).toBeInTheDocument();
+    expect(await screen.findByText('Up to date')).toBeInTheDocument();
+  });
+
+  it('surfaces an available manager update with the exact docker pull command', async () => {
+    render(<OperationsConsole client={makeFakeClient({ managerUpdateAvailable: true })} />);
+
+    expect(await screen.findByText(/Update available: 0\.2\.0/)).toBeInTheDocument();
+    expect(await screen.findByText(/docker pull ghcr\.io\/humdek-unibe-ch\/sh-manager:v0\.2\.0/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Release notes for 0\.2\.0/i })).toHaveAttribute(
+      'href',
+      'https://github.com/humdek-unibe-ch/sh-manager/releases/tag/v0.2.0',
+    );
+  });
 });

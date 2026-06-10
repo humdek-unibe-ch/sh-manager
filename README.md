@@ -25,6 +25,62 @@ It ships **two interfaces over the same logic**: the `sh-manager` **CLI** (the
 canonical interface) and a localhost **web UI** (`sh-manager-web`) — an install
 wizard, an operations console, and operator login.
 
+## Install the manager
+
+The manager ships as a Docker image (recommended — nothing to build) and as
+this source repo (development).
+
+### Linux server (production)
+
+```bash
+docker pull ghcr.io/humdek-unibe-ch/sh-manager:latest
+
+# every run mounts the Docker socket + the state root at the SAME path
+alias shm='docker run --rm \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v /opt/selfhelp:/opt/selfhelp \
+  ghcr.io/humdek-unibe-ch/sh-manager:latest'
+
+shm server init --server-id srv-001 --mode production --email ops@example.ch
+shm instance install --id website1 --domain website1.example.ch \
+  --registry https://humdek-unibe-ch.github.io/sh2-plugin-registry/ \
+  --version latest --provision --admin-email ops@example.ch
+```
+
+Full guide: [docs/operator/install.md](docs/operator/install.md).
+
+### Windows machine (testing)
+
+Same image, two Windows specifics: the state root must use the Docker Desktop
+VM path (`/run/desktop/mnt/host/d/selfhelp` for `D:\selfhelp`) and Git Bash
+needs the `MSYS_NO_PATHCONV=1` prefix. Local mode runs instances on plain
+`http://localhost:<port>` — no domains, no SSL — and as many side-by-side
+instances as you have ports.
+Full guide: [docs/operator/windows-quickstart.md](docs/operator/windows-quickstart.md).
+
+### From source (development)
+
+```bash
+npm install && npm run build
+npm run cli -- --help
+```
+
+## Update the manager
+
+```bash
+# Docker image (exit code 2 = update available):
+docker run --rm ghcr.io/humdek-unibe-ch/sh-manager:latest self-update
+docker pull ghcr.io/humdek-unibe-ch/sh-manager:latest   # apply
+
+# Source checkout:
+git pull && npm ci && npm run build
+```
+
+`sh-manager self-update` checks the official GitHub releases and prints the
+exact commands for your runtime; the web UI's operations console shows the
+same "update available" status. Long-running `process-operations` loops must
+be restarted after a pull. Release notes: [`CHANGELOG.md`](CHANGELOG.md).
+
 ## Documentation
 
 Full documentation lives in [`docs/`](docs/README.md):
@@ -33,6 +89,7 @@ Full documentation lives in [`docs/`](docs/README.md):
   [developer guide](docs/developer-guide.md),
   [release & publishing](docs/release-publishing.md).
 - Operators: [install](docs/operator/install.md),
+  [Windows quickstart](docs/operator/windows-quickstart.md),
   [update](docs/operator/update.md),
   [backup & restore](docs/operator/backup-restore.md),
   [clone & remove](docs/operator/clone-remove.md),
@@ -77,10 +134,11 @@ Docker / network / filesystem side effects live behind injected boundaries.
 
 ## Requirements
 
-- Node.js >= 22 (for the manager itself).
-- Docker Engine + Docker Compose v2 on the server.
+- Docker Engine + Docker Compose v2 on the server (that's all when using the
+  manager image).
+- Node.js >= 22 only when running the manager from source.
 
-## Install / develop
+## Develop
 
 ```bash
 npm install
@@ -112,6 +170,8 @@ sh-manager instance health website1
 sh-manager instance update --dry-run website1
 sh-manager instance update website1 --accept-migration-risk
 sh-manager doctor
+sh-manager self-update      # is a newer manager released? (exit 2 = yes)
+sh-manager web              # serve the web UI (wizard / operations console)
 ```
 
 Configuration via env: `SELFHELP_ROOT` (default `/opt/selfhelp`),
@@ -140,9 +200,14 @@ must be opted into explicitly), and serves the built SPA from `dist-web` (fallin
 back to an inline shell if unbuilt). Reach it remotely via an SSH tunnel:
 
 ```bash
-# on the server
-sh-manager-web --root /opt/selfhelp        # bootstrap wizard, http://127.0.0.1:8765
-sh-manager-web --root /opt/selfhelp --mode persistent --persist   # management UI
+# on the server (equivalent: sh-manager-web)
+sh-manager web --root /opt/selfhelp        # bootstrap wizard, http://127.0.0.1:8765
+sh-manager web --root /opt/selfhelp --mode persistent --persist   # management UI
+
+# from the Docker image (bind 0.0.0.0 inside; published loopback-only)
+docker run --rm -p 127.0.0.1:8765:8765 \
+  -v /var/run/docker.sock:/var/run/docker.sock -v /opt/selfhelp:/opt/selfhelp \
+  ghcr.io/humdek-unibe-ch/sh-manager:latest web --host 0.0.0.0
 
 # from your machine
 ssh -L 8765:127.0.0.1:8765 you@your-server # then open http://127.0.0.1:8765
@@ -166,6 +231,17 @@ docker run --rm \
 
 This is deliberately different from instance runtime containers, which must
 never receive the socket.
+
+Two rules make this reliable everywhere:
+
+- **Mount the state root at the same path on both sides** (`/opt/selfhelp` ↔
+  `/opt/selfhelp`). The manager drives the *host* engine through the socket,
+  so every path it writes must mean the same thing to the engine. On Windows
+  (Docker Desktop) that path is the VM view of your drive — see the
+  [Windows quickstart](docs/operator/windows-quickstart.md).
+- **Use the exact same `-v` flags for every invocation** (use a shell alias).
+  If the state mount is missing or different, commands fail with
+  `ENOENT ... selfhelp.server.json` ("not initialized").
 
 ## Security model
 

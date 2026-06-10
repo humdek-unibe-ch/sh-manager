@@ -2,8 +2,8 @@
 
 Audience: Server operators
 Status: Active
-Applies to: `sh-manager` (manager tool `0.1.0`)
-Last verified: 2026-06-09
+Applies to: `sh-manager` (manager tool `0.1.4`)
+Last verified: 2026-06-10
 Source of truth: `apps/cli/src/bin.ts`
 
 The commands you reach for most. `<root>` is the SelfHelp root (default
@@ -27,15 +27,15 @@ never for editing an instance's stack.
 
 ## View logs / containers / restart
 
-Run against the instance's compose file (`<root>/instances/website1/docker-compose.yml`):
+Run against the instance's compose file (`<root>/instances/website1/compose.yaml`):
 
 | Task | Command |
 | --- | --- |
-| Show containers | `docker compose -f <root>/instances/website1/docker-compose.yml ps` |
-| Tail all logs | `docker compose -f <root>/instances/website1/docker-compose.yml logs -f --tail=200` |
-| Logs for one service | `docker compose -f <root>/instances/website1/docker-compose.yml logs -f backend` |
-| Restart one service | `docker compose -f <root>/instances/website1/docker-compose.yml restart backend` |
-| Run a backend console cmd | `docker compose -f <root>/instances/website1/docker-compose.yml exec backend php bin/console <cmd>` |
+| Show containers | `docker compose -f <root>/instances/website1/compose.yaml ps` |
+| Tail all logs | `docker compose -f <root>/instances/website1/compose.yaml logs -f --tail=200` |
+| Logs for one service | `docker compose -f <root>/instances/website1/compose.yaml logs -f backend` |
+| Restart one service | `docker compose -f <root>/instances/website1/compose.yaml restart backend` |
+| Run a backend console cmd | `docker compose -f <root>/instances/website1/compose.yaml exec backend php bin/console <cmd>` |
 
 Services: `frontend`, `backend`, `worker`, `scheduler`, `mysql`, `redis`,
 `mercure` (+ `mailpit` in local mode).
@@ -46,8 +46,10 @@ Services: `frontend`, `backend`, `worker`, `scheduler`, `mysql`, `redis`,
 | --- | --- |
 | Host preflight | `sh-manager doctor` |
 | Bootstrap server (once) | `sh-manager server init --server-id srv-001 --mode production --email ops@example.ch` |
+| Bootstrap for local testing | `sh-manager server init --server-id dev --mode local` |
 | Install + provision | `sh-manager instance install --id website1 --domain website1.example.ch --registry <url> --version latest --provision --admin-email ops@example.ch` |
-| Web wizard (localhost BFF) | `sh-manager-web --root /opt/selfhelp` |
+| Install local (port, no SSL) | `sh-manager instance install --id demo1 --mode local --port 8080 --registry <url> --version latest --provision --admin-email you@example.test` |
+| Web wizard (localhost BFF) | `sh-manager web` (alias: `sh-manager-web --root /opt/selfhelp`) |
 
 ## Update
 
@@ -58,6 +60,7 @@ Services: `frontend`, `backend`, `worker`, `scheduler`, `mysql`, `redis`,
 | Target a version | `sh-manager instance update website1 --version 0.1.1` |
 | Accept destructive migration | `sh-manager instance update website1 --accept-migration-risk` |
 | Process a CMS-requested update | `sh-manager instance process-operations website1 --backend-url http://127.0.0.1:PORT --token "$SELFHELP_MANAGER_TOKEN"` |
+| Is a newer manager released? | `sh-manager self-update` (exit `2` = update available; prints the update commands) |
 
 ## Back up / restore / clone
 
@@ -101,9 +104,9 @@ Services: `frontend`, `backend`, `worker`, `scheduler`, `mysql`, `redis`,
 
 | Path | What |
 | --- | --- |
-| `<root>/inventory.json` | Server inventory. |
-| `<root>/proxy/docker-compose.yml` | Shared Traefik proxy. |
-| `<root>/instances/<id>/docker-compose.yml` | Instance stack. |
+| `<root>/selfhelp.server.json` | Server inventory. |
+| `<root>/proxy/compose.yaml` | Shared Traefik proxy. |
+| `<root>/instances/<id>/compose.yaml` | Instance stack. |
 | `<root>/instances/<id>/manifest.json` · `lock.json` | What's installed · pinned digests. |
 | `<root>/instances/<id>/README.md` | Per-instance operator commands. |
 | `<root>/instances/<id>/backups/` | Checksummed backups. |
@@ -116,6 +119,7 @@ Services: `frontend`, `backend`, `worker`, `scheduler`, `mysql`, `redis`,
 | `SELFHELP_MANAGER_TOKEN` | Per-instance token for `process-operations`. |
 | `SELFHELP_PUBLIC_IP` | Enables a hard server-IP DNS comparison. |
 | `SHM_WEB_HOST` / `SHM_WEB_PORT` | Web BFF bind host/port (default `127.0.0.1:8765`). |
+| `SELFHELP_LOCALHOST_PROBE_HOST` | Host substituted for `localhost` in health probes when the manager runs in a container (auto: `host.docker.internal`; `off` disables). |
 
 ## See also
 

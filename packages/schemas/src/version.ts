@@ -12,8 +12,12 @@
  */
 import semver from 'semver';
 
-/** Running manager version. Kept in sync with the root package version. */
-export const MANAGER_VERSION = '0.1.3';
+/**
+ * Running manager version — the single source of truth.
+ * Update here + root package.json + CHANGELOG.md when releasing (the CLI,
+ * web UI, and inventory stamps all import this constant).
+ */
+export const MANAGER_VERSION = '0.1.4';
 
 /** Document kinds that carry a `*Version`/`schemaVersion` field. */
 export type SchemaDocKind =

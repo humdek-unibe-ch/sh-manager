@@ -2,13 +2,17 @@
 
 Audience: Server operators
 Status: Active
-Applies to: `sh-manager` (manager tool `0.1.0`, installs the SelfHelp 0.x pre-release line)
-Last verified: 2026-06-08
+Applies to: `sh-manager` (manager tool `0.1.4`, installs the SelfHelp 0.x pre-release line)
+Last verified: 2026-06-10
 Source of truth: `apps/cli/src/bin.ts`, `apps/web/src/bin.ts`, `apps/web/src/server.ts`
 
 This installs SelfHelp on a fresh server in two stages: **bootstrap the server**
 (one shared reverse proxy + an inventory) and **install an instance** (an
 isolated SelfHelp site). You can do both from the **web wizard** or the **CLI**.
+
+> Testing on a Windows machine instead of a server? Use the
+> [Windows quickstart](windows-quickstart.md) — same flow in local mode
+> (localhost ports, no domains/TLS).
 
 ## Before you start
 
@@ -19,12 +23,44 @@ isolated SelfHelp site). You can do both from the **web wizard** or the **CLI**.
   internet — it binds to `127.0.0.1`; reach it over an **SSH tunnel** for a
   remote server.
 
-## Option A — the web wizard (recommended)
+## Get the manager
 
-1. Start the wizard BFF on the server (bootstrap mode, localhost only):
+The recommended way to run the manager is the published Docker image — nothing
+to build or install beyond Docker itself:
 
 ```bash
-sh-manager-web --root /opt/selfhelp
+docker pull ghcr.io/humdek-unibe-ch/sh-manager:latest
+
+# define once per shell; every command below then reads `shm ...`
+alias shm='docker run --rm \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v /opt/selfhelp:/opt/selfhelp \
+  ghcr.io/humdek-unibe-ch/sh-manager:latest'
+shm --version
+```
+
+The state mount must use the **same path on both sides** (`/opt/selfhelp`) and
+must be present on **every** invocation — without it commands fail with
+`ENOENT ... selfhelp.server.json` ("not initialized"). Where this page says
+`sh-manager ...`, run `shm ...`; for the wizard run
+`docker run --rm -p 127.0.0.1:8765:8765 ... web --host 0.0.0.0`
+(see "Option A"). Running from a source checkout (`npm run cli -- ...`) is for
+development.
+
+## Option A — the web wizard (recommended)
+
+1. Start the wizard on the server (bootstrap mode, localhost only):
+
+```bash
+# from the Docker image (binds 0.0.0.0 inside the container; the published
+# port stays loopback-only on the server):
+docker run --rm -p 127.0.0.1:8765:8765 \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v /opt/selfhelp:/opt/selfhelp \
+  ghcr.io/humdek-unibe-ch/sh-manager:latest web --host 0.0.0.0
+
+# or from a source checkout:
+sh-manager web --root /opt/selfhelp
 # "SelfHelp Manager bootstrap UI listening on http://127.0.0.1:8765"
 ```
 
@@ -61,12 +97,15 @@ change anything. To manage the server afterwards, run it in **persistent mode**
 
 ```bash
 sh-manager server init --server-id srv-001 --mode production --email ops@example.ch
-# Proxy compose: /opt/selfhelp/proxy/docker-compose.yml
-# Inventory:     /opt/selfhelp/inventory.json
+# Proxy compose: /opt/selfhelp/proxy/compose.yaml
+# Inventory:     /opt/selfhelp/selfhelp.server.json
 ```
 
-This creates the single shared Traefik proxy and the server inventory. Re-running
-on an existing install requires `--import` to acknowledge repair.
+This writes the server inventory, creates the shared `selfhelp_proxy` Docker
+network, and (production mode) starts the single shared Traefik proxy. Local
+mode creates the network but starts no proxy container — local instances are
+reached directly on their published ports. Re-running on an existing install
+requires `--import` to acknowledge repair.
 
 ### 2. Check the host
 
@@ -125,7 +164,7 @@ Per instance, under `<root>/instances/<id>/` (root default `/opt/selfhelp`):
 
 | File | Purpose |
 | --- | --- |
-| `docker-compose.yml` | The instance stack (no container mounts the Docker socket). |
+| `compose.yaml` | The instance stack (no container mounts the Docker socket). |
 | `.env` | Non-secret environment only. |
 | `manifest.json` | What was installed (no secrets). |
 | `lock.json` | Pinned image digests + versions. |

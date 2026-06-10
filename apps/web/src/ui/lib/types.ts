@@ -7,7 +7,7 @@
  * check shapes — the UI never redefines validation or step contracts.
  */
 import type { InstanceMode, ReleaseChannel } from '@shm/schemas';
-import type { HealthOutcome, InstallOutcome } from '../../actions';
+import type { HealthOutcome, InstallOutcome, ManagerUpdateCheck } from '../../actions';
 import type { CheckResult, CheckSeverity, WizardConfig, WizardStepId } from '../../wizard';
 
 export type {
@@ -18,6 +18,7 @@ export type {
   HealthOutcome,
   InstallOutcome,
   InstanceMode,
+  ManagerUpdateCheck,
   ReleaseChannel,
 };
 

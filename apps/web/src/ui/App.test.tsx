@@ -27,6 +27,13 @@ function persistentClient(): ApiClient {
     back: same,
     runCheck: same,
     install: same,
+    managerUpdateCheck: async () => ({
+      currentVersion: '0.1.4',
+      latestVersion: '0.1.4',
+      updateAvailable: false,
+      runtime: 'docker',
+      instructions: [],
+    }),
     login: async () => ({ ok: true, email: 'owner@example.com', roles: ['server_owner'], csrfToken: 't' }),
     logout: async () => {},
   };
@@ -41,6 +48,7 @@ function throwingClient(err: unknown): ApiClient {
     back: fail,
     runCheck: fail,
     install: fail,
+    managerUpdateCheck: fail,
     login: fail,
     logout: async () => {},
   };

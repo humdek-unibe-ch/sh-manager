@@ -21,6 +21,11 @@ or production keys. It is the Windows-flavoured companion of
 [rehearsal-publish-install-update.md](rehearsal-publish-install-update.md);
 read that page for the "why" behind each step.
 
+> Just want to **test SelfHelp on Windows** with the published manager image —
+> no Node, no source checkout? Use the
+> [Windows quickstart](windows-quickstart.md) instead. This page is for
+> developing the manager/CMS from source.
+
 ## 0. What you need (once)
 
 | Tool | Why | Check |
@@ -204,14 +209,18 @@ claims and executes it:
      --backend-url http://127.0.0.1:8080 --token "$SELFHELP_MANAGER_TOKEN"
    ```
 
-   The per-instance `SELFHELP_MANAGER_TOKEN` is in the instance's `.env` under
-   `$SELFHELP_ROOT/instances/demo1/`.
+   The per-instance `SELFHELP_MANAGER_TOKEN` is one you set yourself: append
+   `SELFHELP_MANAGER_TOKEN=<a long random string>` to
+   `$SELFHELP_ROOT/instances/demo1/secrets/secrets.env`, recreate the backend
+   (`docker compose up -d --force-recreate backend` in the instance dir), and
+   use the same value here.
 4. Watch the status on the same admin page until it reads **succeeded**.
 
 ## 8. Clean up
 
 ```bash
-npm run cli -- instance remove demo1 --destroy-data --yes
+npm run cli -- instance remove demo1 --mode full_delete --delete-volumes \
+  --confirm "delete demo1"
 rm -rf "$HOME/sh-root" "$HOME/sh-test-registry"
 ```
 

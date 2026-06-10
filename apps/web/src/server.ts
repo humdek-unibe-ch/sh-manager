@@ -319,6 +319,10 @@ export function createBootstrapServer(options: BootstrapServerOptions): Bootstra
     }
 
     if (path === '/api/state' && ctx.method === 'GET') return sendJson(res, 200, snapshot());
+    if (path === '/api/manager/update-check' && ctx.method === 'GET') {
+      if (!options.actions.checkManagerUpdate) throw new HttpError(404, 'Not found.');
+      return sendJson(res, 200, await options.actions.checkManagerUpdate());
+    }
     if (path === '/api/config' && ctx.method === 'POST') {
       state = setConfig(state, (ctx.body ?? {}) as Partial<WizardConfig>);
       return sendJson(res, 200, snapshot());

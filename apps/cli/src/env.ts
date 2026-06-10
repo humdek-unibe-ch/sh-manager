@@ -8,20 +8,23 @@
  */
 import { execFile, spawn } from 'node:child_process';
 import { resolve4, resolve6 } from 'node:dns/promises';
+import { existsSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { readFile, statfs } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type { LockServiceEntry, TrustedKeysFile } from '@shm/schemas';
-import { validateTrustedKeys } from '@shm/schemas';
+import { MANAGER_VERSION, validateTrustedKeys } from '@shm/schemas';
 import { RealComposeRunner } from '@shm/docker';
 import type { Fetcher, FetchResponse } from '@shm/registry';
 import type { PreflightResourceFacts, ServiceProbeResult } from '@shm/core';
 import type { ActionDeps } from './actions.js';
 
 const execFileAsync = promisify(execFile);
-const MANAGER_VERSION = '0.1.3';
+// Single source of truth for the manager version (kept in sync with the root
+// package.json by the release checklist).
+export { MANAGER_VERSION };
 
 class HttpFetcher implements Fetcher {
   async fetch(url: string): Promise<FetchResponse> {
@@ -65,6 +68,40 @@ async function portFree(port: number): Promise<boolean> {
   });
 }
 
+/**
+ * Hostname substituted for `localhost`/`127.0.0.1` in health-probe URLs.
+ *
+ * Local-mode instances publish their frontend on the HOST's loopback. When the
+ * manager itself runs inside a container (the published Docker image), its own
+ * `localhost` is the container, so those probes must go through the host
+ * gateway instead. Docker Desktop (Windows/macOS) resolves
+ * `host.docker.internal` out of the box; on a plain Linux engine add
+ * `--add-host=host.docker.internal:host-gateway` to the manager's `docker run`.
+ * Override with SELFHELP_LOCALHOST_PROBE_HOST (set `off` to disable).
+ */
+export function localhostProbeHost(): string | undefined {
+  const configured = process.env.SELFHELP_LOCALHOST_PROBE_HOST;
+  if (configured !== undefined && configured !== '') {
+    return configured === 'off' ? undefined : configured;
+  }
+  return existsSync('/.dockerenv') ? 'host.docker.internal' : undefined;
+}
+
+/** Rewrites a loopback-host URL to `probeHost`; every other URL passes through. */
+export function rewriteLocalhostUrl(url: string, probeHost: string | undefined): string {
+  if (!probeHost) return url;
+  try {
+    const u = new URL(url);
+    if (u.hostname === 'localhost' || u.hostname === '127.0.0.1' || u.hostname === '::1') {
+      u.hostname = probeHost;
+      return u.toString();
+    }
+  } catch {
+    // Not a URL — leave untouched.
+  }
+  return url;
+}
+
 async function imageDigest(image: string): Promise<string> {
   try {
     await execFileAsync('docker', ['pull', image]);
@@ -104,7 +141,7 @@ export function realDeps(root: string, trustedKeys: TrustedKeysFile): ActionDeps
       // BFF-relative `/health`; the BFF maps it to the backend's
       // `/cms-api/v1/health`. Appending `/cms-api/v1/health` here instead would
       // double the prefix (`/cms-api/v1/cms-api/v1/health`) and 404 the probe.
-      const healthUrl = `${publicUrl}${apiPrefix}/health`;
+      const healthUrl = rewriteLocalhostUrl(`${publicUrl}${apiPrefix}/health`, localhostProbeHost());
       try {
         const res = await fetch(healthUrl);
         probes.push({ service: 'backend', ok: res.ok, detail: `HTTP ${res.status}` });
@@ -127,6 +164,15 @@ export function realDeps(root: string, trustedKeys: TrustedKeysFile): ActionDeps
         dockerAvailable: await dockerAvailable(),
         dockerComposeAvailable: await composeAvailable(),
       };
+    },
+    ensureNetwork: async (name): Promise<void> => {
+      try {
+        await execFileAsync('docker', ['network', 'create', name]);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        // Idempotent: an existing network is success, anything else is real.
+        if (!msg.includes('already exists')) throw err;
+      }
     },
     archiveVolume: async (volumeName, outFile): Promise<void> => {
       const dir = path.dirname(outFile);

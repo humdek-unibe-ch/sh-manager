@@ -56,6 +56,8 @@ export interface FakeClientOptions {
   config?: Partial<WizardConfig>;
   startAt?: WizardStepId;
   failInstall?: boolean;
+  /** Simulate a newer published manager release. */
+  managerUpdateAvailable?: boolean;
 }
 
 export function makeFakeClient(opts: FakeClientOptions = {}): ApiClient {
@@ -105,6 +107,18 @@ export function makeFakeClient(opts: FakeClientOptions = {}): ApiClient {
         health: { healthy: true, degraded: false },
         publicUrl: 'https://clinic-a.example',
       });
+    },
+    async managerUpdateCheck() {
+      return opts.managerUpdateAvailable
+        ? {
+            currentVersion: '0.1.4',
+            latestVersion: '0.2.0',
+            updateAvailable: true,
+            runtime: 'docker' as const,
+            releaseUrl: 'https://github.com/humdek-unibe-ch/sh-manager/releases/tag/v0.2.0',
+            instructions: ['docker pull ghcr.io/humdek-unibe-ch/sh-manager:v0.2.0'],
+          }
+        : { currentVersion: '0.1.4', latestVersion: '0.1.4', updateAvailable: false, runtime: 'docker' as const, instructions: [] };
     },
     async login() {
       return { ok: true, email: 'owner@example.com', roles: ['server_owner'], csrfToken: 'csrf-token' };

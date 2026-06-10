@@ -13,7 +13,7 @@
  * the fresh snapshot back into the query cache.
  */
 import { useMemo } from 'react';
-import { Center, Group, SimpleGrid, Stack, Text, Title } from '@mantine/core';
+import { Anchor, Center, Group, SimpleGrid, Stack, Text, Title } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Alert,
@@ -33,6 +33,7 @@ import type { CheckResult, Snapshot, WizardStepId } from '../../lib/types';
 
 const CHECKS: WizardStepId[] = ['docker', 'internet', 'registry', 'resources'];
 const STATE_KEY = ['manager', 'console', 'state'] as const;
+const UPDATE_KEY = ['manager', 'console', 'update-check'] as const;
 
 const OPERATOR_COMMANDS: { label: string; command: string }[] = [
   { label: 'Check instance health', command: 'sh-manager instance health <instance-id>' },
@@ -63,6 +64,10 @@ export function OperationsConsole({ client }: OperationsConsoleProps): JSX.Eleme
   const queryClient = useQueryClient();
   const stateQuery = useQuery({ queryKey: STATE_KEY, queryFn: () => client.getState() });
   const snapshot = stateQuery.data ?? null;
+  // Non-blocking: the console renders fully even when the release feed is slow
+  // or unreachable (the card then shows the error detail).
+  const updateQuery = useQuery({ queryKey: UPDATE_KEY, queryFn: () => client.managerUpdateCheck(), retry: false });
+  const update = updateQuery.data ?? null;
 
   const runCheck = useMutation({
     mutationFn: (step: WizardStepId) => client.runCheck(step),
@@ -150,6 +155,60 @@ export function OperationsConsole({ client }: OperationsConsoleProps): JSX.Eleme
               </Group>
             );
           })}
+        </Stack>
+      </Card>
+
+      <Card
+        title="Manager version"
+        description="The manager checks the official GitHub releases for newer versions."
+        aside={
+          update ? (
+            <StatusBadge tone={update.error ? 'neutral' : update.updateAvailable ? 'warning' : 'ok'}>
+              {update.error ? 'Unknown' : update.updateAvailable ? `Update available: ${update.latestVersion}` : 'Up to date'}
+            </StatusBadge>
+          ) : (
+            <StatusBadge tone="pending">{updateQuery.isError ? 'Unavailable' : 'Checking…'}</StatusBadge>
+          )
+        }
+      >
+        <Stack gap="sm">
+          <Group gap="xs">
+            <Text size="sm" fw={500}>
+              Installed:
+            </Text>
+            <Text size="sm">{update ? `sh-manager ${update.currentVersion} (${update.runtime === 'docker' ? 'Docker image' : 'source checkout'})` : '…'}</Text>
+          </Group>
+          {update?.error ? (
+            <Text size="sm" c="dimmed">
+              Could not reach the release feed: {update.error}
+            </Text>
+          ) : null}
+          {update?.updateAvailable ? (
+            <>
+              {update.releaseUrl ? (
+                <Anchor href={update.releaseUrl} target="_blank" rel="noreferrer" size="sm">
+                  Release notes for {update.latestVersion}
+                </Anchor>
+              ) : null}
+              <Text size="sm" fw={500}>
+                To update, run on the server:
+              </Text>
+              {update.instructions.map((cmd) =>
+                cmd.startsWith('docker ') || cmd.startsWith('git ') || cmd.startsWith('npm ') ? (
+                  <CommandPreview key={cmd} value={cmd} label="Update command" />
+                ) : (
+                  <Text key={cmd} size="sm" c="dimmed">
+                    {cmd}
+                  </Text>
+                ),
+              )}
+            </>
+          ) : null}
+          <Group>
+            <Button variant="ghost" loading={updateQuery.isFetching} onClick={() => void updateQuery.refetch()}>
+              Check for updates
+            </Button>
+          </Group>
         </Stack>
       </Card>
 

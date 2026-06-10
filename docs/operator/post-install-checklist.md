@@ -20,7 +20,7 @@ secrets stored, access locked down, backups scheduled, monitoring in place.
       rather than digging for it:
 
 ```bash
-docker compose -f <root>/instances/website1/docker-compose.yml \
+docker compose -f <root>/instances/website1/compose.yaml \
   exec backend php bin/console <create-admin-command>
 ```
 

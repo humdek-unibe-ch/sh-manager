@@ -8,7 +8,7 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `0.1.3`). Registry releases
+- **The manager tool** uses its own semver (currently `0.1.4`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
@@ -17,6 +17,55 @@ The manager has two version axes (see
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
 
 ## [Unreleased]
+
+## [0.1.4] - 2026-06-10
+
+Windows-testing + self-update release: the Docker image is now first-class on
+Docker Desktop (Windows/macOS), `server init` actually brings the shared proxy
+up, and both the CLI and the GUI can tell you when a newer manager is released.
+
+### Added
+- **`sh-manager self-update`** — checks the official GitHub releases feed and
+  prints the exact update commands for the detected runtime (Docker image →
+  `docker pull …`, source checkout → `git pull && npm ci && npm run build`).
+  Exit code `2` means "update available" so cron/scripts can branch on it.
+  Network failures degrade to a clear message, never a crash.
+- **GUI update visibility** — the persistent operations console now shows a
+  "Manager version" card with the installed version, an "Up to date /
+  Update available" badge, release-notes link, and the copy-paste update
+  commands (`GET /api/manager/update-check` on the manager BFF).
+- **`server init` now creates the shared proxy network** (`selfhelp_proxy`)
+  idempotently and, in production mode, starts the Traefik proxy container —
+  previously the first `instance install --up` failed with "network declared
+  as external, but could not be found" unless the operator created it by hand.
+  `instance install --up` also re-ensures the network for servers bootstrapped
+  by older managers. Local mode creates the network but starts no proxy (no
+  80/443 grab on dev machines).
+- **Containerised health probes work on Docker Desktop** — when the manager
+  runs inside a container, health probes against `http://localhost:<port>`
+  (local-mode instances publish on the host) are rewritten to
+  `host.docker.internal` automatically. Override or disable with
+  `SELFHELP_LOCALHOST_PROBE_HOST` (plain Linux engines:
+  `--add-host=host.docker.internal:host-gateway`).
+- **`sh-manager web`** — the web UI (install wizard / operations console) is
+  now a first-class CLI subcommand, so the published Docker image can serve
+  the GUI directly:
+  `docker run -p 127.0.0.1:8765:8765 … sh-manager:latest web --host 0.0.0.0`.
+  `sh-manager-web` still works and now shares the same composition root
+  (`apps/web/src/main.ts`).
+- **Windows quickstart** (`docs/operator/windows-quickstart.md`) — copy-paste
+  path from a fresh Docker Desktop to a running local instance using only the
+  published image (no Node/git), including the Git Bash `MSYS_NO_PATHCONV`
+  path-mangling fix, Docker Desktop path-parity root, multi-instance port
+  layout, and the GUI/CMS/update walkthrough.
+
+### Changed
+- **Single source of truth for the manager version**: `MANAGER_VERSION` lives
+  in `@shm/schemas` (`packages/schemas/src/version.ts`) and the CLI
+  (`--version`), web UI, and inventory stamps all import it. A release now
+  bumps two files (that constant + root `package.json`) instead of five.
+- The "server not initialized" CLI hint now also explains the local mode
+  variant and the Docker named-volume/`MSYS_NO_PATHCONV` pitfalls on Windows.
 
 ## [0.1.3] - 2026-06-10
 
