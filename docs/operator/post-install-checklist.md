@@ -26,8 +26,9 @@ docker compose -f <root>/instances/website1/docker-compose.yml \
 
 - [ ] **Record the per-instance manager token** (`SELFHELP_MANAGER_TOKEN`) you'll
       use for CMS-requested updates, unique per instance.
-- [ ] Confirm `SELFHELP_TRUSTED_KEYS` points at the official trusted-keys file so
-      only signed releases are accepted.
+- [ ] Confirm `SELFHELP_TRUSTED_KEYS` is unset (the manager defaults to the
+      pinned official production key) or points at the official trusted-keys
+      file so only signed releases are accepted.
 
 ## 2. Verify the install is healthy
 

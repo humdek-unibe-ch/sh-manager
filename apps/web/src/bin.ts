@@ -58,10 +58,12 @@ async function main(): Promise<void> {
   const allowNonLocal = flag('allow-non-local') || process.env.SHM_WEB_ALLOW_NONLOCAL === 'true';
   const persistAfterBootstrap = flag('persist') || process.env.SHM_WEB_PERSIST === 'true';
   const clientDir = arg('client-dir', process.env.SHM_WEB_CLIENT_DIR) ?? path.join(here, '..', 'dist-web');
+  // Same default trust anchor as the CLI: the pinned official production key,
+  // never the dev fixture (its seed is public).
   const trustedKeysPath =
     arg('trusted-keys', process.env.SELFHELP_TRUSTED_KEYS) ??
-    path.join(here, '..', '..', '..', 'packages', 'schemas', 'examples', 'trusted-keys.json');
-  const managerVersion = process.env.SHM_MANAGER_VERSION ?? '0.1.1';
+    path.join(here, '..', '..', '..', 'packages', 'schemas', 'keys', 'official-trusted-keys.json');
+  const managerVersion = process.env.SHM_MANAGER_VERSION ?? '0.1.2';
 
   const trustedKeys = await loadTrustedKeys(trustedKeysPath);
   const deps = realDeps(root, trustedKeys);

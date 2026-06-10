@@ -1,6 +1,6 @@
 {
   "name": "@selfhelp/manager",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "SelfHelp Manager: the official Docker-only connected installer, updater, and multi-instance server manager for SelfHelp.",
   "license": "MPL-2.0",
@@ -27,9 +27,10 @@
     "validate:schemas": "tsx scripts/validate-schemas.mts",
     "fixtures:sign": "tsx scripts/sign-fixtures.mts",
     "license:report": "tsx scripts/license-report.mts",
+    "headers:check": "tsx scripts/check-spdx-headers.mts",
     "cli": "tsx apps/cli/src/bin.ts",
-    "build": "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json && npm -w @shm/web run build",
-    "check": "npm run typecheck && npm run lint && npm run test && npm run validate:schemas"
+    "build": "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json && node scripts/copy-dist-assets.mjs && npm -w @shm/web run build",
+    "check": "npm run typecheck && npm run lint && npm run test && npm run validate:schemas && npm run headers:check"
   },
   "dependencies": {
     "ajv": "^8.17.1",

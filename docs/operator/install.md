@@ -140,7 +140,7 @@ volumes that **survive** updates and removals unless you explicitly full-delete.
 | Env var | Purpose |
 | --- | --- |
 | `SELFHELP_ROOT` | Root directory (default `/opt/selfhelp`). |
-| `SELFHELP_TRUSTED_KEYS` | Path to the registry trusted-keys file. |
+| `SELFHELP_TRUSTED_KEYS` | Path to the registry trusted-keys file. Default: the pinned official production key shipped in the image (`packages/schemas/keys/official-trusted-keys.json`), so installs from the official registry verify out of the box. Override only for dev/test registries. |
 | `SELFHELP_PUBLIC_IP` | Optional: enables a hard server-IP DNS comparison. |
 | `SHM_WEB_HOST` / `SHM_WEB_PORT` | Web BFF bind host/port (default `127.0.0.1:8765`). |
 

@@ -112,7 +112,7 @@ Services: `frontend`, `backend`, `worker`, `scheduler`, `mysql`, `redis`,
 | Env var | Purpose |
 | --- | --- |
 | `SELFHELP_ROOT` | Root directory (default `/opt/selfhelp`). |
-| `SELFHELP_TRUSTED_KEYS` | Registry trusted-keys file. |
+| `SELFHELP_TRUSTED_KEYS` | Registry trusted-keys file (default: the pinned official prod key shipped with the manager). |
 | `SELFHELP_MANAGER_TOKEN` | Per-instance token for `process-operations`. |
 | `SELFHELP_PUBLIC_IP` | Enables a hard server-IP DNS comparison. |
 | `SHM_WEB_HOST` / `SHM_WEB_PORT` | Web BFF bind host/port (default `127.0.0.1:8765`). |

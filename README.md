@@ -115,7 +115,10 @@ sh-manager doctor
 ```
 
 Configuration via env: `SELFHELP_ROOT` (default `/opt/selfhelp`),
-`SELFHELP_TRUSTED_KEYS` (path to the registry trusted-keys file).
+`SELFHELP_TRUSTED_KEYS` (path to the registry trusted-keys file; defaults to
+the pinned **official production key** shipped at
+`packages/schemas/keys/official-trusted-keys.json` — only override for dev/test
+registries).
 
 ## Web UI
 

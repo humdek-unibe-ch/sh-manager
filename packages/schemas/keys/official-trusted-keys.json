@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "1.0",
+  "keys": [
+    {
+      "keyId": "prod",
+      "publicKey": "UlkkXrRQSeS0jVqxHkoj39Ak4wDSVfed/XW6hexhCHc=",
+      "algorithm": "ed25519",
+      "status": "active"
+    }
+  ]
+}

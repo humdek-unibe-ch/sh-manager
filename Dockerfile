@@ -40,10 +40,13 @@ ENV SELFHELP_ROOT=/opt/selfhelp
 # without the workspace source dirs (which are intentionally not shipped).
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-workspaces
+# dist/ already contains the runtime JSON assets (packages/schemas/{keys,examples})
+# copied in by scripts/copy-dist-assets.mjs during `npm run build`; the bins
+# resolve their default trusted-keys file (the pinned official production key)
+# relative to the compiled bin.js inside dist/.
 COPY --from=build /app/dist ./dist
 # Ship the built web UI (Vite SPA) where the web server's default client dir
 # resolves (path.join(dirname(bin.js), '..', 'dist-web') === dist/apps/web/dist-web).
 COPY --from=build /app/apps/web/dist-web ./dist/apps/web/dist-web
-COPY packages/schemas/examples ./packages/schemas/examples
 ENTRYPOINT ["node", "dist/apps/cli/src/bin.js"]
 CMD ["--help"]

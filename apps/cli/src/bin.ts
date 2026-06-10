@@ -47,8 +47,12 @@ import {
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ROOT = process.env.SELFHELP_ROOT ?? '/opt/selfhelp';
+// Default trust anchor = the official SelfHelp production signing key, pinned
+// in this repo (packages/schemas/keys/). The dev fixture key under examples/
+// has a public seed and must only ever be used when passed explicitly
+// (tests/rehearsals via SELFHELP_TRUSTED_KEYS).
 const DEFAULT_TRUSTED_KEYS =
-  process.env.SELFHELP_TRUSTED_KEYS ?? path.join(here, '..', '..', '..', 'packages', 'schemas', 'examples', 'trusted-keys.json');
+  process.env.SELFHELP_TRUSTED_KEYS ?? path.join(here, '..', '..', '..', 'packages', 'schemas', 'keys', 'official-trusted-keys.json');
 
 async function deps(root: string) {
   const trustedKeys = await loadTrustedKeys(DEFAULT_TRUSTED_KEYS);
@@ -59,13 +63,20 @@ function fail(err: unknown): never {
   if (err instanceof CrossInstanceError) {
     console.error(`DENIED (cross-instance): ${err.message}`);
   } else {
-    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`Error: ${message}`);
+    if (message.includes('ENOENT') && message.includes('selfhelp.server.json')) {
+      console.error(
+        'This server is not initialized yet. Run first:\n' +
+          '  sh-manager server init --server-id <id> --mode production --email <letsencrypt-email>',
+      );
+    }
   }
   process.exit(1);
 }
 
 const program = new Command();
-program.name('sh-manager').description('SelfHelp Manager: Docker-only connected installer/updater/server manager.').version('0.1.1');
+program.name('sh-manager').description('SelfHelp Manager: Docker-only connected installer/updater/server manager.').version('0.1.2');
 program.option('--root <dir>', 'SelfHelp root directory', DEFAULT_ROOT);
 
 const server = program.command('server').description('Server-level operations');

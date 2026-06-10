@@ -8,7 +8,7 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `0.1.1`). Registry releases
+- **The manager tool** uses its own semver (currently `0.1.2`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
@@ -17,6 +17,39 @@ The manager has two version axes (see
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
 
 ## [Unreleased]
+
+## [0.1.2] - 2026-06-10
+
+The first actually *runnable* Docker image. `v0.1.1` built and pushed fine but
+every container invocation died at startup (see Fixed).
+
+### Fixed
+- **Docker image was unusable** — any command (`instance list`, `--help`, the
+  GUI) failed at startup with
+  `ENOENT ... /app/dist/packages/schemas/examples/trusted-keys.json`. The
+  compiled bins resolve their default trusted-keys file relative to
+  `dist/apps/.../bin.js`, i.e. *inside* `dist/`, but the image copied the JSON
+  assets next to `dist/` instead. `npm run build` now copies
+  `packages/schemas/{keys,examples}` into `dist/` (`scripts/copy-dist-assets.mjs`),
+  so the compiled tree is self-contained everywhere, not only in Docker.
+
+### Security
+- **The default trust anchor is now the pinned official production key**
+  (`packages/schemas/keys/official-trusted-keys.json`, keyId `prod`) for both
+  the CLI and the web UI. Previously the default pointed at the *dev fixture*
+  keys (`packages/schemas/examples/trusted-keys.json`), whose private seed is
+  public in this repo — an operator relying on the default would have accepted
+  attacker-signed "releases". The dev fixture now has to be opted into
+  explicitly via `SELFHELP_TRUSTED_KEYS`/`--trusted-keys` (tests and local
+  rehearsals already do).
+
+### Added
+- **MPL-2.0 `LICENSE` file** at the repo root (the `package.json` already
+  declared `MPL-2.0`; now the license text ships with the repo and image, like
+  the other SelfHelp repositories).
+- **`npm run headers:check`** (`scripts/check-spdx-headers.mts`) — CI-enforced
+  gate (part of `npm run check`) that every tracked source file carries the
+  MPL-2.0 SPDX header, mirroring the backend's `composer headers:check`.
 
 ## [0.1.1] - 2026-06-10
 

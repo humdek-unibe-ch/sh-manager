@@ -85,8 +85,9 @@ bundles.
 - [ ] Docker Engine + Compose v2 installed; the host passes `sh-manager doctor`.
 - [ ] The wizard/BFF is **not** internet-exposed; access is via SSH tunnel.
 - [ ] Management uses **persistent mode** with real operators (least privilege).
-- [ ] `SELFHELP_TRUSTED_KEYS` points at the official trusted-keys file; no
-      `dev`-keyed releases are accepted.
+- [ ] `SELFHELP_TRUSTED_KEYS` is **unset** (the default is the pinned official
+      production key shipped with the manager) or points at the official
+      trusted-keys file; no `dev`-keyed releases are accepted.
 - [ ] Each instance has a **unique** per-instance manager token.
 - [ ] DNS points at this server; consider `--strict-dns` (and `SELFHELP_PUBLIC_IP`
       for a hard server-IP comparison) for production installs.

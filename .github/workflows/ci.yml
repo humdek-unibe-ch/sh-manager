@@ -25,6 +25,8 @@ jobs:
         run: npm test
       - name: Validate schemas + signatures
         run: npm run validate:schemas
+      - name: License headers (MPL-2.0 SPDX)
+        run: npm run headers:check
       - name: License policy report
         run: npm run license:report
       - name: Build
