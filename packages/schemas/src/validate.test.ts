@@ -194,7 +194,7 @@ const validScheduler: SchedulerRelease = {
   image: 'ghcr.io/humdek-unibe-ch/selfhelp-scheduler:0.1.0',
   digest: 'sha256:3333333333333333333333333333333333333333333333333333333333333333',
   backendCompatibility: { requiredCoreRange: '>=0.1.0 <0.2.0' },
-  security: { signature: 's', keyId: 'selfhelp-official-2026' },
+  security: { signature: 's', keyId: 'selfhelp-dev-fixture' },
 };
 
 const validWorker: WorkerRelease = {

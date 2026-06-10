@@ -80,7 +80,7 @@ describe('cross-installer same-fixture parity (manager verifies backend-authored
       //     shared dev key, exactly as a production verify would.
       const result = verifyReleaseSignature(doc, trustedKeys);
       expect(result.verified).toBe(true);
-      expect(result.keyId).toBe('selfhelp-official-2026');
+      expect(result.keyId).toBe('selfhelp-dev-fixture');
     });
   }
 });

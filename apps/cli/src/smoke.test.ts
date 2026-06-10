@@ -39,7 +39,7 @@ import { instanceHealth, instanceInstall, instanceUpdate, serverInit } from './a
 const examplesDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'packages', 'schemas', 'examples');
 const readExample = (n: string) => readFile(path.join(examplesDir, n), 'utf8');
 
-const DEV_KEY_ID = 'selfhelp-official-2026';
+const DEV_KEY_ID = 'selfhelp-dev-fixture';
 const devSeed = createHash('sha256').update('selfhelp-dev-registry-signing-key-v1').digest();
 const devKeyPair = nacl.sign.keyPair.fromSeed(new Uint8Array(devSeed));
 

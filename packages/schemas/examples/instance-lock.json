@@ -35,7 +35,7 @@
       "version": "0.1.0",
       "artifactSha256": "sha256:8888888888888888888888888888888888888888888888888888888888888888",
       "signature": "ZGV2LXNpZ25hdHVyZQ==",
-      "keyId": "selfhelp-official-2026",
+      "keyId": "selfhelp-dev-fixture",
       "compatibility": {
         "core": ">=0.1.0 <0.2.0",
         "pluginApi": "0.1.0"

@@ -35,7 +35,7 @@ import {
 const here = path.dirname(fileURLToPath(import.meta.url));
 const examplesDir = path.join(here, '..', 'packages', 'schemas', 'examples');
 
-const DEV_KEY_ID = 'selfhelp-official-2026';
+const DEV_KEY_ID = 'selfhelp-dev-fixture';
 const seed = createHash('sha256').update('selfhelp-dev-registry-signing-key-v1').digest();
 const keyPair = nacl.sign.keyPair.fromSeed(new Uint8Array(seed));
 const publicKeyB64 = Buffer.from(keyPair.publicKey).toString('base64');

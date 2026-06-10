@@ -13,7 +13,7 @@
   },
   "security": {
     "signature": "dh6YK+AT0oKe2gBHWjEGifRUHrCSnESKrFqtLOhrqtgSh6I/xPgLeUoX0cfIYLLWhibuOJDva+HXT1Sa8DHeBg==",
-    "keyId": "selfhelp-official-2026",
+    "keyId": "selfhelp-dev-fixture",
     "signedPayloadSha256": "sha256:79bff732ee5de6159d3e6c697cc53f1ba4a5835bfd199c5be8ad16729bd11881"
   }
 }
