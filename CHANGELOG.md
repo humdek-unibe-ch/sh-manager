@@ -8,13 +8,53 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `1.0.9`). Registry releases
+- **The manager tool** uses its own semver (currently `1.0.10`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
   **`0.x`** line (core, frontend, scheduler, worker — all `0.1.0`).
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
+
+## [1.0.10] - 2026-06-11
+
+### Fixed
+- **Install no longer dies at `wait_db` with `Unable to read the "/app/.env"
+  environment file`** — Symfony's runtime boots a dotenv file on every request
+  and console command, but the published core images up to 0.1.2 bake no
+  `/app/.env`, so every `php bin/console …` the installer execs (DB wait,
+  migrations, admin creation) fatally aborted and provisioning stopped at
+  `wait_db`. Compose `env_file` entries only inject process env vars — they
+  never create the file — so the generated instance compose now bind-mounts
+  the instance's non-secret `.env` read-only at `/app/.env` in the
+  backend/worker/scheduler containers. The generated `.env` now also carries
+  every backend env var that has no config default (`APP_DEBUG`,
+  `JWT_TOKEN_TTL`, `JWT_REFRESH_TOKEN_TTL`, `CORS_ALLOW_ORIGIN`,
+  `MAILER_DSN`), so it fully substitutes the image-baked defaults file it
+  shadows on newer cores. Installs work for every published core again;
+  images that bake their own `/app/.env` are unaffected (real container env
+  always overrides dotenv values).
+- **Reinstalling after a failed install now continues automatically, even
+  after the manager was updated/restarted in between** — the wizard's retry
+  acknowledgement only lived in memory, so pulling a fixed manager image and
+  re-running the install was refused with "This server is already
+  bootstrapped"; operators had to delete the state folder first. The web
+  install now resumes a half-finished bootstrap server-side: when the on-disk
+  state contains no instance other than the one being (re)installed, `server
+  init` proceeds as an import/repair — the inventory, proxy config and
+  instance folder are reconciled and the existing on-disk secrets are reused
+  (the already-initialised MySQL volume keeps matching its credentials).
+  Nothing has to be deleted to try again. A server hosting *other* instances
+  still refuses without an explicit import acknowledgement.
+- **Worker/scheduler containers no longer show "(unhealthy)" in `docker ps`** —
+  the published worker/scheduler images are built from the backend image and
+  inherit its FrankenPHP `HEALTHCHECK` (a curl against the Caddy admin endpoint
+  `:2019`), but both services run console loops, not FrankenPHP, so the
+  inherited check could never pass and permanently branded working containers
+  unhealthy. The generated compose now disables that inherited healthcheck for
+  `worker` and `scheduler`; `restart: unless-stopped` remains their liveness
+  mechanism and the manager's health verdict (which probes the public HTTP
+  surface) is unaffected.
 
 ## [1.0.9] - 2026-06-11
 
