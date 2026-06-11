@@ -99,8 +99,9 @@ printed password. Repeat on `:8090` for `demo2`.
 .\shm.ps1 web
 ```
 
-Open <http://127.0.0.1:8765> (the wrapper publishes the port loopback-only and
-binds the UI correctly inside the container):
+Open the printed URL, <http://localhost:8765> (the wrapper publishes the port
+loopback-only and binds the UI correctly inside the container; the manager
+version is shown in the page header):
 
 - On a fresh state folder it runs the **install wizard** (environment checks →
   registry → instance config → install) and self-locks after success. You can
@@ -111,6 +112,10 @@ binds the UI correctly inside the container):
   `.\shm.ps1 admin create --email you@example.test --roles server_owner --password ...`.
 
 Stop it with `Ctrl+C`.
+
+In Docker Desktop the GUI container is named `sh-manager-web` (CLI calls run as
+short-lived `sh-manager-cli-<pid>` containers); instance stacks are grouped
+under `selfhelp_<instance-id>`.
 
 ## 5. Update an instance
 
@@ -186,7 +191,9 @@ to the engine's view of the state folder, or `off` to disable translation.
 | Instance containers start but secrets/JWT files appear empty | Manager < 0.1.5 with a state mount that differs between the engine and the container. Update the image, or use the old same-path mount (`-v /run/desktop/mnt/host/d/selfhelp:/run/desktop/mnt/host/d/selfhelp`). |
 | `network selfhelp_proxy declared as external, but could not be found` | Server was bootstrapped by a manager < 0.1.4. Run `docker network create selfhelp_proxy` once, or re-run any `instance install --up` with a current image (it re-ensures the network). |
 | Health probe fails but `http://localhost:<port>` works in the browser | Manager < 0.1.4 probed `localhost` inside its own container. Update the image; or set `SELFHELP_LOCALHOST_PROBE_HOST=host.docker.internal`. |
-| GUI port unreachable | Use `.\shm.ps1 web` (it publishes `127.0.0.1:8765` and binds `0.0.0.0` inside the container). For manual `docker run`, add `-p 127.0.0.1:8765:8765` and `web --host 0.0.0.0`. |
+| GUI port unreachable | Use `.\shm.ps1 web` (it publishes `127.0.0.1:8765` and binds `0.0.0.0` inside the container), then browse `http://localhost:8765` — never `http://0.0.0.0:8765`, which is a bind address, not a URL. For manual `docker run`, add `-p 127.0.0.1:8765:8765` and `web --host 0.0.0.0`. |
+| Wizard says "Provisioning failed at …" (e.g. `admin`, `wait_db`) | The checklist marks the failing step and the red box carries the underlying error. First thing to try: `docker pull ghcr.io/humdek-unibe-ch/sh-manager:latest` — `:latest` is only re-resolved when you pull, so a stale image keeps already-fixed provisioning bugs (e.g. the pre-1.0.6 backend `MERCURE_URL` bug that broke admin creation). Then hit **Retry installation**. |
+| Retry after a failed install says "This server is already bootstrapped" | Fixed in current images: the wizard retry reconciles the half-bootstrapped state (inventory/proxy/instance folder are reused, secrets on disk are kept so the DB volume still matches). On an old image, delete the instance folder and `selfhelp.server.json` from the state folder and start over. |
 | Everything is slow | Keep the state folder on a local NTFS drive (not a network share); make sure Docker Desktop uses the WSL2 backend. |
 
 ## Where to go next
