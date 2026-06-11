@@ -2,8 +2,8 @@
 
 Audience: Server operators
 Status: Active
-Applies to: `sh-manager` (manager tool `0.1.4`)
-Last verified: 2026-06-10
+Applies to: `sh-manager` (manager tool `0.1.5`)
+Last verified: 2026-06-11
 Source of truth: `apps/cli/src/bin.ts`
 
 The commands you reach for most. `<root>` is the SelfHelp root (default
@@ -47,9 +47,11 @@ Services: `frontend`, `backend`, `worker`, `scheduler`, `mysql`, `redis`,
 | Host preflight | `sh-manager doctor` |
 | Bootstrap server (once) | `sh-manager server init --server-id srv-001 --mode production --email ops@example.ch` |
 | Bootstrap for local testing | `sh-manager server init --server-id dev --mode local` |
-| Install + provision | `sh-manager instance install --id website1 --domain website1.example.ch --registry <url> --version latest --provision --admin-email ops@example.ch` |
-| Install local (port, no SSL) | `sh-manager instance install --id demo1 --mode local --port 8080 --registry <url> --version latest --provision --admin-email you@example.test` |
+| Install + provision | `sh-manager instance install --id website1 --domain website1.example.ch --version latest --provision --admin-email ops@example.ch` |
+| Install local (port, no SSL) | `sh-manager instance install --id demo1 --mode local --port 8080 --version latest --provision --admin-email you@example.test` |
+| Use a dev/test registry | add `--registry <url>` (default: the official registry) |
 | Web wizard (localhost BFF) | `sh-manager web` (alias: `sh-manager-web --root /opt/selfhelp`) |
+| Generate the `shm` wrapper script | `sh-manager wrapper --shell powershell\|bash > shm.ps1` (save into the state folder) |
 
 ## Update
 
@@ -120,6 +122,7 @@ Services: `frontend`, `backend`, `worker`, `scheduler`, `mysql`, `redis`,
 | `SELFHELP_PUBLIC_IP` | Enables a hard server-IP DNS comparison. |
 | `SHM_WEB_HOST` / `SHM_WEB_PORT` | Web BFF bind host/port (default `127.0.0.1:8765`). |
 | `SELFHELP_LOCALHOST_PROBE_HOST` | Host substituted for `localhost` in health probes when the manager runs in a container (auto: `host.docker.internal`; `off` disables). |
+| `SELFHELP_ENGINE_ROOT` | The engine's view of the state root when it differs from the container's (auto-discovered by self-inspection; `off` disables translation). |
 
 ## See also
 

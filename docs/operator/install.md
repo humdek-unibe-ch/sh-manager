@@ -2,8 +2,8 @@
 
 Audience: Server operators
 Status: Active
-Applies to: `sh-manager` (manager tool `0.1.4`, installs the SelfHelp 0.x pre-release line)
-Last verified: 2026-06-10
+Applies to: `sh-manager` (manager tool `0.1.5`, installs the SelfHelp 0.x pre-release line)
+Last verified: 2026-06-11
 Source of truth: `apps/cli/src/bin.ts`, `apps/web/src/bin.ts`, `apps/web/src/server.ts`
 
 This installs SelfHelp on a fresh server in two stages: **bootstrap the server**
@@ -39,10 +39,23 @@ alias shm='docker run --rm \
 shm --version
 ```
 
-The state mount must use the **same path on both sides** (`/opt/selfhelp`) and
-must be present on **every** invocation — without it commands fail with
-`ENOENT ... selfhelp.server.json` ("not initialized"). Where this page says
-`sh-manager ...`, run `shm ...`; for the wizard run
+Alternatively, let the image generate a persistent wrapper script into the
+state folder (same effect as the alias, plus it handles the GUI port for
+`shm web` and survives new shells):
+
+```bash
+mkdir -p /opt/selfhelp && cd /opt/selfhelp
+docker run --rm ghcr.io/humdek-unibe-ch/sh-manager:latest wrapper --shell bash > shm.sh && chmod +x shm.sh
+./shm.sh --version
+```
+
+The state mount must be present on **every** invocation — without it commands
+fail with `ENOENT ... selfhelp.server.json` ("not initialized"). Mounting it
+at `/opt/selfhelp` on both sides is the documented default; if you mount a
+*different* host folder there, the manager discovers the engine-side path by
+inspecting its own container and translates generated bind mounts
+automatically (override with `SELFHELP_ENGINE_ROOT`, see Configuration).
+Where this page says `sh-manager ...`, run `shm ...`; for the wizard run
 `docker run --rm -p 127.0.0.1:8765:8765 ... web --host 0.0.0.0`
 (see "Option A"). Running from a source checkout (`npm run cli -- ...`) is for
 development.
@@ -118,11 +131,11 @@ Compose availability).
 
 ### 3. Install an instance
 
-Install and bring the stack up:
+Install and bring the stack up (the official registry is the default;
+`--registry <url>` overrides it for dev/test registries):
 
 ```bash
 sh-manager instance install --id website1 --domain website1.example.ch \
-  --registry https://humdek-unibe-ch.github.io/sh2-plugin-registry/ \
   --version latest --up
 ```
 
@@ -132,7 +145,6 @@ printed **once** if you do not pass one:
 
 ```bash
 sh-manager instance install --id website1 --domain website1.example.ch \
-  --registry https://humdek-unibe-ch.github.io/sh2-plugin-registry/ \
   --version latest --provision --admin-email ops@example.ch
 ```
 
@@ -142,6 +154,7 @@ Useful flags:
 | --- | --- |
 | `--mode production\|local` | Production (domain + TLS) or local (localhost port). |
 | `--port <n>` | Localhost port (local mode). |
+| `--registry <url>` | Registry base URL (default: the official registry). Signature verification against the pinned trusted keys applies regardless. |
 | `--strict-dns` | Production: **block** (not just warn) when DNS does not resolve here. |
 | `--channel stable\|beta\|nightly` | Registry channel. |
 | `--version <v>` | Core version, or `latest`. |
@@ -179,6 +192,7 @@ volumes that **survive** updates and removals unless you explicitly full-delete.
 | Env var | Purpose |
 | --- | --- |
 | `SELFHELP_ROOT` | Root directory (default `/opt/selfhelp`). |
+| `SELFHELP_ENGINE_ROOT` | The Docker engine's view of the root when it differs from the manager container's (auto-discovered by self-inspection when containerized; set explicitly only if discovery is impossible, `off` disables translation). |
 | `SELFHELP_TRUSTED_KEYS` | Path to the registry trusted-keys file. Default: the pinned official production key shipped in the image (`packages/schemas/keys/official-trusted-keys.json`), so installs from the official registry verify out of the box. Override only for dev/test registries. |
 | `SELFHELP_PUBLIC_IP` | Optional: enables a hard server-IP DNS comparison. |
 | `SHM_WEB_HOST` / `SHM_WEB_PORT` | Web BFF bind host/port (default `127.0.0.1:8765`). |

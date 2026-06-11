@@ -35,7 +35,7 @@ this source repo (development).
 ```bash
 docker pull ghcr.io/humdek-unibe-ch/sh-manager:latest
 
-# every run mounts the Docker socket + the state root at the SAME path
+# every run mounts the Docker socket + the state root
 alias shm='docker run --rm \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v /opt/selfhelp:/opt/selfhelp \
@@ -43,19 +43,32 @@ alias shm='docker run --rm \
 
 shm server init --server-id srv-001 --mode production --email ops@example.ch
 shm instance install --id website1 --domain website1.example.ch \
-  --registry https://humdek-unibe-ch.github.io/sh2-plugin-registry/ \
   --version latest --provision --admin-email ops@example.ch
 ```
 
+(The official registry is the default; pass `--registry <url>` for dev/test
+registries.) Instead of the alias, the image can also generate a persistent
+wrapper script: `docker run --rm ghcr.io/humdek-unibe-ch/sh-manager:latest
+wrapper --shell bash > /opt/selfhelp/shm.sh`.
 Full guide: [docs/operator/install.md](docs/operator/install.md).
 
 ### Windows machine (testing)
 
-Same image, two Windows specifics: the state root must use the Docker Desktop
-VM path (`/run/desktop/mnt/host/d/selfhelp` for `D:\selfhelp`) and Git Bash
-needs the `MSYS_NO_PATHCONV=1` prefix. Local mode runs instances on plain
-`http://localhost:<port>` — no domains, no SSL — and as many side-by-side
-instances as you have ports.
+Same image. Pick a state folder (e.g. `D:\selfhelp`), let the image generate
+its wrapper script into it, and use that for everything — the manager
+discovers Docker Desktop's engine-side paths automatically (no VM paths, no
+Git Bash path mangling):
+
+```powershell
+mkdir D:\selfhelp; cd D:\selfhelp
+docker run --rm ghcr.io/humdek-unibe-ch/sh-manager:latest wrapper --shell powershell > shm.ps1
+.\shm.ps1 server init --server-id win-test --mode local
+.\shm.ps1 instance install --id demo1 --mode local --port 8080 --provision --admin-email admin@example.test
+.\shm.ps1 web   # GUI at http://127.0.0.1:8765
+```
+
+Local mode runs instances on plain `http://localhost:<port>` — no domains, no
+SSL — and as many side-by-side instances as you have ports.
 Full guide: [docs/operator/windows-quickstart.md](docs/operator/windows-quickstart.md).
 
 ### From source (development)
@@ -154,16 +167,16 @@ Other scripts: `npm run build`, `npm run fixtures:sign`, `npm run license:report
 # one-time server bootstrap (shared proxy + inventory)
 sh-manager server init --server-id srv-001 --mode production --email ops@example.ch
 
-# install an isolated instance from the official registry
+# install an isolated instance (official registry is the default;
+# --registry <url> overrides it for dev/test registries)
 sh-manager instance install --id website1 --domain website1.example.ch \
-  --registry https://humdek-unibe-ch.github.io/sh2-plugin-registry/ --version latest --up
+  --version latest --up
 
 # install AND fully provision (wait for DB -> migrate -> create admin ->
 # install plugins -> warm caches -> health). A generated admin password is
 # printed once and never written to disk/manifest/lock.
 sh-manager instance install --id website1 --domain website1.example.ch \
-  --registry https://humdek-unibe-ch.github.io/sh2-plugin-registry/ --version latest \
-  --provision --admin-email ops@example.ch
+  --version latest --provision --admin-email ops@example.ch
 
 sh-manager instance list
 sh-manager instance health website1
@@ -234,14 +247,16 @@ never receive the socket.
 
 Two rules make this reliable everywhere:
 
-- **Mount the state root at the same path on both sides** (`/opt/selfhelp` ↔
-  `/opt/selfhelp`). The manager drives the *host* engine through the socket,
-  so every path it writes must mean the same thing to the engine. On Windows
-  (Docker Desktop) that path is the VM view of your drive — see the
-  [Windows quickstart](docs/operator/windows-quickstart.md).
-- **Use the exact same `-v` flags for every invocation** (use a shell alias).
-  If the state mount is missing or different, commands fail with
-  `ENOENT ... selfhelp.server.json` ("not initialized").
+- **Mount a state folder at `/opt/selfhelp` inside the container.** The
+  manager drives the *host* engine through the socket; when the engine sees
+  that folder under a different path (Docker Desktop on Windows/macOS, or any
+  non-default host folder), the manager discovers the engine-side path by
+  inspecting its own container and translates generated bind mounts
+  automatically (`SELFHELP_ENGINE_ROOT` overrides/disables this).
+- **Use the exact same `-v` flags for every invocation** — or generate the
+  wrapper script once (`sh-manager wrapper --shell powershell|bash`), which
+  bakes them in. If the state mount is missing or different, commands fail
+  with `ENOENT ... selfhelp.server.json` ("not initialized").
 
 ## Security model
 
