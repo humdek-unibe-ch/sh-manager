@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
 import { Code, Paper, Stack } from '@mantine/core';
+import { useQuery } from '@tanstack/react-query';
 import { Alert, Button, SelectField, TextField, WizardFrame } from '../../../components';
 import { STEP_COPY } from '../../../lib/wizard-view';
 import { instanceDir, slugify } from '../../../lib/formatting';
@@ -21,9 +22,30 @@ export interface InstanceStepProps {
 
 export function InstanceStep({ ctl }: InstanceStepProps): JSX.Element {
   const cfg = ctl.effectiveConfig;
+  const channel = cfg?.channel ?? 'stable';
+  // Available release versions for the dropdown (display aid only — the
+  // server re-resolves and verifies the selected version during install).
+  const versionsQuery = useQuery({
+    queryKey: ['registry-versions', channel],
+    queryFn: () => ctl.client.listVersions(channel),
+    staleTime: 60_000,
+    retry: false,
+  });
   if (!cfg) return <span />;
   const copy = STEP_COPY.instance;
   const problems = validateStep('instance', cfg);
+
+  const versions = versionsQuery.data?.versions ?? [];
+  // Fall back to free-text entry when the registry list cannot be fetched.
+  const versionListUsable = !versionsQuery.isError && !(versionsQuery.isSuccess && versions.length === 0);
+  const versionOptions = [
+    { value: 'latest', label: 'latest — newest compatible release' },
+    ...versions.map((v) => ({ value: v, label: v })),
+    // Keep a pinned value selectable even when it is not in the fetched list.
+    ...(cfg.version !== 'latest' && !versions.includes(cfg.version)
+      ? [{ value: cfg.version, label: cfg.version }]
+      : []),
+  ];
 
   const onName = (value: string): void => {
     // Auto-suggest the id while the operator hasn't customised it.
@@ -80,18 +102,29 @@ export function InstanceStep({ ctl }: InstanceStepProps): JSX.Element {
             onChange={(v) => ctl.patchDraft({ channel: v as ReleaseChannel })}
             help="Determines which verified releases are offered."
           />
-          <TextField
-            label="SelfHelp version"
-            value={cfg.version}
-            onChange={(v) => ctl.patchDraft({ version: v })}
-            help='Use "latest" for the newest compatible release, or pin an exact version.'
-            placeholder="latest"
-          />
+          {versionListUsable ? (
+            <SelectField
+              label="SelfHelp version"
+              value={cfg.version}
+              options={versionOptions}
+              onChange={(v) => ctl.patchDraft({ version: v })}
+              help='Pick "latest" for the newest compatible release, or pin an exact version from the registry.'
+            />
+          ) : (
+            <TextField
+              label="SelfHelp version"
+              value={cfg.version}
+              onChange={(v) => ctl.patchDraft({ version: v })}
+              help='Could not load the version list — use "latest" or type an exact version.'
+              placeholder="latest"
+            />
+          )}
           <TextField
             label="Registry URL"
             value={cfg.registryUrl}
-            onChange={(v) => ctl.patchDraft({ registryUrl: v })}
-            help="The official signed release registry. Change only if you run a mirror."
+            onChange={() => undefined}
+            disabled
+            help="Fixed to the official signed SelfHelp registry."
             error={pickProblem(problems, 'registry')}
           />
         </Stack>

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MPL-2.0
 import { describe, it, expect, afterEach } from 'vitest';
 import { createOperator, emptyOperatorTable, InMemoryOperatorStore } from '@shm/auth';
-import { createBootstrapServer, isLoopbackHost, type BootstrapServerHandle } from './server.js';
+import { browseUrl, createBootstrapServer, isLoopbackHost, type BootstrapServerHandle } from './server.js';
 import type { BootstrapActions } from './actions.js';
 
 function fakeActions(overrides: Partial<BootstrapActions> = {}): BootstrapActions {
@@ -78,6 +78,18 @@ describe('isLoopbackHost', () => {
     expect(isLoopbackHost('::1')).toBe(true);
     expect(isLoopbackHost('localhost')).toBe(true);
     expect(isLoopbackHost('example.com')).toBe(false);
+  });
+});
+
+describe('browseUrl', () => {
+  it('maps a wildcard bind (in-container) to a localhost URL the operator can open', () => {
+    expect(browseUrl('0.0.0.0', 8765)).toBe('http://localhost:8765');
+    expect(browseUrl('::', 8765)).toBe('http://localhost:8765');
+  });
+
+  it('keeps explicit binds as-is (bracketing IPv6)', () => {
+    expect(browseUrl('127.0.0.1', 8765)).toBe('http://127.0.0.1:8765');
+    expect(browseUrl('::1', 9000)).toBe('http://[::1]:9000');
   });
 });
 
@@ -169,6 +181,79 @@ describe('bootstrap wizard over HTTP', () => {
     // Without a wired action the route is simply absent.
     const bare = await start(createBootstrapServer({ actions: fakeActions(), port: 0 }));
     expect((await fetch(bare + '/api/manager/update-check')).status).toBe(404);
+  });
+
+  it('includes the manager version in every state snapshot', async () => {
+    const base = await start(createBootstrapServer({ actions: fakeActions(), managerVersion: '1.0.6' }));
+    const body = (await (await fetch(base + '/api/state')).json()) as { managerVersion?: string };
+    expect(body.managerVersion).toBe('1.0.6');
+  });
+
+  it('lists registry versions server-authoritatively (URL from wizard state, channel previewable)', async () => {
+    const calls: { url: string; channel: string }[] = [];
+    const base = await start(
+      createBootstrapServer({
+        actions: fakeActions({
+          listVersions: async (registryUrl, channel) => {
+            calls.push({ url: registryUrl, channel });
+            return { versions: ['0.2.0', '0.1.0'] };
+          },
+        }),
+        initialConfig: { registryUrl: 'https://registry.example.com/' },
+      }),
+    );
+
+    const res = await fetch(base + '/api/registry/versions');
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { versions: string[] }).versions).toEqual(['0.2.0', '0.1.0']);
+    // The registry URL comes from the server's wizard state, never the browser.
+    expect(calls[0]).toEqual({ url: 'https://registry.example.com/', channel: 'stable' });
+
+    await fetch(base + '/api/registry/versions?channel=beta');
+    expect(calls[1]?.channel).toBe('beta');
+
+    // Without a wired action the route is simply absent.
+    const bare = await start(createBootstrapServer({ actions: fakeActions(), port: 0 }));
+    expect((await fetch(bare + '/api/registry/versions')).status).toBe(404);
+  });
+
+  it('re-runs after a failed install acknowledge import/repair (retry path)', async () => {
+    const seenAllowImport: (boolean | undefined)[] = [];
+    let failNext = true;
+    const base = await start(
+      createBootstrapServer({
+        actions: fakeActions({
+          runInstall: async (plan) => {
+            seenAllowImport.push(plan.serverInit.allowImport);
+            if (failNext) {
+              failNext = false;
+              return { ok: false, detail: 'Provisioning failed at "wait_db": boom', failedStep: 'wait_db' };
+            }
+            return { ok: true, instanceDir: '/opt/selfhelp/instances/clinic-a', version: '0.1.0' };
+          },
+        }),
+      }),
+    );
+    const post = (p: string, body?: unknown) =>
+      fetch(base + p, { method: 'POST', headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
+
+    await post('/api/config', FULL_CONFIG);
+    const order = ['welcome', 'docker', 'internet', 'registry', 'install_root', 'resources', 'mode', 'domain', 'proxy', 'instance', 'admin'];
+    for (const step of order) {
+      if (['docker', 'internet', 'registry', 'resources'].includes(step)) await post('/api/check/' + step);
+      await post('/api/advance');
+    }
+
+    // First attempt: a fresh bootstrap — no import acknowledgement.
+    const first = await snap(await post('/api/install'));
+    expect(first.outcome?.ok).toBe(false);
+    expect(seenAllowImport[0]).toBeUndefined();
+
+    // Retry: the failed first attempt may have half-bootstrapped the server,
+    // so the re-run must acknowledge import/repair instead of refusing.
+    const second = await snap(await post('/api/install'));
+    expect(second.outcome?.ok).toBe(true);
+    expect(seenAllowImport[1]).toBe(true);
   });
 });
 

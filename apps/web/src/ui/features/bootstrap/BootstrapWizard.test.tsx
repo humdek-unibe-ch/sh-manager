@@ -83,4 +83,36 @@ describe('BootstrapWizard flow', () => {
     await user.type(screen.getByLabelText(/server id/i), 'research-vm-1');
     expect(continueBtn).toBeEnabled();
   });
+
+  it('offers registry versions in a dropdown and keeps the registry URL visible but locked', async () => {
+    const user = userEvent.setup();
+    render(
+      <BootstrapWizard
+        client={makeFakeClient({ startAt: 'instance', availableVersions: ['0.5.0', '0.4.2'] })}
+      />,
+    );
+
+    // The version field is a dropdown fed from the registry, plus "latest".
+    // (The open dropdown's listbox shares the field label, so select the <input>.)
+    const versionSelect = await screen.findByLabelText(/selfhelp version/i, { selector: 'input' });
+    await user.click(versionSelect);
+    expect(await screen.findByRole('option', { name: /latest — newest compatible release/i })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '0.5.0' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '0.4.2' })).toBeInTheDocument();
+
+    // The registry URL is shown for transparency but not editable.
+    const registryInput = screen.getByLabelText(/registry url/i);
+    expect(registryInput).toBeDisabled();
+    expect(registryInput).toHaveValue('https://registry.example.com/');
+  });
+
+  it('falls back to free-text version entry when the registry list cannot be loaded', async () => {
+    render(<BootstrapWizard client={makeFakeClient({ startAt: 'instance', availableVersions: [] })} />);
+
+    // An empty registry response degrades to a plain text input, not an empty dropdown.
+    await screen.findByText(/Could not load the version list/i);
+    const versionInput = screen.getByLabelText(/selfhelp version/i);
+    expect(versionInput).not.toHaveAttribute('aria-haspopup');
+    expect(versionInput).toHaveValue('latest');
+  });
 });

@@ -71,6 +71,8 @@ export interface BootstrapServerOptions {
   initialConfig?: Partial<WizardConfig>;
   /** Directory of the built React SPA (Vite `dist-web`). Falls back to the inline shell. */
   clientDir?: string;
+  /** Manager version surfaced in every state snapshot (UI header/footer). */
+  managerVersion?: string;
   now?: () => Date;
 }
 
@@ -109,6 +111,17 @@ const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost', '0.0.0.0']);
 
 export function isLoopbackHost(host: string): boolean {
   return LOOPBACK_HOSTS.has(host);
+}
+
+/**
+ * The URL an operator can actually open for a given bind. A wildcard bind
+ * (`0.0.0.0` / `::` — the in-container case, reached through a published
+ * loopback port) is browsable via localhost, never via the wildcard address.
+ */
+export function browseUrl(host: string, port: number): string {
+  const wildcard = host === '0.0.0.0' || host === '::' || host === '';
+  const display = wildcard ? 'localhost' : host.includes(':') ? `[${host}]` : host;
+  return `http://${display}:${port}`;
 }
 
 function hostHeaderIsLocal(req: IncomingMessage): boolean {
@@ -226,6 +239,7 @@ export function createBootstrapServer(options: BootstrapServerOptions): Bootstra
       checks: state.checks,
       completed: state.completed,
       canAdvance: canAdvance(state),
+      ...(options.managerVersion ? { managerVersion: options.managerVersion } : {}),
       ...extra,
     };
   }
@@ -258,6 +272,13 @@ export function createBootstrapServer(options: BootstrapServerOptions): Bootstra
       plan = buildBootstrapPlan(state.config);
     } catch (err) {
       throw new HttpError(400, err instanceof WizardError ? err.message : 'Invalid configuration.');
+    }
+    // Retry after a failed attempt: the first run may already have written the
+    // inventory/proxy/instance dir, so the re-run must acknowledge import/repair
+    // instead of failing with "this server is already bootstrapped".
+    const priorInstall = state.checks.install;
+    if (priorInstall && !priorInstall.ok) {
+      plan = { ...plan, serverInit: { ...plan.serverInit, allowImport: true } };
     }
     const outcome = await options.actions.runInstall(plan);
     state = recordCheck(state, 'install', installToCheck(outcome));
@@ -322,6 +343,14 @@ export function createBootstrapServer(options: BootstrapServerOptions): Bootstra
     if (path === '/api/manager/update-check' && ctx.method === 'GET') {
       if (!options.actions.checkManagerUpdate) throw new HttpError(404, 'Not found.');
       return sendJson(res, 200, await options.actions.checkManagerUpdate());
+    }
+    if (path === '/api/registry/versions' && ctx.method === 'GET') {
+      if (!options.actions.listVersions) throw new HttpError(404, 'Not found.');
+      // Server-authoritative: the registry URL always comes from the wizard
+      // state, never from the browser. Only the channel may be previewed (a
+      // display concern; the install itself re-validates against the state).
+      const channel = ctx.url.searchParams.get('channel') ?? state.config.channel;
+      return sendJson(res, 200, await options.actions.listVersions(state.config.registryUrl, channel));
     }
     if (path === '/api/config' && ctx.method === 'POST') {
       state = setConfig(state, (ctx.body ?? {}) as Partial<WizardConfig>);

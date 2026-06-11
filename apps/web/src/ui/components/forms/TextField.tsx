@@ -14,6 +14,8 @@ export interface TextFieldProps {
   type?: 'text' | 'email' | 'number';
   inputMode?: 'text' | 'numeric' | 'email';
   autoComplete?: string;
+  /** Visible but not editable (e.g. a value fixed by policy). */
+  disabled?: boolean;
   /** Optional trailing adornment, e.g. a unit or fixed suffix. */
   suffix?: ReactNode;
 }
@@ -29,6 +31,7 @@ export function TextField({
   type = 'text',
   inputMode,
   autoComplete,
+  disabled,
   suffix,
 }: TextFieldProps): JSX.Element {
   return (
@@ -43,6 +46,7 @@ export function TextField({
       type={type}
       inputMode={inputMode}
       autoComplete={autoComplete}
+      disabled={disabled}
       rightSection={suffix}
       rightSectionWidth={suffix ? undefined : 0}
     />

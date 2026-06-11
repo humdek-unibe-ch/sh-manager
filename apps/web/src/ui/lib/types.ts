@@ -7,7 +7,7 @@
  * check shapes — the UI never redefines validation or step contracts.
  */
 import type { InstanceMode, ReleaseChannel } from '@shm/schemas';
-import type { HealthOutcome, InstallOutcome, ManagerUpdateCheck } from '../../actions';
+import type { HealthOutcome, InstallOutcome, ManagerUpdateCheck, RegistryVersions } from '../../actions';
 import type { CheckResult, CheckSeverity, WizardConfig, WizardStepId } from '../../wizard';
 
 export type {
@@ -19,6 +19,7 @@ export type {
   InstallOutcome,
   InstanceMode,
   ManagerUpdateCheck,
+  RegistryVersions,
   ReleaseChannel,
 };
 
@@ -39,6 +40,8 @@ export interface Snapshot {
   checks: Partial<Record<WizardStepId, CheckResult>>;
   completed: boolean;
   canAdvance: AdvanceDecision;
+  /** Manager version, shown in the UI header/footer. */
+  managerVersion?: string;
   /** Present only on the `/api/install` response. */
   outcome?: InstallOutcome;
   health?: HealthOutcome;

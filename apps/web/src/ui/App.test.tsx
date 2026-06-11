@@ -18,6 +18,7 @@ function persistentClient(): ApiClient {
     checks: {},
     completed: false,
     canAdvance: { ok: false },
+    managerVersion: '1.0.6-test',
   };
   const same = async (): Promise<Snapshot> => snap;
   return {
@@ -34,6 +35,7 @@ function persistentClient(): ApiClient {
       runtime: 'docker',
       instructions: [],
     }),
+    listVersions: async () => ({ versions: [] }),
     login: async () => ({ ok: true, email: 'owner@example.com', roles: ['server_owner'], csrfToken: 't' }),
     logout: async () => {},
   };
@@ -49,6 +51,7 @@ function throwingClient(err: unknown): ApiClient {
     runCheck: fail,
     install: fail,
     managerUpdateCheck: fail,
+    listVersions: fail,
     login: fail,
     logout: async () => {},
   };
@@ -58,6 +61,12 @@ describe('App routing', () => {
   it('shows the bootstrap installer when the server is in bootstrap mode', async () => {
     render(<App client={makeFakeClient()} />);
     expect(await screen.findByText(/Set up SelfHelp on this server/i)).toBeInTheDocument();
+  });
+
+  it('shows the manager version reported by the server in the header', async () => {
+    render(<App client={makeFakeClient()} />);
+    await screen.findByText(/Set up SelfHelp on this server/i);
+    expect(screen.getAllByText(/v1\.0\.6-test/).length).toBeGreaterThan(0);
   });
 
   it('shows the operations console when the server is in persistent mode', async () => {

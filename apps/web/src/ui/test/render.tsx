@@ -36,7 +36,9 @@ export function render(
   const client = createTestQueryClient();
   function Wrapper({ children }: { children: ReactNode }): JSX.Element {
     return (
-      <MantineProvider theme={theme}>
+      // `env="test"` switches Mantine transitions/portals to their synchronous
+      // test-mode path — without it, dropdowns never become visible in jsdom.
+      <MantineProvider theme={theme} env="test">
         <QueryClientProvider client={client}>
           <Notifications />
           {children}

@@ -4,17 +4,19 @@ import { useEffect, useState } from 'react';
 import { Code, Paper, Stack, Text, VisuallyHidden } from '@mantine/core';
 import { Alert, Button, StepProgress, WizardFrame, type ProgressStep } from '../../../components';
 import { redactSecrets } from '../../../lib/formatting';
-import { INSTALL_STEPS } from '../../../lib/wizard-view';
+import { INSTALL_STEPS, installStepIndexForFailure } from '../../../lib/wizard-view';
 import { StepFooter } from './shared';
 
 export interface InstallProgressStepProps {
   phase: 'running' | 'failed';
   error?: string;
+  /** Server-reported failure phase (`InstallOutcome.failedStep`). */
+  failedStep?: string;
   onRetry?: () => void;
   onBack?: () => void;
 }
 
-export function InstallProgressStep({ phase, error, onRetry, onBack }: InstallProgressStepProps): JSX.Element {
+export function InstallProgressStep({ phase, error, failedStep, onRetry, onBack }: InstallProgressStepProps): JSX.Element {
   const [index, setIndex] = useState(0);
 
   useEffect(() => {
@@ -25,12 +27,17 @@ export function InstallProgressStep({ phase, error, onRetry, onBack }: InstallPr
     return () => window.clearInterval(timer);
   }, [phase]);
 
+  // On failure, trust the server's reported phase over the display animation's
+  // position so the failed marker lands on the step that actually stopped.
+  const mappedFailIndex = installStepIndexForFailure(failedStep);
+  const failIndex = phase === 'failed' && mappedFailIndex >= 0 ? mappedFailIndex : index;
+
   const steps: ProgressStep[] = INSTALL_STEPS.map((s, i) => {
     const state: ProgressStep['state'] =
       phase === 'failed'
-        ? i < index
+        ? i < failIndex
           ? 'success'
-          : i === index
+          : i === failIndex
             ? 'failed'
             : 'waiting'
         : i < index

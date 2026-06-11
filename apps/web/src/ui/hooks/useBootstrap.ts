@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react';
 import { ApiError, createApiClient, type ApiClient } from '../lib/api-client';
 import { publicUrlPreview } from '../lib/formatting';
-import type { InstallResult, Snapshot, WizardConfig, WizardStepId } from '../lib/types';
+import type { InstallOutcome, InstallResult, Snapshot, WizardConfig, WizardStepId } from '../lib/types';
 
 export interface BootstrapState {
   status: 'loading' | 'ready' | 'error';
@@ -21,6 +21,8 @@ export interface BootstrapState {
   actionError: string | null;
   installing: boolean;
   installError: string | null;
+  /** The structured failure outcome (carries `failedStep` for the checklist). */
+  installFailure: InstallOutcome | null;
   installResult: InstallResult | null;
 }
 
@@ -34,6 +36,7 @@ const INITIAL: BootstrapState = {
   actionError: null,
   installing: false,
   installError: null,
+  installFailure: null,
   installResult: null,
 };
 
@@ -49,6 +52,8 @@ function friendly(err: unknown): string {
 
 export interface BootstrapController {
   state: BootstrapState;
+  /** The API client, for read-only lookups in step components (e.g. versions). */
+  client: ApiClient;
   /** snapshot.config merged with unsaved field edits. */
   effectiveConfig: WizardConfig | null;
   patchDraft: (patch: Partial<WizardConfig>) => void;
@@ -127,12 +132,17 @@ export function useBootstrap(injectedClient?: ApiClient): BootstrapController {
   );
 
   const install = useCallback(async () => {
-    dispatch({ installing: true, installError: null, actionError: null });
+    dispatch({ installing: true, installError: null, installFailure: null, actionError: null });
     try {
       const snap = await client.install();
       const outcome = snap.outcome;
       if (!outcome || !outcome.ok) {
-        dispatch({ installing: false, installError: outcome?.detail ?? 'Installation failed.', snapshot: snap });
+        dispatch({
+          installing: false,
+          installError: outcome?.detail ?? 'Installation failed.',
+          installFailure: outcome ?? null,
+          snapshot: snap,
+        });
         return;
       }
       const cfg = { ...snap.config, ...stateRef.current.draft };
@@ -167,5 +177,5 @@ export function useBootstrap(injectedClient?: ApiClient): BootstrapController {
     [state.snapshot, state.draft],
   );
 
-  return { state, effectiveConfig, patchDraft, continueStep, goBack, runCheck, install, dismissError };
+  return { state, client, effectiveConfig, patchDraft, continueStep, goBack, runCheck, install, dismissError };
 }

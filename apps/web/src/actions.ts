@@ -34,6 +34,12 @@ export interface InstallOutcome {
   /** Public URL the operator visits once the stack is up. */
   publicUrl?: string;
   detail?: string;
+  /**
+   * Where the install stopped: a provisioning step name (`wait_db`,
+   * `migrations`, `admin`, `plugins`, `cache_warm`, `health`) or the coarse
+   * phases `server_init` / `install`. Lets the UI mark the right checklist row.
+   */
+  failedStep?: string;
 }
 
 export interface HealthOutcome {
@@ -53,6 +59,14 @@ export interface ManagerUpdateCheck {
   error?: string;
 }
 
+/** Available release versions for the wizard's version dropdown. */
+export interface RegistryVersions {
+  /** Versions on the requested channel, newest first. */
+  versions: string[];
+  /** Human detail when the list could not be fetched (UI falls back to free text). */
+  detail?: string;
+}
+
 export interface BootstrapActions {
   checkDocker(): Promise<DockerCheck>;
   checkInternet(): Promise<CheckResult>;
@@ -62,6 +76,8 @@ export interface BootstrapActions {
   checkHealth(plan: BootstrapPlan): Promise<HealthOutcome>;
   /** Optional: "is a newer manager released?" surfaced in the UI header. */
   checkManagerUpdate?(): Promise<ManagerUpdateCheck>;
+  /** Optional: list installable versions for the wizard's version dropdown. */
+  listVersions?(registryUrl: string, channel: string): Promise<RegistryVersions>;
 }
 
 /** Map the typed sub-results onto the wizard's generic {@link CheckResult}. */
@@ -103,4 +119,22 @@ export function healthToCheck(o: HealthOutcome): CheckResult {
   if (o.healthy && !o.degraded) return { ok: true, severity: 'ok', detail: o.detail ?? 'All services healthy.' };
   if (o.degraded) return { ok: true, severity: 'warning', detail: o.detail ?? 'Some services degraded.' };
   return { ok: false, severity: 'error', detail: o.detail ?? 'Health check failed.' };
+}
+
+/** Minimal shape of a provisioning step result (mirrors @shm/core's report). */
+export interface ProvisionStepLike {
+  name: string;
+  status: 'done' | 'failed' | 'skipped';
+  detail?: string;
+}
+
+/**
+ * Human-readable provisioning failure: names the step that stopped the install
+ * and carries its detail, instead of an opaque "Provisioning failed.".
+ * Provisioning is fail-fast, so there is at most one failed step.
+ */
+export function provisionFailureDetail(steps: ProvisionStepLike[]): string {
+  const failed = steps.find((s) => s.status === 'failed');
+  if (!failed) return 'Provisioning failed.';
+  return `Provisioning failed at "${failed.name}"${failed.detail ? `: ${failed.detail}` : '.'}`;
 }

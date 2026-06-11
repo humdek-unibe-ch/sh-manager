@@ -18,8 +18,8 @@ import { MANAGER_VERSION } from '@shm/schemas';
 import { RegistryClient, RegistryError } from '@shm/registry';
 import { discoverEngineRoot } from '@shm/docker';
 import { FileOperatorStore } from '@shm/auth';
-import type { BootstrapActions } from './actions.js';
-import { createBootstrapServer, type ServerMode } from './server.js';
+import { provisionFailureDetail, type BootstrapActions } from './actions.js';
+import { browseUrl, createBootstrapServer, type ServerMode } from './server.js';
 import { doctor, instanceInstall, serverInit } from '../../cli/src/actions.js';
 import { loadTrustedKeys, realDeps } from '../../cli/src/env.js';
 import { checkSelfUpdate } from '../../cli/src/self-update.js';
@@ -118,19 +118,43 @@ export async function startWebUi(opts: WebUiOptions = {}): Promise<{ host: strin
       return { status: result.status === 'blocked' ? 'blocked' : result.status === 'warning' ? 'warning' : 'ok', detail: result.checks.map((c) => c.message).join(' ') };
     },
     async runInstall(plan) {
-      await serverInit(deps, plan.serverInit);
-      const res = await instanceInstall(deps, { ...plan.instanceInstall });
-      lastHealthOk = res.provision ? res.provision.ok : res.broughtUp;
       const publicUrl =
         plan.instanceInstall.mode === 'production'
           ? `https://${plan.instanceInstall.domain}`
           : `http://localhost:${plan.instanceInstall.localPort}`;
+      // Failures come back as a structured outcome (never a thrown 500): the
+      // wizard records them, shows the failing phase, and can offer a retry.
+      try {
+        await serverInit(deps, plan.serverInit);
+      } catch (err) {
+        lastHealthOk = false;
+        return { ok: false, publicUrl, failedStep: 'server_init', detail: err instanceof Error ? err.message : String(err) };
+      }
+      let res;
+      try {
+        res = await instanceInstall(deps, { ...plan.instanceInstall });
+      } catch (err) {
+        lastHealthOk = false;
+        return { ok: false, publicUrl, failedStep: 'install', detail: err instanceof Error ? err.message : String(err) };
+      }
+      lastHealthOk = res.provision ? res.provision.ok : res.broughtUp;
+      if (res.provision && !res.provision.ok) {
+        const failed = res.provision.steps.find((s) => s.status === 'failed');
+        return {
+          ok: false,
+          instanceDir: res.instanceDir,
+          version: res.version,
+          publicUrl,
+          detail: provisionFailureDetail(res.provision.steps),
+          ...(failed ? { failedStep: failed.name } : {}),
+        };
+      }
       return {
-        ok: res.provision ? res.provision.ok : true,
+        ok: true,
         instanceDir: res.instanceDir,
         version: res.version,
         publicUrl,
-        detail: res.provision ? `Provisioning ${res.provision.ok ? 'succeeded' : 'failed'}.` : 'Installed.',
+        detail: res.provision ? 'Provisioning succeeded.' : 'Installed.',
       };
     },
     async checkHealth() {
@@ -139,6 +163,17 @@ export async function startWebUi(opts: WebUiOptions = {}): Promise<{ host: strin
     },
     async checkManagerUpdate() {
       return checkSelfUpdate({ currentVersion: managerVersion });
+    },
+    async listVersions(registryUrl, channel) {
+      const client = new RegistryClient({ baseUrl: registryUrl, trustedKeys, managerVersion });
+      try {
+        const index = await client.getIndex();
+        const versions = [...new Set(index.core.filter((r) => r.channel === channel && !r.blocked).map((r) => r.version))]
+          .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+        return { versions };
+      } catch (err) {
+        return { versions: [], detail: err instanceof Error ? err.message : String(err) };
+      }
     },
   };
 
@@ -152,11 +187,18 @@ export async function startWebUi(opts: WebUiOptions = {}): Promise<{ host: strin
     allowNonLocal,
     persistAfterBootstrap,
     clientDir,
+    managerVersion,
     ...(operatorStore ? { operatorStore } : {}),
   });
 
   const bound = await handle.listen();
-  console.log(`SelfHelp Manager ${mode} UI listening on http://${bound.host}:${bound.port}`);
-  if (!allowNonLocal) console.log('Bound to localhost only. Use an SSH tunnel for remote access.');
+  // Always print the URL an operator can actually open: a wildcard bind
+  // (in-container) is reachable via the published localhost port, not 0.0.0.0.
+  console.log(`SelfHelp Manager ${mode} UI (v${managerVersion}): ${browseUrl(bound.host, bound.port)}`);
+  if (bound.host === '0.0.0.0' || bound.host === '::') {
+    console.log('Reachable only through the published port (the shm wrapper publishes it on 127.0.0.1).');
+  } else if (!allowNonLocal) {
+    console.log('Bound to localhost only. Use an SSH tunnel for remote access.');
+  }
   return bound;
 }

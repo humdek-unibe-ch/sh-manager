@@ -76,7 +76,7 @@ export function App({ client: injected }: AppProps = {}): JSX.Element {
     ) : null;
 
   return (
-    <AppShell subtitle={subtitle} headerActions={headerActions}>
+    <AppShell subtitle={subtitle} version={stateQuery.data?.managerVersion} headerActions={headerActions}>
       {view === 'loading' ? (
         <Center mih="50vh">
           <Spinner size="lg" label="Loading manager" />

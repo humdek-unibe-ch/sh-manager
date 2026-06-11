@@ -58,7 +58,12 @@ export interface FakeClientOptions {
   failInstall?: boolean;
   /** Simulate a newer published manager release. */
   managerUpdateAvailable?: boolean;
+  /** Versions returned by listVersions (default: a small fixed set). */
+  availableVersions?: string[];
 }
+
+/** Manager version baked into every fake snapshot (asserted by header tests). */
+export const FAKE_MANAGER_VERSION = '1.0.6-test';
 
 export function makeFakeClient(opts: FakeClientOptions = {}): ApiClient {
   const config: WizardConfig = { ...FULL_CONFIG, ...opts.config };
@@ -73,6 +78,7 @@ export function makeFakeClient(opts: FakeClientOptions = {}): ApiClient {
     checks: state.checks,
     completed: state.completed,
     canAdvance: canAdvance(state),
+    managerVersion: FAKE_MANAGER_VERSION,
     ...extra,
   });
 
@@ -96,9 +102,18 @@ export function makeFakeClient(opts: FakeClientOptions = {}): ApiClient {
       state = recordCheck(state, step, { ok: true, severity: 'ok', detail: `${step} check passed.` });
       return snapshot();
     },
+    async listVersions() {
+      return { versions: opts.availableVersions ?? ['0.3.0', '0.2.1', '0.2.0'] };
+    },
     async install() {
       if (opts.failInstall) {
-        return snapshot({ outcome: { ok: false, detail: 'Install failed while pulling images: token=supersecret123' } });
+        return snapshot({
+          outcome: {
+            ok: false,
+            detail: 'Provisioning failed at "wait_db": Install failed while pulling images: token=supersecret123',
+            failedStep: 'wait_db',
+          },
+        });
       }
       state = recordCheck(state, 'install', { ok: true, severity: 'ok', detail: 'Installed.' });
       state = recordCheck(state, 'health', { ok: true, severity: 'ok', detail: 'Healthy.' });

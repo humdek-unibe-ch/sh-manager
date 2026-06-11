@@ -6,12 +6,14 @@ import { Brand } from './Brand';
 
 export interface AppShellProps {
   subtitle?: string;
+  /** Manager version shown in the header brand + footer. */
+  version?: string;
   /** Rendered on the right of the header (status badge, sign-out, …). */
   headerActions?: ReactNode;
   children: ReactNode;
 }
 
-export function AppShell({ subtitle, headerActions, children }: AppShellProps): JSX.Element {
+export function AppShell({ subtitle, version, headerActions, children }: AppShellProps): JSX.Element {
   return (
     <div className="flex min-h-screen flex-col">
       <Box
@@ -22,7 +24,7 @@ export function AppShell({ subtitle, headerActions, children }: AppShellProps): 
       >
         <Container size="lg" px={0}>
           <Group justify="space-between" wrap="nowrap">
-            <Brand subtitle={subtitle} />
+            <Brand subtitle={subtitle} version={version} />
             {headerActions ? <Group gap="sm">{headerActions}</Group> : null}
           </Group>
         </Container>
@@ -34,7 +36,8 @@ export function AppShell({ subtitle, headerActions, children }: AppShellProps): 
 
       <Box component="footer" px="md" py="md">
         <Text ta="center" c="dimmed" size="xs">
-          SelfHelp Manager · Docker-only connected installer · runs locally, never exposes secrets
+          SelfHelp Manager{version ? ` v${version}` : ''} · Docker-only connected installer · runs locally, never
+          exposes secrets
         </Text>
       </Box>
     </div>

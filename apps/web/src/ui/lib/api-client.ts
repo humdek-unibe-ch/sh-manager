@@ -10,7 +10,7 @@
  *   human message — never a stack trace. Callers turn these into friendly UI.
  * - `fetch` is injectable so the client is unit-testable without a network.
  */
-import type { LoginResult, ManagerUpdateCheck, Snapshot, WizardConfig, WizardStepId } from './types';
+import type { LoginResult, ManagerUpdateCheck, RegistryVersions, Snapshot, WizardConfig, WizardStepId } from './types';
 
 export class ApiError extends Error {
   constructor(
@@ -37,6 +37,8 @@ export interface ApiClient {
   runCheck(step: WizardStepId): Promise<Snapshot>;
   install(): Promise<Snapshot>;
   managerUpdateCheck(): Promise<ManagerUpdateCheck>;
+  /** Installable release versions for the wizard's version dropdown. */
+  listVersions(channel?: string): Promise<RegistryVersions>;
   login(email: string, password: string): Promise<LoginResult>;
   logout(): Promise<void>;
 }
@@ -90,6 +92,11 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     runCheck: (step) => request<Snapshot>(`/api/check/${step}`, 'POST'),
     install: () => request<Snapshot>('/api/install', 'POST'),
     managerUpdateCheck: () => request<ManagerUpdateCheck>('/api/manager/update-check', 'GET'),
+    listVersions: (channel) =>
+      request<RegistryVersions>(
+        `/api/registry/versions${channel ? `?channel=${encodeURIComponent(channel)}` : ''}`,
+        'GET',
+      ),
     async login(email, password) {
       const result = await request<LoginResult>('/api/login', 'POST', { email, password });
       csrfToken = result.csrfToken;

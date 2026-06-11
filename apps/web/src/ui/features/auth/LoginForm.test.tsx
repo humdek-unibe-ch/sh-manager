@@ -19,6 +19,7 @@ function clientWithLogin(login: ApiClient['login']): ApiClient {
     runCheck: fail,
     install: fail,
     managerUpdateCheck: fail,
+    listVersions: fail,
     login,
     logout: async () => {},
   };

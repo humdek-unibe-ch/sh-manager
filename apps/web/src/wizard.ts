@@ -221,6 +221,12 @@ export interface ServerInitPlan {
   serverId: string;
   mode: InstanceMode;
   letsencryptEmail?: string;
+  /**
+   * Set on the retry path: a failed first attempt leaves the server partly
+   * bootstrapped (inventory + proxy + instance dir on disk), so the re-run must
+   * acknowledge import/repair instead of refusing with a bootstrap conflict.
+   */
+  allowImport?: boolean;
 }
 
 export interface InstanceInstallPlan {

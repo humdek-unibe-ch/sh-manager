@@ -96,6 +96,7 @@ export function BootstrapWizard({ client }: BootstrapWizardProps): JSX.Element {
             <InstallProgressStep
               phase="failed"
               error={state.installError}
+              failedStep={state.installFailure?.failedStep}
               onRetry={() => void ctl.install()}
               onBack={() => void ctl.goBack()}
             />

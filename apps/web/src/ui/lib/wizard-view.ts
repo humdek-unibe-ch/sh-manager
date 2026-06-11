@@ -128,3 +128,28 @@ export const INSTALL_STEPS: InstallStepView[] = [
   { id: 'inventory', label: 'Update server inventory' },
   { id: 'readme', label: 'Generate operator README' },
 ];
+
+/**
+ * Maps the server's failure phase (`InstallOutcome.failedStep`: a provisioning
+ * step name or a coarse `server_init` / `install` phase) onto the
+ * presentational checklist row, so the failed marker lands on the step that
+ * actually stopped — not wherever the progress animation happened to be.
+ */
+const FAILED_STEP_TO_INSTALL_STEP: Record<string, string> = {
+  server_init: 'folder',
+  install: 'start',
+  wait_db: 'db',
+  migrations: 'migrate',
+  seed: 'migrate',
+  admin: 'admin',
+  plugins: 'plugins',
+  cache_warm: 'health',
+  health: 'health',
+};
+
+/** Index into {@link INSTALL_STEPS} for a server failure phase (-1 = unknown). */
+export function installStepIndexForFailure(failedStep: string | undefined): number {
+  if (!failedStep) return -1;
+  const id = FAILED_STEP_TO_INSTALL_STEP[failedStep] ?? failedStep;
+  return INSTALL_STEPS.findIndex((s) => s.id === id);
+}
