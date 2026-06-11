@@ -8,7 +8,7 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `1.0.6`). Registry releases
+- **The manager tool** uses its own semver (currently `1.0.7`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
@@ -16,11 +16,45 @@ The manager has two version axes (see
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
 
+## [1.0.7] - 2026-06-11
+
+### Added
+- **Manager version in the GUI** — the BFF now includes its version in every
+  state snapshot and the web UI shows it in the header brand and footer
+  (bootstrap wizard and operations console alike).
+- **SelfHelp version dropdown** — the wizard's instance step fetches the
+  available core versions from the registry (`GET /api/registry/versions`,
+  server-authoritative: the registry URL always comes from the server-side
+  wizard state, never the browser) and offers them in a dropdown next to
+  "latest". If the list cannot be loaded it degrades to the previous free-text
+  input. The Registry URL field stays visible but is locked to the official
+  signed registry.
+- **Named manager containers** — the generated wrapper now starts the GUI as
+  `sh-manager-web` and CLI runs as `sh-manager-cli-<pid>` instead of random
+  Docker names, so the manager is recognizable in `docker ps`/Docker Desktop.
+
+### Fixed
+- **Retry after a failed install no longer dead-ends** — re-running the wizard
+  install used to fail with "This server is already bootstrapped…" because the
+  first attempt had already written the inventory/proxy/instance dir. The
+  wizard retry now re-runs `server init` in import/reconcile mode (existing
+  inventory instances are preserved), re-installing the *same* instance id over
+  its own domain/port is allowed, and `instance install` reuses the secrets
+  already on disk so a database volume initialized by the first attempt still
+  matches its credentials on the retry.
+- **Provisioning failures now say what failed** — the install outcome carries
+  the failing provision step (`wait_db`, `migrations`, `admin`, …) and its
+  detail instead of a bare "Provisioning failed.", and the wizard checklist
+  marks the step that actually failed rather than wherever the progress
+  animation happened to stop.
+- **`shm web` prints a browsable URL** — the listen message now shows
+  `http://localhost:8765` (the published loopback port) instead of the
+  in-container bind address `http://0.0.0.0:8765`, which is not reachable from
+  the host browser.
+
 ## [1.0.6] - 2026-06-11
 
 Version bump to 1.0.6.
-
-## [Unreleased]
 
 ### Fixed
 - **Backend Mercure hub URL** — generated instances now set `MERCURE_URL`

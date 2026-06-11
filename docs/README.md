@@ -2,7 +2,7 @@
 
 Audience: Developers and server operators
 Status: Active
-Applies to: `sh-manager` (manager tool `1.0.6`, manages the SelfHelp 0.x pre-release platform line)
+Applies to: `sh-manager` (manager tool `1.0.7`, manages the SelfHelp 0.x pre-release platform line)
 Last verified: 2026-06-10
 Source of truth: `apps/`, `packages/`, and `README.md` in this repository
 
