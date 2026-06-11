@@ -162,6 +162,62 @@ describe('CLI actions (offline)', () => {
     ).resolves.toBeTruthy();
   });
 
+  it('resumes a half-finished bootstrap (inventory, no instances) after a manager restart', async () => {
+    // First wizard attempt got as far as server init, then failed before any
+    // instance dir existed (e.g. registry error). The manager was restarted
+    // (in-memory retry acknowledgement lost), the operator reinstalls.
+    const d = await makeDeps();
+    await serverInit(d, { serverId: 's1', mode: 'local' });
+    await expect(
+      serverInit(d, { serverId: 's1', mode: 'local', resumeInstanceId: 'demo1' }),
+    ).resolves.toBeTruthy();
+  });
+
+  it('resumes when the only instance on disk is the one being reinstalled', async () => {
+    // First attempt created the instance dir and then failed mid-provisioning
+    // (e.g. wait_db). A reinstall of the SAME instance id must continue
+    // automatically — nothing has to be deleted first.
+    const d = await makeDeps();
+    await serverInit(d, { serverId: 's1', mode: 'production', letsencryptEmail: 'ops@example.ch' });
+    await instanceInstall(d, {
+      instanceId: 'website1',
+      displayName: 'Website 1',
+      mode: 'production',
+      domain: 'resume.example.ch',
+      registryUrl: 'https://humdek-unibe-ch.github.io/sh2-plugin-registry/',
+      version: 'latest',
+    });
+    await expect(
+      serverInit(d, {
+        serverId: 's1',
+        mode: 'production',
+        letsencryptEmail: 'ops@example.ch',
+        resumeInstanceId: 'website1',
+      }),
+    ).resolves.toBeTruthy();
+  });
+
+  it('still refuses to resume over a server that hosts OTHER instances', async () => {
+    const d = await makeDeps();
+    await serverInit(d, { serverId: 's1', mode: 'production', letsencryptEmail: 'ops@example.ch' });
+    await instanceInstall(d, {
+      instanceId: 'website1',
+      displayName: 'Website 1',
+      mode: 'production',
+      domain: 'other.example.ch',
+      registryUrl: 'https://humdek-unibe-ch.github.io/sh2-plugin-registry/',
+      version: 'latest',
+    });
+    await expect(
+      serverInit(d, {
+        serverId: 's1',
+        mode: 'production',
+        letsencryptEmail: 'ops@example.ch',
+        resumeInstanceId: 'website2',
+      }),
+    ).rejects.toThrow(/already bootstrapped/);
+  });
+
   it('emits engine-side bind sources end to end when the engine sees the root elsewhere', async () => {
     // The Docker Desktop / Windows case: the manager container sees the state
     // root at `root`, the engine sees it under /run/desktop/mnt/host/… . The

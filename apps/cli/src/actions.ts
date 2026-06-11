@@ -218,6 +218,18 @@ export interface ServerInitOptions {
   proxyNetwork?: string;
   /** Acknowledge import/repair of an already-bootstrapped or partial target. */
   allowImport?: boolean;
+  /**
+   * Wizard retry/resume: the instance id the caller is about to (re)install.
+   * A failed first attempt leaves the target half-bootstrapped (inventory /
+   * proxy compose / instance dir on disk), and the wizard's in-memory "retry"
+   * acknowledgement is lost when the manager restarts (e.g. the operator
+   * pulled an updated image before retrying). When the target's existing
+   * state is just that — no instances yet, or only THIS instance — re-running
+   * the bootstrap is a safe continuation, so it proceeds as an import instead
+   * of failing with "already bootstrapped". A target with OTHER instances
+   * still refuses without an explicit {@link allowImport}.
+   */
+  resumeInstanceId?: string;
 }
 
 async function pathExists(p: string): Promise<boolean> {
@@ -241,9 +253,16 @@ async function discoverBootstrapTarget(root: string): Promise<BootstrapTargetFac
 
 export async function serverInit(deps: ActionDeps, opts: ServerInitOptions): Promise<{ proxyComposePath: string; inventoryPath: string }> {
   // Never overwrite an already-managed or partial/foreign install unless the
-  // operator explicitly acknowledges import/repair.
-  assertSafeToBootstrap(assessBootstrapTarget(await discoverBootstrapTarget(deps.root)), {
-    allowImport: opts.allowImport ?? false,
+  // operator explicitly acknowledges import/repair — or this is a safe
+  // continuation of a half-finished bootstrap of the SAME instance (see
+  // ServerInitOptions.resumeInstanceId).
+  const facts = await discoverBootstrapTarget(deps.root);
+  const resumable =
+    opts.resumeInstanceId !== undefined &&
+    (facts.instanceDirsOnDisk.length === 0 ||
+      facts.instanceDirsOnDisk.every((dir) => dir === opts.resumeInstanceId));
+  assertSafeToBootstrap(assessBootstrapTarget(facts), {
+    allowImport: (opts.allowImport ?? false) || resumable,
   });
 
   const boot = buildServerBootstrap({

@@ -125,7 +125,12 @@ export async function startWebUi(opts: WebUiOptions = {}): Promise<{ host: strin
       // Failures come back as a structured outcome (never a thrown 500): the
       // wizard records them, shows the failing phase, and can offer a retry.
       try {
-        await serverInit(deps, plan.serverInit);
+        // resumeInstanceId: a failed attempt leaves the server half-bootstrapped,
+        // and the wizard's in-memory retry acknowledgement does not survive a
+        // manager restart (operator updates the image, then reinstalls). When
+        // the on-disk state holds no OTHER instance, re-running the bootstrap
+        // for the same install is a safe continuation, not a conflict.
+        await serverInit(deps, { ...plan.serverInit, resumeInstanceId: plan.instanceInstall.instanceId });
       } catch (err) {
         lastHealthOk = false;
         return { ok: false, publicUrl, failedStep: 'server_init', detail: err instanceof Error ? err.message : String(err) };
