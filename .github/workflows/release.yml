@@ -50,12 +50,26 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # A dedicated BuildKit (docker-container) builder makes buildx push the
+      # image to GHCR directly. Without it buildx falls back to the runner's
+      # default docker driver, which exports the image into the local daemon
+      # and lets the daemon push — and that daemon-side push intermittently
+      # fails against GHCR with "ERROR: unknown blob" after all layers have
+      # uploaded (this killed the v1.0.8 release).
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Build and push image
         id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
+          # Keep the pushed artifact a plain image manifest rather than an OCI
+          # index with a provenance attestation, so the digest stays the image
+          # digest previous releases shipped — it is what cosign signs below
+          # and what operators pin.
+          provenance: false
           tags: |
             ${{ env.IMAGE }}:latest
             ${{ env.IMAGE }}:${{ github.ref_name }}
