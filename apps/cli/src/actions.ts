@@ -257,7 +257,10 @@ export async function serverInit(deps: ActionDeps, opts: ServerInitOptions): Pro
   });
   await writeFileAtomic(boot.proxyComposePath, boot.proxyComposeYaml);
   const store = new InventoryStore(deps.root);
-  await store.write(boot.inventory);
+  // Import/repair must never orphan already-registered instances: a fresh
+  // bootstrap inventory starts empty, so carry the existing entries over.
+  const existing = await store.read().catch(() => null);
+  await store.write(existing ? { ...boot.inventory, instances: existing.instances } : boot.inventory);
 
   // Every instance compose references the shared proxy network as `external`,
   // so bootstrap must guarantee it exists — otherwise the very first
@@ -414,10 +417,14 @@ export async function instanceInstall(
  * warnings (e.g. DNS not yet pointing here) for the caller to surface.
  */
 async function assertInstallableDomain(deps: ActionDeps, opts: InstanceInstallOptions): Promise<string[]> {
-  const existingDomains = await new InventoryStore(deps.root)
+  const existingEntries = await new InventoryStore(deps.root)
     .read()
-    .then((inv) => inv.instances.map((e) => e.domain))
-    .catch(() => [] as string[]);
+    .then((inv) => inv.instances)
+    .catch(() => [] as { instanceId: string; domain: string }[]);
+  const existingDomains = existingEntries.map((e) => e.domain);
+  // Re-installing over the SAME instance id (retry after a failed first
+  // attempt) keeps its own domain claim; only other instances' domains conflict.
+  const ownDomain = existingEntries.find((e) => e.instanceId === opts.instanceId)?.domain;
 
   let dns: { a: string[]; aaaa: string[] } | undefined;
   let serverPublicIp: string | undefined;
@@ -431,6 +438,7 @@ async function assertInstallableDomain(deps: ActionDeps, opts: InstanceInstallOp
     ...(opts.domain ? { domain: opts.domain } : {}),
     ...(opts.localPort !== undefined ? { localPort: opts.localPort } : {}),
     existingDomains,
+    ...(ownDomain ? { excludeInstanceDomain: ownDomain } : {}),
     ...(dns ? { dns } : {}),
     ...(serverPublicIp ? { serverPublicIp } : {}),
     ...(opts.strictDns !== undefined ? { strictDns: opts.strictDns } : {}),
