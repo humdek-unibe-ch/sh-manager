@@ -8,7 +8,7 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `0.1.4`). Registry releases
+- **The manager tool** uses its own semver (currently `0.1.5`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
@@ -17,6 +17,44 @@ The manager has two version axes (see
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
 
 ## [Unreleased]
+
+## [0.1.5] - 2026-06-11
+
+Windows-simplification release: mount any state folder, no Docker Desktop VM
+paths, and the image distributes its own wrapper script.
+
+### Added
+- **Engine-side path auto-discovery** — when the manager runs containerized,
+  it inspects its own container through the mounted socket and learns where
+  the Docker ENGINE sees the state root. Generated compose bind sources
+  (instance JWT keys, proxy Let's Encrypt storage) and backup/restore helper
+  mounts are translated automatically. The state folder can now be mounted
+  from anywhere (`-v D:\selfhelp:/opt/selfhelp` on Windows,
+  `-v /home/me/selfhelp:/opt/selfhelp` on Linux) — the previous
+  same-path-on-both-sides requirement and the Windows
+  `/run/desktop/mnt/host/…` VM-path trick are gone. Same-path mounts (the
+  documented Linux production layout) discover an identity mapping and keep
+  emitting today's relative binds — zero behavior change. Escape hatch:
+  `SELFHELP_ENGINE_ROOT=<path|off>`.
+- **`sh-manager wrapper --shell powershell|bash`** — prints a small `shm`
+  wrapper script so the image distributes its own convenience layer
+  (`docker run --rm … wrapper --shell powershell > shm.ps1`). The script
+  mounts the socket + state folder (default: the folder the script is saved
+  in), forwards every command, publishes the GUI loopback-only for
+  `shm web` (`--web-port`, default 8765), survives Git Bash path mangling
+  (`cygpath` + `MSYS_NO_PATHCONV`), and supports `--state-root`/`--image`
+  overrides.
+
+### Changed
+- **`instance install --registry` is now optional** and defaults to the
+  official registry (`https://humdek-unibe-ch.github.io/sh2-plugin-registry/`),
+  matching the web wizard. Release signature/checksum verification against the
+  pinned trusted keys is unaffected by the registry URL.
+- **Windows quickstart rewritten** around the generated wrapper: pull →
+  generate `shm.ps1` → `server init` → `instance install` → `shm web`, with
+  PowerShell as the primary shell and no manual path translation anywhere.
+  `install.md`, `quick-reference.md`, and the README follow the new flow, and
+  the "not initialized" CLI hint now points at the wrapper.
 
 ## [0.1.4] - 2026-06-10
 

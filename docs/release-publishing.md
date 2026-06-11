@@ -2,8 +2,8 @@
 
 Audience: Developers / maintainers
 Status: Active
-Applies to: `sh-manager` (manager tool `0.1.4`) and the SelfHelp 0.x pre-release platform line
-Last verified: 2026-06-10
+Applies to: `sh-manager` (manager tool `0.1.5`) and the SelfHelp 0.x pre-release platform line
+Last verified: 2026-06-11
 Source of truth: `packages/registry/src`, `packages/schemas/src`, `scripts/sign-fixtures.mts`, `package.json`, and (registry side) `sh2-plugin-registry/.github/workflows/publish-core-release.yml`
 
 This page explains how versions, signatures, and the registry fit together, and
