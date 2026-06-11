@@ -229,6 +229,40 @@ describe('CLI actions (offline)', () => {
     ).rejects.toThrow(/already used by another instance/);
   });
 
+  it('allows re-installing the same instance id over its own domain (retry after a failed attempt)', async () => {
+    const d = await makeDeps();
+    await serverInit(d, { serverId: 's1', mode: 'production', letsencryptEmail: 'ops@example.ch' });
+    const opts = {
+      instanceId: 'website1',
+      displayName: 'Website 1',
+      mode: 'production' as const,
+      domain: 'retry.example.ch',
+      registryUrl: 'https://humdek-unibe-ch.github.io/sh2-plugin-registry/',
+      version: 'latest',
+    };
+    await instanceInstall(d, opts);
+    // The first attempt registered website1 + its domain in the inventory; a
+    // re-run of the SAME instance must not trip the duplicate-domain guard.
+    await expect(instanceInstall(d, opts)).resolves.toBeTruthy();
+  });
+
+  it('import/repair re-bootstrap keeps already-registered instances in the inventory', async () => {
+    const d = await makeDeps();
+    await serverInit(d, { serverId: 's1', mode: 'production', letsencryptEmail: 'ops@example.ch' });
+    await instanceInstall(d, {
+      instanceId: 'website1',
+      displayName: 'Website 1',
+      mode: 'production',
+      domain: 'keep.example.ch',
+      registryUrl: 'https://humdek-unibe-ch.github.io/sh2-plugin-registry/',
+      version: 'latest',
+    });
+
+    const res = await serverInit(d, { serverId: 's1', mode: 'production', letsencryptEmail: 'ops@example.ch', allowImport: true });
+    const inv = JSON.parse(await readFile(res.inventoryPath, 'utf8')) as { instances: { instanceId: string }[] };
+    expect(inv.instances.map((i) => i.instanceId)).toContain('website1');
+  });
+
   it('warns when DNS does not point at this server and blocks under strictDns', async () => {
     const d = await makeDeps();
     d.resolveDns = async () => ({ a: ['203.0.113.9'], aaaa: [] });
