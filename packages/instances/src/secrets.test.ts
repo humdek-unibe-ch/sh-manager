@@ -1,12 +1,16 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
-import { describe, expect, it } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   SECRET_DIR_MODE,
   SECRET_FILE_MODE,
   generateCloneSecrets,
   generateInstanceSecrets,
   instanceSecretFiles,
+  readInstanceSecrets,
   renderSecretsEnv,
   secretEnvMap,
   secretsForRestore,
@@ -80,6 +84,42 @@ describe('writeInstanceSecrets', () => {
     const envFile = instanceSecretFiles(secrets).find((f) => f.relPath === 'secrets.env');
     expect(envFile?.mode).toBe(SECRET_FILE_MODE);
     expect(envFile?.contents).toContain(`APP_SECRET=${secrets.appSecret}`);
+  });
+});
+
+describe('readInstanceSecrets', () => {
+  const tempDirs: string[] = [];
+  afterEach(async () => {
+    for (const dir of tempDirs.splice(0)) await rm(dir, { recursive: true, force: true });
+  });
+  const makeSecretsDir = async (): Promise<string> => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'shm-secrets-'));
+    tempDirs.push(dir);
+    return path.join(dir, 'secrets');
+  };
+
+  it('reads a previously written set back unchanged (retry continues with the same credentials)', async () => {
+    const secretsDir = await makeSecretsDir();
+    const written = generateInstanceSecrets(opts);
+    await writeInstanceSecrets(secretsDir, written);
+
+    const read = await readInstanceSecrets(secretsDir);
+    expect(read).not.toBeNull();
+    expect(read).toEqual(written);
+  });
+
+  it('returns null when no secrets were ever written (fresh install)', async () => {
+    const secretsDir = await makeSecretsDir();
+    expect(await readInstanceSecrets(secretsDir)).toBeNull();
+  });
+
+  it('returns null for an incomplete set instead of guessing (e.g. missing JWT keys)', async () => {
+    const secretsDir = await makeSecretsDir();
+    const written = generateInstanceSecrets(opts);
+    await writeInstanceSecrets(secretsDir, written);
+    await rm(path.join(secretsDir, 'jwt', 'private.pem'), { force: true });
+
+    expect(await readInstanceSecrets(secretsDir)).toBeNull();
   });
 });
 

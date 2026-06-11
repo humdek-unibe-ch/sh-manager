@@ -190,6 +190,21 @@ describe('installInstance', () => {
     expect(runner.calls.at(-1)?.args).toEqual(['up', '-d']);
   });
 
+  it('re-running install over a partial instance keeps the existing on-disk secrets (retry-safe)', async () => {
+    await buildAndInstall();
+    const secretsEnvPath = path.join(root, 'instances', 'website1', 'secrets', 'secrets.env');
+    const before = await readFile(secretsEnvPath, 'utf8');
+
+    // Retry without injected secrets: a fresh set would lock the stack out of
+    // the MySQL/Redis volumes initialised by the first attempt, so the
+    // existing files must be reused verbatim.
+    const artifacts = buildInstanceInstallArtifacts(installInput('production'));
+    await installInstance(artifacts, { root });
+
+    expect(await readFile(secretsEnvPath, 'utf8')).toBe(before);
+    expect(before).toContain(`MYSQL_PASSWORD=${fakeSecrets.databasePassword}`);
+  });
+
   async function buildAndInstall() {
     // server inventory must exist before upserting an instance entry
     const boot = buildServerBootstrap({ serverId: 's1', managerVersion: '0.1.0', mode: 'production', root, letsencryptEmail: 'ops@example.ch' });

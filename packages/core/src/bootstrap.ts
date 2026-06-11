@@ -44,6 +44,7 @@ import {
   instanceDirectories,
   instancePaths,
   proxyDir,
+  readInstanceSecrets,
   writeFileAtomic,
   writeInstanceSecrets,
   type InstanceSecrets,
@@ -277,10 +278,13 @@ export async function installInstance(
     await mkdir(dir, { recursive: true });
   }
 
-  // A new instance always gets freshly generated, isolated secrets written to
-  // 0600 files before the stack is brought up. Secrets never enter the manifest,
-  // lock, inventory, or README.
-  const secrets = deps.secrets ?? generateInstanceSecrets();
+  // A new instance gets freshly generated, isolated secrets written to 0600
+  // files before the stack is brought up. Re-running install over a PARTIAL
+  // instance (retry after a failed first attempt) reuses the existing on-disk
+  // set instead: the MySQL/Redis volumes were already initialised with those
+  // credentials, and a fresh set would lock the stack out of its own database.
+  // Secrets never enter the manifest, lock, inventory, or README.
+  const secrets = deps.secrets ?? (await readInstanceSecrets(paths.secretsDir)) ?? generateInstanceSecrets();
   const writtenSecrets = await writeInstanceSecrets(paths.secretsDir, secrets, deps.secretIO);
 
   await writeFileAtomic(paths.composePath, artifacts.composeYaml);

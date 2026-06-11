@@ -17,7 +17,7 @@
  * values live in `secrets/secrets.env`, which compose loads through `env_file`.
  */
 import { generateKeyPairSync, randomBytes } from 'node:crypto';
-import { chmod, mkdir, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 export const SECRET_FILE_MODE = 0o600;
@@ -158,6 +158,67 @@ export function instanceSecretFiles(secrets: InstanceSecrets): SecretFileSpec[] 
     f('jwt/public.pem', secrets.jwtPublicKeyPem),
     f('secrets.env', renderSecretsEnv(secrets)),
   ];
+}
+
+/**
+ * Reads a previously written secret set back from `<secretsDir>`.
+ *
+ * Used when `instance install` re-runs over a partially installed instance
+ * (e.g. the wizard's "Retry installation" after a failed provisioning): the
+ * MySQL/Redis volumes were already initialised with the FIRST attempt's
+ * credentials, so the retry must continue with the same set — regenerating
+ * would lock the stack out of its own database. Returns `null` when no
+ * complete set exists (fresh install).
+ */
+export async function readInstanceSecrets(secretsDir: string): Promise<InstanceSecrets | null> {
+  const tryRead = (rel: string): Promise<string | null> =>
+    readFile(path.join(secretsDir, rel), 'utf8').catch(() => null);
+  const [envText, privatePem, publicPem] = await Promise.all([
+    tryRead('secrets.env'),
+    tryRead('jwt/private.pem'),
+    tryRead('jwt/public.pem'),
+  ]);
+  if (envText === null || privatePem === null || publicPem === null) return null;
+
+  const vars: Record<string, string> = {};
+  for (const line of envText.split(/\r?\n/)) {
+    if (!line || line.startsWith('#')) continue;
+    const eq = line.indexOf('=');
+    if (eq <= 0) continue;
+    vars[line.slice(0, eq)] = line.slice(eq + 1);
+  }
+  const get = (key: string): string | null => {
+    const value = vars[key];
+    return value !== undefined && value !== '' ? value : null;
+  };
+
+  const appSecret = get('APP_SECRET');
+  const databaseName = get('MYSQL_DATABASE');
+  const databaseUser = get('MYSQL_USER');
+  const databasePassword = get('MYSQL_PASSWORD');
+  const databaseRootPassword = get('MYSQL_ROOT_PASSWORD');
+  const redisPassword = get('REDIS_PASSWORD');
+  const mercureJwtSecret = get('MERCURE_JWT_SECRET');
+  const jwtPassphrase = get('JWT_PASSPHRASE');
+  if (
+    !appSecret || !databaseName || !databaseUser || !databasePassword ||
+    !databaseRootPassword || !redisPassword || !mercureJwtSecret || !jwtPassphrase
+  ) {
+    return null;
+  }
+
+  return {
+    appSecret,
+    databaseName,
+    databaseUser,
+    databasePassword,
+    databaseRootPassword,
+    redisPassword,
+    mercureJwtSecret,
+    jwtPassphrase,
+    jwtPrivateKeyPem: privatePem,
+    jwtPublicKeyPem: publicPem,
+  };
 }
 
 /**
