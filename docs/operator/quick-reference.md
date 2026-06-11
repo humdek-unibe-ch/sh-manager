@@ -62,7 +62,8 @@ Services: `frontend`, `backend`, `worker`, `scheduler`, `mysql`, `redis`,
 | Target a version | `sh-manager instance update website1 --version 0.1.1` |
 | Accept destructive migration | `sh-manager instance update website1 --accept-migration-risk` |
 | Process a CMS-requested update | `sh-manager instance process-operations website1 --backend-url http://127.0.0.1:PORT --token "$SELFHELP_MANAGER_TOKEN"` |
-| Is a newer manager released? | `sh-manager self-update` (exit `2` = update available; prints the update commands) |
+| Update the manager itself | `sh-manager self-update` (pulls the new image + restarts the web GUI container; source: git pull + build) |
+| Only check for a manager update | `sh-manager self-update --check` (exit `2` = update available) |
 
 ## Back up / restore / clone
 

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
-import { Button, Group, Paper, SimpleGrid, Stack, Text, ThemeIcon, Title } from '@mantine/core';
-import { Alert, CommandPreview, KeyValue, StatusBadge, type BadgeTone, type KeyValueRow } from '../../../components';
+import { Button, Code, Group, Paper, SimpleGrid, Stack, Text, ThemeIcon, Title } from '@mantine/core';
+import { Alert, CommandPreview, KeyValue, SecretReveal, StatusBadge, type BadgeTone, type KeyValueRow } from '../../../components';
 import { instanceDir, publicUrlPreview } from '../../../lib/formatting';
 import type { InstallResult, Snapshot, WizardConfig } from '../../../lib/types';
 
@@ -70,11 +70,33 @@ export function SuccessStep({ result, config, snapshot }: SuccessStepProps): JSX
         </Stack>
       </Paper>
 
-      <Alert tone="warning" title="Save your admin password now">
-        The generated administrator password is stored in a restricted file inside the instance directory and shown by
-        the installer process once. Retrieve it from the server now and store it in your password manager — it is not
-        displayed in this UI.
-      </Alert>
+      {result?.outcome.adminPassword ? (
+        <Paper withBorder radius="md" p="lg">
+          <Stack gap="sm">
+            <Text size="xs" tt="uppercase" fw={700} c="dimmed">
+              Administrator sign-in (shown once)
+            </Text>
+            {config.adminEmail ? <KeyValue rows={[{ key: 'Admin email', value: config.adminEmail, mono: true }]} /> : null}
+            <SecretReveal value={result.outcome.adminPassword} label="generated admin password" />
+            <Text size="xs" c="dimmed">
+              Store it in your password manager now — it disappears from this screen when you leave or reload.
+              {result.outcome.adminPasswordFile ? (
+                <>
+                  {' '}
+                  It is also saved on the server in the owner-only file <Code>{result.outcome.adminPasswordFile}</Code>;
+                  delete that file after your first sign-in.
+                </>
+              ) : null}
+            </Text>
+          </Stack>
+        </Paper>
+      ) : config.adminEmail ? (
+        <Alert tone="warning" title="Retrieve your admin password from the server">
+          The generated administrator password is stored in the owner-only file{' '}
+          <Code>{`${dir}/secrets/admin_password`}</Code> on the server. Retrieve it now, store it in your password
+          manager, then delete the file.
+        </Alert>
+      ) : null}
 
       <SimpleGrid cols={{ base: 1, sm: 2 }}>
         <Paper withBorder radius="md" p="lg">

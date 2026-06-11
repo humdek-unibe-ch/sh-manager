@@ -139,11 +139,15 @@ container), then:
 ## 6. Update the manager itself
 
 ```powershell
-.\shm.ps1 self-update
-docker pull ghcr.io/humdek-unibe-ch/sh-manager:latest   # apply when one is available
+.\shm.ps1 self-update           # checks, pulls the new image, restarts the GUI
+.\shm.ps1 self-update --check   # check only (exit 2 = update available)
 ```
 
-The next `.\shm.ps1 ...` call uses the new image — the wrapper always runs
+`self-update` pulls the new image tags and — when the `sh-manager-web` GUI
+container is running — recreates it on the new image with the same port,
+mounts, and arguments (a terminal attached to the old GUI container is
+released; the GUI comes back on <http://localhost:8765> after a few seconds).
+Every next `.\shm.ps1 ...` call uses the new image — the wrapper always runs
 `:latest` and `--rm` containers carry no state; everything lives in your state
 folder. The GUI shows the same information on the operations console
 ("Manager version" card).

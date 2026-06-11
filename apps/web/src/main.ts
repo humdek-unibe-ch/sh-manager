@@ -143,6 +143,15 @@ export async function startWebUi(opts: WebUiOptions = {}): Promise<{ host: strin
         return { ok: false, publicUrl, failedStep: 'install', detail: err instanceof Error ? err.message : String(err) };
       }
       lastHealthOk = res.provision ? res.provision.ok : res.broughtUp;
+      // The generated admin password rides ONLY on this one-shot outcome (and
+      // is persisted server-side to the instance's secrets/admin_password):
+      // it never enters the wizard state or any /api/state snapshot. It is
+      // included on failure outcomes too — provisioning may have created the
+      // admin before a later step (e.g. health) stopped the install.
+      const adminSecret = {
+        ...(res.adminPassword ? { adminPassword: res.adminPassword } : {}),
+        ...(res.adminPasswordFile ? { adminPasswordFile: res.adminPasswordFile } : {}),
+      };
       if (res.provision && !res.provision.ok) {
         const failed = res.provision.steps.find((s) => s.status === 'failed');
         return {
@@ -152,6 +161,7 @@ export async function startWebUi(opts: WebUiOptions = {}): Promise<{ host: strin
           publicUrl,
           detail: provisionFailureDetail(res.provision.steps),
           ...(failed ? { failedStep: failed.name } : {}),
+          ...adminSecret,
         };
       }
       return {
@@ -160,6 +170,7 @@ export async function startWebUi(opts: WebUiOptions = {}): Promise<{ host: strin
         version: res.version,
         publicUrl,
         detail: res.provision ? 'Provisioning succeeded.' : 'Installed.',
+        ...adminSecret,
       };
     },
     async checkHealth() {

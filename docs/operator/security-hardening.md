@@ -75,7 +75,7 @@ privilege each operator needs. Passwords are hashed; digests are never printed.
 | Per-instance manager token | `--token` / `SELFHELP_MANAGER_TOKEN` | Authenticates the manager to one instance's backend (`process-operations`). Unique per instance. |
 | Operator passwords | `--password` / `SELFHELP_MANAGER_ADMIN_PASSWORD` | Used only at creation; stored hashed. |
 | Registry trusted keys | `SELFHELP_TRUSTED_KEYS` | The Ed25519 public keys the client trusts. Keep this file under change control. |
-| Generated admin password | shown once at install | Never written to manifest/lock; store it in a password manager. |
+| Generated admin password | shown once at install + `<instance>/secrets/admin_password` (0600) | Never in manifest/lock/logs; store it in a password manager and delete the file after the first sign-in. |
 
 Never commit tokens or keys, never paste them into issues, logs, or support
 bundles.

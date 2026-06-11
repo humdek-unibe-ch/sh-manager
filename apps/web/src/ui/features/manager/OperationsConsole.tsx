@@ -194,7 +194,7 @@ export function OperationsConsole({ client }: OperationsConsoleProps): JSX.Eleme
                 To update, run on the server:
               </Text>
               {update.instructions.map((cmd) =>
-                cmd.startsWith('docker ') || cmd.startsWith('git ') || cmd.startsWith('npm ') ? (
+                cmd.startsWith('sh-manager ') || cmd.startsWith('docker ') || cmd.startsWith('git ') || cmd.startsWith('npm ') ? (
                   <CommandPreview key={cmd} value={cmd} label="Update command" />
                 ) : (
                   <Text key={cmd} size="sm" c="dimmed">

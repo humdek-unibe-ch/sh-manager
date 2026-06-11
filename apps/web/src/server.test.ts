@@ -58,6 +58,15 @@ const FULL_CONFIG = {
   adminName: 'Admin',
 };
 
+/**
+ * Test servers always bind an EPHEMERAL port: the fixed default (8765) may be
+ * taken on a developer machine by a real running manager GUI, and parallel
+ * test files must never fight over one port.
+ */
+function testServer(options: Parameters<typeof createBootstrapServer>[0]): BootstrapServerHandle {
+  return createBootstrapServer({ port: 0, ...options });
+}
+
 let handles: BootstrapServerHandle[] = [];
 
 async function start(handle: BootstrapServerHandle): Promise<string> {
@@ -95,20 +104,20 @@ describe('browseUrl', () => {
 
 describe('bootstrap server binding', () => {
   it('binds to 127.0.0.1 by default', async () => {
-    const base = await start(createBootstrapServer({ actions: fakeActions() }));
+    const base = await start(testServer({ actions: fakeActions() }));
     expect(base).toContain('127.0.0.1');
   });
 
   it('refuses a non-loopback bind unless explicitly allowed', () => {
-    expect(() => createBootstrapServer({ actions: fakeActions(), host: '0.0.0.0' })).not.toThrow();
-    expect(() => createBootstrapServer({ actions: fakeActions(), host: '203.0.113.5' })).toThrow(/non-loopback/);
-    expect(() => createBootstrapServer({ actions: fakeActions(), host: '203.0.113.5', allowNonLocal: true })).not.toThrow();
+    expect(() => testServer({ actions: fakeActions(), host: '0.0.0.0' })).not.toThrow();
+    expect(() => testServer({ actions: fakeActions(), host: '203.0.113.5' })).toThrow(/non-loopback/);
+    expect(() => testServer({ actions: fakeActions(), host: '203.0.113.5', allowNonLocal: true })).not.toThrow();
   });
 });
 
 describe('bootstrap wizard over HTTP', () => {
   it('drives the whole flow and self-locks after completion', async () => {
-    const base = await start(createBootstrapServer({ actions: fakeActions() }));
+    const base = await start(testServer({ actions: fakeActions() }));
 
     const post = (p: string, body?: unknown) =>
       fetch(base + p, { method: 'POST', headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
@@ -146,8 +155,48 @@ describe('bootstrap wizard over HTTP', () => {
     expect(stateAfter.status).toBe(200);
   });
 
+  it('returns the generated admin password ONLY on the one-shot install response, never in state', async () => {
+    const base = await start(
+      testServer({
+        actions: fakeActions({
+          async runInstall() {
+            return {
+              ok: true,
+              instanceDir: '/opt/selfhelp/instances/clinic-a',
+              version: '0.1.0',
+              publicUrl: 'https://app.example.com',
+              adminPassword: 'gen-pw-shown-once-12345',
+              adminPasswordFile: '/opt/selfhelp/instances/clinic-a/secrets/admin_password',
+            };
+          },
+        }),
+        persistAfterBootstrap: true,
+      }),
+    );
+    const post = (p: string, body?: unknown) =>
+      fetch(base + p, { method: 'POST', headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
+
+    await post('/api/config', FULL_CONFIG);
+    let s = await snap(await post('/api/advance'));
+    for (const step of ['docker', 'internet', 'registry', 'install_root', 'resources', 'mode', 'domain', 'proxy', 'instance', 'admin']) {
+      if (['docker', 'internet', 'registry', 'resources'].includes(step)) await post('/api/check/' + step);
+      s = await snap(await post('/api/advance'));
+    }
+    expect(s.step).toBe('install');
+
+    // The one-shot install response carries the password + its server-side file…
+    const res = await post('/api/install');
+    const body = (await res.json()) as { outcome?: { adminPassword?: string; adminPasswordFile?: string } };
+    expect(body.outcome?.adminPassword).toBe('gen-pw-shown-once-12345');
+    expect(body.outcome?.adminPasswordFile).toContain('secrets/admin_password');
+
+    // …but no later state snapshot ever does ("retrieved from the server, shown once").
+    const stateText = JSON.stringify(await (await fetch(base + '/api/state')).json());
+    expect(stateText).not.toContain('gen-pw-shown-once-12345');
+  });
+
   it('returns 409 with a reason when advancing past a failed check', async () => {
-    const base = await start(createBootstrapServer({ actions: fakeActions({ checkDocker: async () => ({ dockerAvailable: false, dockerComposeAvailable: false }) }) }));
+    const base = await start(testServer({ actions: fakeActions({ checkDocker: async () => ({ dockerAvailable: false, dockerComposeAvailable: false }) }) }));
     const post = (p: string, body?: unknown) =>
       fetch(base + p, { method: 'POST', headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
     await post('/api/config', FULL_CONFIG);
@@ -160,7 +209,7 @@ describe('bootstrap wizard over HTTP', () => {
 
   it('exposes the manager self-update check as GET /api/manager/update-check', async () => {
     const base = await start(
-      createBootstrapServer({
+      testServer({
         actions: fakeActions({
           checkManagerUpdate: async () => ({
             currentVersion: '0.1.4',
@@ -179,12 +228,12 @@ describe('bootstrap wizard over HTTP', () => {
     expect(body.latestVersion).toBe('0.2.0');
 
     // Without a wired action the route is simply absent.
-    const bare = await start(createBootstrapServer({ actions: fakeActions(), port: 0 }));
+    const bare = await start(testServer({ actions: fakeActions(), port: 0 }));
     expect((await fetch(bare + '/api/manager/update-check')).status).toBe(404);
   });
 
   it('includes the manager version in every state snapshot', async () => {
-    const base = await start(createBootstrapServer({ actions: fakeActions(), managerVersion: '1.0.6' }));
+    const base = await start(testServer({ actions: fakeActions(), managerVersion: '1.0.6' }));
     const body = (await (await fetch(base + '/api/state')).json()) as { managerVersion?: string };
     expect(body.managerVersion).toBe('1.0.6');
   });
@@ -192,7 +241,7 @@ describe('bootstrap wizard over HTTP', () => {
   it('lists registry versions server-authoritatively (URL from wizard state, channel previewable)', async () => {
     const calls: { url: string; channel: string }[] = [];
     const base = await start(
-      createBootstrapServer({
+      testServer({
         actions: fakeActions({
           listVersions: async (registryUrl, channel) => {
             calls.push({ url: registryUrl, channel });
@@ -213,7 +262,7 @@ describe('bootstrap wizard over HTTP', () => {
     expect(calls[1]?.channel).toBe('beta');
 
     // Without a wired action the route is simply absent.
-    const bare = await start(createBootstrapServer({ actions: fakeActions(), port: 0 }));
+    const bare = await start(testServer({ actions: fakeActions(), port: 0 }));
     expect((await fetch(bare + '/api/registry/versions')).status).toBe(404);
   });
 
@@ -221,7 +270,7 @@ describe('bootstrap wizard over HTTP', () => {
     const seenAllowImport: (boolean | undefined)[] = [];
     let failNext = true;
     const base = await start(
-      createBootstrapServer({
+      testServer({
         actions: fakeActions({
           runInstall: async (plan) => {
             seenAllowImport.push(plan.serverInit.allowImport);
@@ -266,7 +315,7 @@ describe('persistent mode authentication', () => {
       roles: ['server_owner'],
     });
     const store = new InMemoryOperatorStore(created.table);
-    const base = await start(createBootstrapServer({ actions: fakeActions(), mode: 'persistent', operatorStore: store }));
+    const base = await start(testServer({ actions: fakeActions(), mode: 'persistent', operatorStore: store }));
     return { base };
   }
 

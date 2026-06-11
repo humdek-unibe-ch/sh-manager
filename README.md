@@ -81,18 +81,18 @@ npm run cli -- --help
 ## Update the manager
 
 ```bash
-# Docker image (exit code 2 = update available):
-docker run --rm ghcr.io/humdek-unibe-ch/sh-manager:latest self-update
-docker pull ghcr.io/humdek-unibe-ch/sh-manager:latest   # apply
-
-# Source checkout:
-git pull && npm ci && npm run build
+sh-manager self-update           # check + APPLY (wrapper: .\shm.ps1 self-update)
+sh-manager self-update --check   # check only (exit code 2 = update available)
 ```
 
-`sh-manager self-update` checks the official GitHub releases and prints the
-exact commands for your runtime; the web UI's operations console shows the
-same "update available" status. Long-running `process-operations` loops must
-be restarted after a pull. Release notes: [`CHANGELOG.md`](CHANGELOG.md).
+`sh-manager self-update` checks the official GitHub releases and applies the
+update for your runtime: on the Docker image it pulls the new tags and
+**restarts the `sh-manager-web` GUI container** on the new image (same port,
+mounts, and arguments); on a source checkout it runs
+`git pull --ff-only && npm ci && npm run build`. The web UI's operations
+console shows the same "update available" status. Long-running
+`process-operations` loops must be restarted after an update. Release notes:
+[`CHANGELOG.md`](CHANGELOG.md).
 
 ## Documentation
 
@@ -174,7 +174,8 @@ sh-manager instance install --id website1 --domain website1.example.ch \
 
 # install AND fully provision (wait for DB -> migrate -> create admin ->
 # install plugins -> warm caches -> health). A generated admin password is
-# printed once and never written to disk/manifest/lock.
+# printed once and saved to <instance>/secrets/admin_password (0600, never in
+# the manifest/lock/logs); delete the file after the first sign-in.
 sh-manager instance install --id website1 --domain website1.example.ch \
   --version latest --provision --admin-email ops@example.ch
 
@@ -183,7 +184,7 @@ sh-manager instance health website1
 sh-manager instance update --dry-run website1
 sh-manager instance update website1 --accept-migration-risk
 sh-manager doctor
-sh-manager self-update      # is a newer manager released? (exit 2 = yes)
+sh-manager self-update      # update the manager (--check: report only, exit 2 = update available)
 sh-manager web              # serve the web UI (wizard / operations console)
 ```
 

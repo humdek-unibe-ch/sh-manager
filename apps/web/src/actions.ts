@@ -40,6 +40,14 @@ export interface InstallOutcome {
    * phases `server_init` / `install`. Lets the UI mark the right checklist row.
    */
   failedStep?: string;
+  /**
+   * The GENERATED admin password, present only on this one-shot install
+   * response ("retrieved from the server, shown once"). It is never part of
+   * the wizard state, any check detail, or `/api/state` snapshots.
+   */
+  adminPassword?: string;
+  /** Restricted (0600) server-side file holding the generated admin password. */
+  adminPasswordFile?: string;
 }
 
 export interface HealthOutcome {

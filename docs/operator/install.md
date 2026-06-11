@@ -95,10 +95,12 @@ ssh -L 8765:127.0.0.1:8765 you@your-server
    - **Review**: confirm, then **Install**. The wizard creates Docker resources
      and writes files, runs provisioning, and shows a success screen.
 
-4. On success the wizard shows the public URL, the important paths, and tells you
-   to retrieve the **generated admin password** from the server (it is written to
-   a restricted file and shown by the install process **once** — never displayed
-   in the UI).
+4. On success the wizard shows the public URL, the important paths, and — when
+   you configured an admin email — the **generated admin password**, masked
+   behind a *Reveal* button and shown **once** (it disappears when you leave or
+   reload the page). The same password is also saved on the server in the
+   owner-only file `<instance>/secrets/admin_password`; store it in your
+   password manager and delete the file after your first sign-in.
 
 The wizard **self-locks** after a successful install: the installer can no longer
 change anything. To manage the server afterwards, run it in **persistent mode**
@@ -161,8 +163,13 @@ Useful flags:
 | `--admin-password <pw>` | Provide the admin password instead of generating one. |
 | `--plugin-manifest <path...>` | Plugin `plugin.json` paths to install during provisioning. |
 
-The generated admin password is **never** written to the manifest or lock file.
-Store it in your password manager immediately.
+A **generated** admin password is printed once **and** saved to the owner-only
+file `<instance>/secrets/admin_password` (0600), so it survives a closed
+terminal or a resumed install — a retried install reuses it instead of
+regenerating. Store it in your password manager and delete the file after your
+first sign-in. A password you supply yourself via `--admin-password` is used
+as-is and never written to disk. Neither ever enters the manifest, lock file,
+inventory, or logs.
 
 ### 4. Verify
 

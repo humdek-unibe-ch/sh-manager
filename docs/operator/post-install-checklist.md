@@ -14,10 +14,12 @@ secrets stored, access locked down, backups scheduled, monitoring in place.
 
 ## 1. Secure the credentials
 
-- [ ] **Store the generated admin password** in your password manager. It was
-      printed **once** at install and is never written to the manifest, lock
-      file, or UI. If you lost it, create a new admin in the backend container
-      rather than digging for it:
+- [ ] **Store the generated admin password** in your password manager, then
+      **delete its server-side file**. It was shown **once** at install (CLI
+      output / wizard success screen) and saved to the owner-only file
+      `<root>/instances/website1/secrets/admin_password`; it is never written
+      to the manifest, lock file, or logs. If you lost both, create a new
+      admin in the backend container rather than digging for it:
 
 ```bash
 docker compose -f <root>/instances/website1/compose.yaml \

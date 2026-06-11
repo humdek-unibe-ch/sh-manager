@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // @vitest-environment jsdom
 import { describe, it, expect } from 'vitest';
-import { render, screen } from '../../../test/render';
+import { fireEvent, render, screen } from '../../../test/render';
 import { SuccessStep } from './SuccessStep';
 import { FULL_CONFIG } from '../../../test/fake-client';
 import type { InstallResult, Snapshot } from '../../../lib/types';
@@ -24,6 +24,15 @@ const RESULT: InstallResult = {
   publicUrl: 'https://clinic-a.example',
 };
 
+const RESULT_WITH_PASSWORD: InstallResult = {
+  ...RESULT,
+  outcome: {
+    ...RESULT.outcome,
+    adminPassword: 'gen-pw-shown-once-12345',
+    adminPasswordFile: '/opt/selfhelp/instances/clinic-a/secrets/admin_password',
+  },
+};
+
 describe('SuccessStep', () => {
   it('celebrates the install and links to the public URL', () => {
     render(<SuccessStep result={RESULT} config={FULL_CONFIG} snapshot={SNAPSHOT} />);
@@ -35,10 +44,26 @@ describe('SuccessStep', () => {
     expect(screen.getByText('/opt/selfhelp/instances/clinic-a/manifest.json')).toBeInTheDocument();
   });
 
-  it('tells the operator to retrieve the password from the server and never prints a secret value', () => {
+  it('shows the generated admin password masked, revealed only on demand, with its server-side file path', () => {
+    render(<SuccessStep result={RESULT_WITH_PASSWORD} config={FULL_CONFIG} snapshot={SNAPSHOT} />);
+
+    expect(screen.getByText(/Administrator sign-in \(shown once\)/i)).toBeInTheDocument();
+    // Masked until the operator explicitly reveals it.
+    expect(document.body.textContent ?? '').not.toContain('gen-pw-shown-once-12345');
+    fireEvent.click(screen.getByRole('button', { name: /reveal generated admin password/i }));
+    expect(screen.getByText('gen-pw-shown-once-12345')).toBeInTheDocument();
+    // Copy works without revealing; the server-side retrieval file is named.
+    expect(screen.getByRole('button', { name: /copy generated admin password/i })).toBeInTheDocument();
+    expect(screen.getByText('/opt/selfhelp/instances/clinic-a/secrets/admin_password')).toBeInTheDocument();
+  });
+
+  it('points at the server-side password file (and prints no secret) when the one-shot value is gone', () => {
+    // E.g. the page was reloaded after install: the password no longer rides
+    // on any response, so the operator is sent to the restricted file instead.
     render(<SuccessStep result={RESULT} config={FULL_CONFIG} snapshot={SNAPSHOT} />);
 
-    expect(screen.getByText(/Save your admin password now/i)).toBeInTheDocument();
+    expect(screen.getByText(/Retrieve your admin password from the server/i)).toBeInTheDocument();
+    expect(screen.getByText(/secrets\/admin_password/)).toBeInTheDocument();
     // No "password: <value>" / "token=<value>" style leak anywhere on the screen.
     expect(document.body.textContent ?? '').not.toMatch(/(password|secret|token)\s*[:=]\s*\S/i);
   });

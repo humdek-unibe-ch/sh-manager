@@ -424,6 +424,106 @@ describe('CLI actions (offline)', () => {
     const joined = (d.runner as RecordingComposeRunner).calls.map((c) => c.args.join(' '));
     expect(joined.some((a) => a.includes('app:create-admin-user'))).toBe(false);
   });
+
+  it('wait_db fails fast with remediation when MySQL rejects the credentials (stale volume)', async () => {
+    // Regression: a mysql_data volume left over from an earlier install (whose
+    // secrets were since regenerated) makes the backend's DB connection fail
+    // with SQLSTATE 1045 "Access denied". That is deterministic — burning the
+    // full 60x2s retry budget only delayed an opaque PDO stack trace.
+    const d = await makeDeps();
+    d.sleep = async () => {};
+    d.dbWaitDelayMs = 0;
+    d.dbWaitAttempts = 60;
+    const denyRunner = new RecordingComposeRunner((args: string[]): ComposeResult => {
+      if (args.join(' ').includes('dbal:run-sql')) {
+        throw new Error(
+          'Command failed: docker compose exec -T backend php bin/console dbal:run-sql SELECT 1\n' +
+            "An exception occurred in the driver: SQLSTATE[HY000] [1045] Access denied for user 'selfhelp'@'172.19.0.8' (using password: YES)",
+        );
+      }
+      return { stdout: '', stderr: '' };
+    });
+    d.runner = denyRunner;
+    await serverInit(d, { serverId: 's1', mode: 'production', letsencryptEmail: 'ops@example.ch' });
+
+    const res = await instanceInstall(d, {
+      instanceId: 'website1',
+      displayName: 'Website 1',
+      mode: 'production',
+      domain: 'website1.example.ch',
+      registryUrl: 'https://humdek-unibe-ch.github.io/sh2-plugin-registry/',
+      version: 'latest',
+      provision: true,
+      adminEmail: 'qa.admin@selfhelp.test',
+    });
+
+    expect(res.provision?.ok).toBe(false);
+    const waitDb = res.provision?.steps.find((s) => s.name === 'wait_db');
+    expect(waitDb?.status).toBe('failed');
+    // The operator gets the cause + the exact remediation command, not a raw trace.
+    expect(waitDb?.detail).toContain('selfhelp_website1_mysql_data');
+    expect(waitDb?.detail).toContain('full_delete --delete-volumes');
+    expect(waitDb?.detail).toContain('Access denied');
+    // Fail-fast: a handful of conclusive rejections, never the full 60-attempt budget.
+    const dbalCalls = denyRunner.calls.filter((c) => c.args.join(' ').includes('dbal:run-sql'));
+    expect(dbalCalls.length).toBe(3);
+  });
+
+  it('persists the generated admin password to secrets/admin_password and reuses it on a resumed install', async () => {
+    const d = await makeDeps();
+    d.sleep = async () => {};
+    d.dbWaitDelayMs = 0;
+    await serverInit(d, { serverId: 's1', mode: 'production', letsencryptEmail: 'ops@example.ch' });
+    const opts = {
+      instanceId: 'website1',
+      displayName: 'Website 1',
+      mode: 'production' as const,
+      domain: 'website1.example.ch',
+      registryUrl: 'https://humdek-unibe-ch.github.io/sh2-plugin-registry/',
+      version: 'latest',
+      provision: true,
+      adminEmail: 'qa.admin@selfhelp.test',
+    };
+
+    const first = await instanceInstall(d, opts);
+    expect(first.adminPassword).toBeTruthy();
+    const file = path.join(instancePaths('website1', root).secretsDir, 'admin_password');
+    expect(first.adminPasswordFile).toBe(file);
+    expect((await readFile(file, 'utf8')).trim()).toBe(first.adminPassword);
+
+    // Retry/resume of the same instance: the admin row in the DB already
+    // carries the FIRST password, so the re-run must reuse it, not regenerate.
+    const second = await instanceInstall(d, opts);
+    expect(second.adminPassword).toBe(first.adminPassword);
+  });
+
+  it('uses an explicitly supplied admin password as-is and never writes it to disk', async () => {
+    const d = await makeDeps();
+    d.sleep = async () => {};
+    d.dbWaitDelayMs = 0;
+    await serverInit(d, { serverId: 's1', mode: 'production', letsencryptEmail: 'ops@example.ch' });
+
+    const res = await instanceInstall(d, {
+      instanceId: 'website1',
+      displayName: 'Website 1',
+      mode: 'production',
+      domain: 'website1.example.ch',
+      registryUrl: 'https://humdek-unibe-ch.github.io/sh2-plugin-registry/',
+      version: 'latest',
+      provision: true,
+      adminEmail: 'qa.admin@selfhelp.test',
+      adminPassword: 'operator-chosen-pw',
+    });
+
+    expect(res.provision?.ok).toBe(true);
+    // Supplied by the operator -> not returned, not persisted.
+    expect(res.adminPassword).toBeUndefined();
+    expect(res.adminPasswordFile).toBeUndefined();
+    const file = path.join(instancePaths('website1', root).secretsDir, 'admin_password');
+    await expect(readFile(file, 'utf8')).rejects.toThrow();
+    const joined = runner.calls.map((c) => c.args.join(' '));
+    expect(joined.some((a) => a.includes('--password=operator-chosen-pw'))).toBe(true);
+  });
 });
 
 describe('instance lifecycle (offline)', () => {

@@ -131,7 +131,8 @@ Open <http://127.0.0.1:8765> and walk the wizard:
    `test`, version `0.1.0`, and an admin email.
 4. **Install** — the wizard pulls the images, brings the stack up, provisions
    (DB → migrations → admin user → caches → health), and shows the generated
-   admin password **once**. Save it.
+   admin password **once** (masked, click *Reveal*). Save it; it is also in
+   the owner-only file `<instance>/secrets/admin_password` until you delete it.
 
 The wizard self-locks after a successful bootstrap install — that is by
 design (see [post-install-checklist.md](post-install-checklist.md)).

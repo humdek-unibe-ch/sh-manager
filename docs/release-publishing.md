@@ -89,9 +89,12 @@ The manager ships as the single privileged Docker image
    versions, lock/manifest shape), coordinate it with the registry catalogue and
    the platform repos per the cross-repo compatibility process.
 
-Operators discover a new release via `sh-manager self-update` (CLI, exit `2`
-when an update exists) or the "Manager version" card in the web operations
-console — both check the GitHub releases feed of this repository.
+Operators update via `sh-manager self-update` (checks the GitHub releases
+feed, pulls the new image tags, and restarts the `sh-manager-web` GUI
+container; on a source checkout it runs `git pull --ff-only && npm ci &&
+npm run build`). `sh-manager self-update --check` only reports (exit `2`
+when an update exists), and the "Manager version" card in the web operations
+console shows the same status.
 
 ## Publishing platform artifacts (core / frontend / scheduler / worker / plugins)
 

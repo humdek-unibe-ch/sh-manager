@@ -61,8 +61,9 @@ export function AdminStep({ ctl }: AdminStepProps): JSX.Element {
       </Paper>
 
       <Alert tone="success" title="Passwords are never entered here">
-        The administrator password is generated securely during installation and shown to you once on the success
-        screen. It is never typed into this form or stored in the wizard.
+        The administrator password is generated securely during installation, shown to you once on the success screen,
+        and saved to an owner-only file in the instance&apos;s <code>secrets/</code> directory on the server. It is
+        never typed into this form or stored in the wizard.
       </Alert>
     </WizardFrame>
   );

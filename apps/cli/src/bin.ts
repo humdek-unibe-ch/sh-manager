@@ -35,7 +35,7 @@ import {
 import { HttpBackendOperationsClient } from './operations-client.js';
 import { MANAGER_VERSION, loadTrustedKeys, realDeps } from './env.js';
 import { formatHealth, formatPreflight, formatSteps, formatTable } from './output.js';
-import { checkSelfUpdate, formatSelfUpdate } from './self-update.js';
+import { applySelfUpdate, checkSelfUpdate, formatSelfUpdate } from './self-update.js';
 import { generateWrapperScript, type WrapperShell } from './wrapper.js';
 import type { ManagerRole } from '@shm/auth';
 import {
@@ -94,13 +94,36 @@ program.option('--root <dir>', 'SelfHelp root directory', DEFAULT_ROOT);
 
 program
   .command('self-update')
-  .description('Check whether a newer manager release is available and print how to update')
-  .action(async () => {
+  .description('Update the manager to the latest release (Docker: pull image + restart the web GUI container; source: git pull + npm ci + build)')
+  .option('--check', 'only check and print what would happen; do not apply', false)
+  .action(async (opts) => {
     try {
       const check = await checkSelfUpdate({ currentVersion: MANAGER_VERSION });
       console.log(formatSelfUpdate(check));
-      // Scripts can branch on the exit code: 0 = up to date, 2 = update available.
-      if (check.updateAvailable) process.exitCode = 2;
+      if (opts.check) {
+        // Scripts can branch on the exit code: 0 = up to date, 2 = update available.
+        if (check.updateAvailable) process.exitCode = 2;
+        return;
+      }
+      if (check.error) {
+        // Degrade gracefully (offline server): the message above already says
+        // the latest release could not be determined.
+        return;
+      }
+      if (!check.updateAvailable) return;
+      console.log('\nApplying update...');
+      const result = await applySelfUpdate(check);
+      for (const step of result.steps) console.log(`  done    ${step}`);
+      if (result.webRestarted) {
+        console.log(`  done    web GUI container restarted on the new image`);
+      } else if (result.webRestartHint) {
+        console.log(`  note    ${result.webRestartHint}`);
+      }
+      console.log(
+        check.runtime === 'docker'
+          ? `\nManager updated to ${check.latestVersion}. Every next run uses the new image.`
+          : `\nManager updated to ${check.latestVersion}. Restart running manager processes to load it.`,
+      );
     } catch (err) {
       fail(err);
     }
@@ -237,6 +260,9 @@ instance
         }
         if (res.adminPassword) {
           console.log(`\nGenerated admin password (shown once, store it now): ${res.adminPassword}`);
+          if (res.adminPasswordFile) {
+            console.log(`Also saved to ${res.adminPasswordFile} (owner-only file) - delete it after your first sign-in.`);
+          }
         }
         if (!res.provision.ok) process.exitCode = 1;
       }

@@ -18,6 +18,7 @@ export { MetricCard, type MetricCardProps, type MetricStatus } from './cards/Met
 
 export { CommandPreview, type CommandPreviewProps } from './commands/CommandPreview';
 export { KeyValue, type KeyValueProps, type KeyValueRow } from './commands/KeyValue';
+export { SecretReveal, type SecretRevealProps } from './commands/SecretReveal';
 
 export { StatusBadge, type StatusBadgeProps, type BadgeTone } from './status/StatusBadge';
 export { CheckRow, type CheckRowProps, type CheckStatus } from './status/CheckRow';

@@ -55,9 +55,12 @@ import {
   InventoryStore,
   LockStore,
   ManifestStore,
+  SECRET_DIR_MODE,
+  SECRET_FILE_MODE,
   generateCloneSecrets,
   instancePaths,
   instancesDir,
+  nodeSecretIO,
   planRemove,
   proxyDir,
   secretsForRestore,
@@ -141,6 +144,35 @@ function errMessage(err: unknown): string {
 
 const realSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * MySQL "Access denied" (SQLSTATE 1045 / ER_ACCESS_DENIED_ERROR) is a
+ * credential mismatch, not slow startup, so retrying cannot fix it. It almost
+ * always means the instance's mysql_data volume was initialised by an EARLIER
+ * install with different generated secrets: the official mysql image applies
+ * MYSQL_USER/MYSQL_PASSWORD only on the first initialisation of an empty
+ * volume, so once secrets are regenerated the stack is locked out of its own
+ * database forever.
+ */
+function isDbCredentialError(message: string): boolean {
+  return /access denied for user|SQLSTATE\[HY000\] \[1045\]|ERROR 1045/i.test(message);
+}
+
+/** Consecutive credential rejections tolerated before failing fast. */
+const DB_CREDENTIAL_FAILURE_LIMIT = 3;
+
+function dbCredentialMismatchError(instanceId: string, lastErr: unknown): Error {
+  const volume = `${composeProjectName(instanceId)}_mysql_data`;
+  return new Error(
+    `MySQL rejected the instance credentials (Access denied). The database volume "${volume}" was ` +
+      `initialised with DIFFERENT credentials than the ones in instances/${instanceId}/secrets/secrets.env — ` +
+      `usually a volume left over from an earlier install attempt whose secrets were since regenerated. ` +
+      `Waiting longer cannot fix this. Either restore the original secrets/secrets.env, or remove the ` +
+      `instance INCLUDING its volumes and reinstall:\n` +
+      `  sh-manager instance remove ${instanceId} --mode full_delete --delete-volumes --confirm "delete ${instanceId}"\n` +
+      `Underlying error: ${errMessage(lastErr)}`,
+  );
+}
+
 function secretGenOptions(deps: ActionDeps): GenerateSecretsOptions {
   return deps.jwtModulusLength === undefined ? {} : { jwtModulusLength: deps.jwtModulusLength };
 }
@@ -163,6 +195,7 @@ async function waitForMysqlReady(deps: ActionDeps, instanceDir: string): Promise
   const delayMs = deps.dbWaitDelayMs ?? 2000;
   const sleep = deps.sleep ?? realSleep;
   let lastErr: unknown;
+  let credentialFailures = 0;
   for (let i = 0; i < attempts; i++) {
     try {
       await deps.runner.run(instanceDir, [
@@ -176,6 +209,17 @@ async function waitForMysqlReady(deps: ActionDeps, instanceDir: string): Promise
       return;
     } catch (err) {
       lastErr = err;
+      // Deterministic credential mismatch (stale volume): fail fast with
+      // remediation instead of burning the whole retry budget (see
+      // isDbCredentialError). The first-boot temp-init phase never answers TCP,
+      // so a couple of consecutive denials is conclusive.
+      if (isDbCredentialError(errMessage(err))) {
+        if (++credentialFailures >= DB_CREDENTIAL_FAILURE_LIMIT) {
+          throw dbCredentialMismatchError(path.basename(instanceDir), err);
+        }
+      } else {
+        credentialFailures = 0;
+      }
       if (i < attempts - 1) await sleep(delayMs);
     }
   }
@@ -358,7 +402,16 @@ function selectCoreRef<T extends { version: string; channel: string; blocked?: b
 export async function instanceInstall(
   deps: ActionDeps,
   opts: InstanceInstallOptions,
-): Promise<{ instanceDir: string; version: string; broughtUp: boolean; provision?: ProvisionReport; adminPassword?: string; domainWarnings: string[] }> {
+): Promise<{
+  instanceDir: string;
+  version: string;
+  broughtUp: boolean;
+  provision?: ProvisionReport;
+  adminPassword?: string;
+  /** Restricted (0600) server-side file holding the generated admin password. */
+  adminPasswordFile?: string;
+  domainWarnings: string[];
+}> {
   // Fail fast on duplicate domains / bad DNS before touching the registry or disk.
   const domainWarnings = await assertInstallableDomain(deps, opts);
 
@@ -414,10 +467,20 @@ export async function instanceInstall(
     return { instanceDir: res.instanceDir, version: core.version, broughtUp: res.broughtUp, domainWarnings };
   }
 
-  // A generated admin password is returned to the caller exactly once and never
-  // written to disk, the manifest, the lock, or any log.
-  const generatedPassword =
-    opts.adminEmail && !opts.adminPassword ? randomBytes(18).toString('base64url') : undefined;
+  // Admin bootstrap password policy: an explicitly supplied password is used
+  // as-is and never written to disk (the operator already has it). A GENERATED
+  // one is persisted to <instance>/secrets/admin_password (0600) so it can be
+  // retrieved after the installer output is gone, and so a resumed install
+  // reuses the password the admin row was already created with instead of
+  // regenerating. It is returned to the caller exactly once and never enters
+  // the manifest, lock, inventory, or any log.
+  let generatedPassword: string | undefined;
+  let adminPasswordFile: string | undefined;
+  if (opts.adminEmail && !opts.adminPassword) {
+    const persisted = await persistOrReuseAdminPassword(deps, opts.instanceId);
+    generatedPassword = persisted.password;
+    adminPasswordFile = persisted.file;
+  }
   const provision = await runInstanceProvisioning(deps, opts, artifacts, core.version, generatedPassword);
 
   return {
@@ -427,7 +490,34 @@ export async function instanceInstall(
     provision,
     domainWarnings,
     ...(generatedPassword ? { adminPassword: generatedPassword } : {}),
+    ...(adminPasswordFile ? { adminPasswordFile } : {}),
   };
+}
+
+/** Filename of the generated admin bootstrap password inside `<instance>/secrets/`. */
+export const ADMIN_PASSWORD_FILENAME = 'admin_password';
+
+/**
+ * Returns the instance's generated admin bootstrap password, creating and
+ * persisting it on first use. The 0600 file under the instance's `secrets/`
+ * directory is the operator's retrieval point once the installer output is
+ * gone (web wizard closed, scrollback lost) and the resume anchor for a
+ * retried install: the CMS admin row already carries the FIRST attempt's
+ * password, so a retry must reuse it, never regenerate.
+ */
+async function persistOrReuseAdminPassword(
+  deps: ActionDeps,
+  instanceId: string,
+): Promise<{ password: string; file: string }> {
+  const paths = instancePaths(instanceId, deps.root);
+  const file = path.join(paths.secretsDir, ADMIN_PASSWORD_FILENAME);
+  const existing = (await readFile(file, 'utf8').catch(() => '')).trim();
+  if (existing !== '') return { password: existing, file };
+  const io = deps.secretIO ?? nodeSecretIO;
+  const password = randomBytes(18).toString('base64url');
+  await io.ensureDir(paths.secretsDir, SECRET_DIR_MODE);
+  await io.writeFile(file, `${password}\n`, SECRET_FILE_MODE);
+  return { password, file };
 }
 
 /**
@@ -493,12 +583,23 @@ async function runInstanceProvisioning(
     const attempts = deps.dbWaitAttempts ?? 60;
     const delayMs = deps.dbWaitDelayMs ?? 2000;
     let lastErr: unknown;
+    let credentialFailures = 0;
     for (let i = 0; i < attempts; i++) {
       try {
         await consoleExec(['dbal:run-sql', 'SELECT 1']);
         return;
       } catch (err) {
         lastErr = err;
+        // "Access denied" is a deterministic credential mismatch (stale
+        // mysql_data volume from an earlier attempt) — retrying for the full
+        // budget only delays a clear answer. Fail fast with remediation.
+        if (isDbCredentialError(errMessage(err))) {
+          if (++credentialFailures >= DB_CREDENTIAL_FAILURE_LIMIT) {
+            throw dbCredentialMismatchError(opts.instanceId, err);
+          }
+        } else {
+          credentialFailures = 0;
+        }
         if (i < attempts - 1) await sleep(delayMs);
       }
     }

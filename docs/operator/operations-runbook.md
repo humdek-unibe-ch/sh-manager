@@ -55,8 +55,9 @@ sh-manager instance install --id website1 --domain website1.example.ch \
   --version latest --provision --admin-email ops@example.ch
 ```
 
-The generated admin password is printed **once** and never stored — capture it
-now. Prefer the **web wizard** for a guided first install.
+The generated admin password is printed **once** and saved to the owner-only
+file `<instance>/secrets/admin_password` — capture it now and delete the file
+after your first sign-in. Prefer the **web wizard** for a guided first install.
 
 → Detail: [install](install.md).
 

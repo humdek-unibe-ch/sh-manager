@@ -8,13 +8,50 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `1.0.10`). Registry releases
+- **The manager tool** uses its own semver (currently `1.0.11`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
   **`0.x`** line (core, frontend, scheduler, worker — all `0.1.0`).
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
+
+## [1.0.11] - 2026-06-11
+
+### Added
+- **The generated admin password is now delivered, not just generated** — it
+  is saved to the owner-only file `<instance>/secrets/admin_password` (0600)
+  and returned once on the install response: the CLI prints it together with
+  the file path, and the web wizard's success screen shows it masked behind a
+  *Reveal* button with copy support (one-shot: it is never part of wizard
+  state, `/api/state`, or any check detail, and disappears on reload — the
+  screen then points at the server-side file instead). A resumed install
+  reuses the persisted password instead of regenerating it, so the admin user
+  always matches the file. A password you supply yourself (`--admin-password`)
+  is still used as-is and never written to disk. Previously the web wizard
+  generated a password, created the admin with it, and threw it away — it was
+  unrecoverable anywhere.
+- **`sh-manager self-update` now applies the update** instead of only printing
+  instructions. On the Docker image it pulls the new image tags and — when the
+  `sh-manager-web` GUI container is running — recreates it on the new image
+  with the same port mapping, mounts, environment, and command (`--check`
+  keeps the old report-only behaviour, exit `2` = update available). On a
+  source checkout it runs `git pull --ff-only`, `npm ci`, and `npm run build`.
+  When the updater runs *inside* the GUI container itself it stages everything
+  and prints the one command to finish from the host (a container cannot
+  safely replace itself).
+
+### Fixed
+- **Installs onto a stale MySQL volume now fail fast with remediation instead
+  of timing out after 2 minutes** — when an instance's `mysql_data` volume was
+  initialised by an earlier install attempt with different generated secrets
+  (manager < 1.0.10 regenerated secrets on retry; MySQL only applies
+  `MYSQL_USER`/`MYSQL_PASSWORD` when an empty volume initialises), every
+  `wait_db` probe died with `SQLSTATE[HY000] [1045] Access denied` until the
+  60-attempt timeout. The DB-wait and console-wait loops now recognise
+  persistent authentication failures (3 consecutive probes), stop immediately,
+  and explain the two ways out: remove the instance **including volumes** and
+  reinstall, or restore the original `secrets/secrets.env`.
 
 ## [1.0.10] - 2026-06-11
 
