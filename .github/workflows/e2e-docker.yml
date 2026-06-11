@@ -26,6 +26,11 @@ on:
           same-branch-or-main auto-resolution.
         required: false
         default: ''
+  push:
+    # Changing the e2e definition itself re-validates the journey immediately
+    # (still off the PR gate: ordinary code pushes do not match this filter).
+    paths:
+      - '.github/workflows/e2e-docker.yml'
   schedule:
     # 03:17 UTC nightly (offset to avoid the top-of-hour runner crush).
     - cron: '17 3 * * *'
