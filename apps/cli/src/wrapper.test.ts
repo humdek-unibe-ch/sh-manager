@@ -21,6 +21,11 @@ describe('generateWrapperScript (powershell)', () => {
     expect(script).toContain('$WebPort = 8765');
   });
 
+  it('names the containers after the manager (GUI fixed, CLI per-shell)', () => {
+    expect(script).toContain('--name sh-manager-web');
+    expect(script).toContain('--name "sh-manager-cli-$PID"');
+  });
+
   it('uses the official image by default and forwards the exit code', () => {
     expect(script).toContain("'ghcr.io/humdek-unibe-ch/sh-manager:latest'");
     expect(script).toContain('exit $LASTEXITCODE');
@@ -53,7 +58,12 @@ describe('generateWrapperScript (bash)', () => {
   it('publishes the GUI loopback-only for `web` and passes everything else through', () => {
     expect(script).toContain('-p "127.0.0.1:${WEB_PORT}:${WEB_PORT}"');
     expect(script).toContain('web --host 0.0.0.0 --port "$WEB_PORT"');
-    expect(script).toContain('exec docker "${DOCKER_ARGS[@]}" "$IMAGE" "$@"');
+    expect(script).toContain('exec docker "${DOCKER_ARGS[@]}" --name "sh-manager-cli-$$" "$IMAGE" "$@"');
+  });
+
+  it('names the containers after the manager (GUI fixed, CLI per-shell)', () => {
+    expect(script).toContain('--name sh-manager-web');
+    expect(script).toContain('--name "sh-manager-cli-$$"');
   });
 
   it('bakes an explicit root with shell-safe quoting', () => {

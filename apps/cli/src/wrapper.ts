@@ -57,11 +57,14 @@ $DockerArgs = @(
   '-v', '/var/run/docker.sock:/var/run/docker.sock',
   '-v', "\${Root}:/opt/selfhelp"
 )
+# Recognisable container names: the GUI is the single long-running container
+# ("name already in use" means it is already running - docker rm -f sh-manager-web);
+# one-shot CLI calls get a per-shell suffix so parallel shells never collide.
 if ($args.Count -gt 0 -and $args[0] -eq 'web') {
   $Rest = @($args | Select-Object -Skip 1)
-  docker @DockerArgs -p "127.0.0.1:\${WebPort}:\${WebPort}" $Image web --host 0.0.0.0 --port $WebPort @Rest
+  docker @DockerArgs --name sh-manager-web -p "127.0.0.1:\${WebPort}:\${WebPort}" $Image web --host 0.0.0.0 --port $WebPort @Rest
 } else {
-  docker @DockerArgs $Image @args
+  docker @DockerArgs --name "sh-manager-cli-$PID" $Image @args
 }
 exit $LASTEXITCODE
 `;
@@ -89,11 +92,14 @@ DOCKER_ARGS=(run --rm
   --add-host=host.docker.internal:host-gateway
   -v /var/run/docker.sock:/var/run/docker.sock
   -v "$ROOT:/opt/selfhelp")
+# Recognisable container names: the GUI is the single long-running container
+# ("name already in use" means it is already running - docker rm -f sh-manager-web);
+# one-shot CLI calls get a per-shell suffix so parallel shells never collide.
 if [ "\${1:-}" = 'web' ]; then
   shift
-  exec docker "\${DOCKER_ARGS[@]}" -p "127.0.0.1:\${WEB_PORT}:\${WEB_PORT}" "$IMAGE" web --host 0.0.0.0 --port "$WEB_PORT" "$@"
+  exec docker "\${DOCKER_ARGS[@]}" --name sh-manager-web -p "127.0.0.1:\${WEB_PORT}:\${WEB_PORT}" "$IMAGE" web --host 0.0.0.0 --port "$WEB_PORT" "$@"
 fi
-exec docker "\${DOCKER_ARGS[@]}" "$IMAGE" "$@"
+exec docker "\${DOCKER_ARGS[@]}" --name "sh-manager-cli-$$" "$IMAGE" "$@"
 `;
 }
 
