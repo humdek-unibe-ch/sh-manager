@@ -23,6 +23,14 @@ import {
 import { sha256Hex } from './canonical.js';
 import { verifyReleaseSignature, type VerificationResult } from './signature.js';
 
+/**
+ * The official SelfHelp release registry. The default everywhere a registry
+ * URL can be omitted (CLI `instance install`, web wizard). Pointing somewhere
+ * else never weakens verification: releases are checked against the pinned
+ * trusted keys regardless of which registry served them.
+ */
+export const OFFICIAL_REGISTRY_URL = 'https://humdek-unibe-ch.github.io/sh2-plugin-registry/';
+
 export type RegistryErrorCode =
   | 'registry_unavailable'
   | 'invalid_metadata'

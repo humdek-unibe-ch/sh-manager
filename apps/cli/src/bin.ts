@@ -14,6 +14,7 @@ import { Command } from 'commander';
 import type { InstanceMode, ReleaseChannel } from '@shm/schemas';
 import { CrossInstanceError } from '@shm/core';
 import { discoverEngineRoot } from '@shm/docker';
+import { OFFICIAL_REGISTRY_URL } from '@shm/registry';
 import type { RemoveMode } from '@shm/instances';
 import type { RestoreMode } from '@shm/backup';
 import {
@@ -167,7 +168,7 @@ instance
   .command('install')
   .description('Install a new instance from the official registry')
   .requiredOption('--id <id>', 'instance id (lowercase)')
-  .requiredOption('--registry <url>', 'registry base url')
+  .option('--registry <url>', 'registry base url', OFFICIAL_REGISTRY_URL)
   .option('--name <name>', 'display name')
   .option('--mode <mode>', 'production|local', 'production')
   .option('--domain <domain>', 'public domain (production)')
