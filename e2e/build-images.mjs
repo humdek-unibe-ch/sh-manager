@@ -61,6 +61,10 @@ export function buildImages(opts = {}) {
   const tags = imageTags(owner, tag);
   for (const target of ['backend', 'worker', 'scheduler']) {
     run('docker', ['build', '-f', 'docker/Dockerfile', '--target', target, '-t', tags[target], '.'], repos.backend);
+    // Fail fast: the Symfony kernel must boot with no host env mounted. A
+    // broken image (e.g. missing /app/.env) would otherwise surface only as
+    // 240s backend-health timeouts deep inside the e2e journey.
+    run('docker', ['run', '--rm', tags[target], 'php', 'bin/console', 'about'], repos.backend);
   }
   run('docker', ['build', '-f', 'Dockerfile', '-t', tags.frontend, '.'], repos.frontend);
   return tags;
