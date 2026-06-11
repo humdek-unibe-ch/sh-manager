@@ -47,11 +47,27 @@ export function buildInstanceRouting(input: InstanceEnvInput): InstanceRouting {
   };
 }
 
-/** Builds the non-secret env map. Secrets live in restricted secret files. */
+/**
+ * Builds the non-secret env map. Secrets live in restricted secret files.
+ *
+ * This file is consumed twice with identical semantics:
+ * - compose `env_file` injects every key as a real container env var;
+ * - it is bind-mounted at `/app/.env`, the dotenv file Symfony's runtime
+ *   REQUIRES to exist on every request/console boot (core images <= 0.1.2
+ *   bake no default file, which fatally broke install provisioning).
+ *
+ * Because the mount shadows any `/app/.env` a newer image bakes, this map
+ * must stay a SUPERSET of the backend image's secret-free defaults: every
+ * backend env var with no `default:` fallback in its Symfony config has to be
+ * present here (APP_DEBUG, JWT TTLs, CORS_ALLOW_ORIGIN, MAILER_DSN below),
+ * or resolving it at runtime throws. Values mirror the backend's
+ * `docker/.env.image-defaults`.
+ */
 export function buildInstanceEnv(input: InstanceEnvInput): Record<string, string> {
   const routing = buildInstanceRouting(input);
   return {
     APP_ENV: 'prod',
+    APP_DEBUG: '0',
     SELFHELP_INSTANCE_ID: input.instanceId,
     SELFHELP_MODE: input.mode,
     // The env names the backend actually reads (config/services.yaml):
@@ -76,6 +92,19 @@ export function buildInstanceEnv(input: InstanceEnvInput): Record<string, string
     // mounted read-only at /app/config/jwt). The passphrase is in secrets.env.
     JWT_SECRET_KEY: '/app/config/jwt/private.pem',
     JWT_PUBLIC_KEY: '/app/config/jwt/public.pem',
+    // Token lifetimes (seconds): access 1 hour, refresh 30 days. No config
+    // default exists for either, so they must be provided here.
+    JWT_TOKEN_TTL: '3600',
+    JWT_REFRESH_TOKEN_TTL: '2592000',
+    // Browser traffic reaches the API through the frontend BFF (same origin);
+    // direct cross-origin browser access stays locked to localhost tooling.
+    // Single-quoted so BOTH parsers (compose env_file + Symfony dotenv) take
+    // the regex literally — unquoted, the trailing `$` would be eaten by
+    // compose's `${…}` interpolation.
+    CORS_ALLOW_ORIGIN: "'^https?://(localhost|127\\.0\\.0\\.1)(:[0-9]+)?$'",
+    // Local mode ships a Mailpit container under this service name; production
+    // operators override it with a real SMTP DSN. Mirrors the backend default.
+    MAILER_DSN: 'smtp://mailpit:1025',
   };
 }
 

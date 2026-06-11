@@ -93,6 +93,31 @@ describe('buildInstanceCompose (production)', () => {
     }
   });
 
+  it('bind-mounts the instance .env at /app/.env so the Symfony dotenv boot never fatals', () => {
+    // Regression: published core images <= 0.1.2 bake no /app/.env, so every
+    // `php bin/console …` (and FrankenPHP request boot) died with "Unable to
+    // read the /app/.env environment file" — install provisioning failed at
+    // `wait_db`. env_file only injects process env; it never creates the file.
+    for (const name of ['backend', 'worker', 'scheduler']) {
+      expect(svc(doc, name).volumes).toContain('./.env:/app/.env:ro');
+    }
+    // Non-Symfony services do not need (and must not get) the dotenv mount.
+    for (const name of ['frontend', 'mysql', 'redis', 'mercure']) {
+      expect(svc(doc, name).volumes ?? []).not.toContain('./.env:/app/.env:ro');
+    }
+  });
+
+  it('disables the inherited FrankenPHP healthcheck on worker/scheduler (console loops, not web servers)', () => {
+    // Regression: worker/scheduler images are built FROM the backend image and
+    // inherit its HEALTHCHECK (curl to Caddy admin :2019). Those services run
+    // console loops — the check can never pass, so `docker ps` branded healthy
+    // containers "(unhealthy)" forever.
+    expect(svc(doc, 'worker').healthcheck).toEqual({ disable: true });
+    expect(svc(doc, 'scheduler').healthcheck).toEqual({ disable: true });
+    // The backend DOES run FrankenPHP: keep the image's own healthcheck.
+    expect(svc(doc, 'backend').healthcheck).toBeUndefined();
+  });
+
   it('mounts persistent uploads + plugin-artifact volumes on every Symfony service', () => {
     for (const name of ['backend', 'worker', 'scheduler']) {
       const volumes = svc(doc, name).volumes as string[];
@@ -189,6 +214,12 @@ describe('engine-side bind sources (hostBindDir)', () => {
   it('emits the JWT bind absolute for the engine on every Symfony service', () => {
     for (const name of ['backend', 'worker', 'scheduler']) {
       expect(svc(doc, name).volumes).toContain(`${engineDir}/secrets/jwt:/app/config/jwt:ro`);
+    }
+  });
+
+  it('emits the /app/.env bind absolute for the engine too', () => {
+    for (const name of ['backend', 'worker', 'scheduler']) {
+      expect(svc(doc, name).volumes).toContain(`${engineDir}/.env:/app/.env:ro`);
     }
   });
 

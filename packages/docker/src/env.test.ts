@@ -51,4 +51,26 @@ describe('BFF URL invariant', () => {
     expect(env.MERCURE_URL).toBe('http://mercure/.well-known/mercure');
     expect(env.MERCURE_PUBLIC_URL).toBe('https://website1.example.ch/.well-known/mercure');
   });
+
+  it('is a superset of the backend image dotenv defaults (mounted at /app/.env)', () => {
+    // The instance .env is bind-mounted as the Symfony dotenv file, shadowing
+    // any /app/.env a newer image bakes — so every backend env var WITHOUT a
+    // `default:` fallback in its Symfony config must be present here, or
+    // resolving it throws at runtime (and on cores <= 0.1.2 the whole console
+    // fatals because no dotenv file exists at all).
+    const env = buildInstanceEnv(input);
+    expect(env.APP_ENV).toBe('prod');
+    expect(env.APP_DEBUG).toBe('0');
+    expect(env.JWT_SECRET_KEY).toBe('/app/config/jwt/private.pem');
+    expect(env.JWT_PUBLIC_KEY).toBe('/app/config/jwt/public.pem');
+    expect(env.JWT_TOKEN_TTL).toBe('3600');
+    expect(env.JWT_REFRESH_TOKEN_TTL).toBe('2592000');
+    expect(env.MAILER_DSN).toBe('smtp://mailpit:1025');
+    expect(env.CORS_ALLOW_ORIGIN).toBeTruthy();
+  });
+
+  it('keeps the CORS regex single-quoted so compose interpolation cannot eat the `$` anchor', () => {
+    const dotenv = renderDotEnv(buildInstanceEnv(input));
+    expect(dotenv).toContain("CORS_ALLOW_ORIGIN='^https?://(localhost|127\\.0\\.0\\.1)(:[0-9]+)?$'");
+  });
 });

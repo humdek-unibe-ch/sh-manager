@@ -29,6 +29,19 @@ const JWT_KEYS_HOST_DIR = './secrets/jwt';
 const JWT_KEYS_CONTAINER_DIR = '/app/config/jwt';
 const NON_SECRET_ENV = ['.env'];
 const SECRET_AWARE_ENV = ['.env', SECRETS_ENV_FILE];
+/**
+ * The instance's non-secret `.env` is ALSO bind-mounted into the Symfony
+ * services as `/app/.env`: Symfony's runtime boots a dotenv file on every
+ * request/console command and FATALS when none exists ("Unable to read the
+ * /app/.env environment file"), which broke install provisioning at `wait_db`
+ * on every published core image that does not bake a default `/app/.env`
+ * (core <= 0.1.2). Compose's `env_file` only injects process env vars — it
+ * never creates the file — so the manager guarantees the file itself. Real
+ * container env vars always override dotenv values, so the mount is inert on
+ * images that already bake their own defaults file.
+ */
+const ENV_HOST_FILE = './.env';
+const ENV_CONTAINER_FILE = '/app/.env';
 
 /**
  * Persistent application data the Symfony services (backend/worker/scheduler)
@@ -151,6 +164,8 @@ export function buildInstanceCompose(spec: InstanceComposeSpec): ComposeDocument
   // (they are read client-side by the compose CLI inside the manager).
   const jwtHostDir = spec.hostBindDir ? `${spec.hostBindDir}/secrets/jwt` : JWT_KEYS_HOST_DIR;
   const jwtMount = `${jwtHostDir}:${JWT_KEYS_CONTAINER_DIR}:ro`;
+  const envHostFile = spec.hostBindDir ? `${spec.hostBindDir}/.env` : ENV_HOST_FILE;
+  const dotenvMount = `${envHostFile}:${ENV_CONTAINER_FILE}:ro`;
 
   // Persistent application data shared by all three Symfony services so uploads
   // and installed plugin artifacts survive container replacement and are
@@ -162,18 +177,27 @@ export function buildInstanceCompose(spec: InstanceComposeSpec): ComposeDocument
   ];
 
   const backend = baseService(spec.images.backend, ['instance'], spec.resources, SECRET_AWARE_ENV);
-  backend.volumes = [jwtMount, ...persistentMounts];
+  backend.volumes = [dotenvMount, jwtMount, ...persistentMounts];
   backend.depends_on = {
     mysql: { condition: 'service_healthy' },
     redis: { condition: 'service_healthy' },
   };
 
+  // The worker/scheduler images are built FROM the backend image and inherit
+  // its FrankenPHP HEALTHCHECK (curl to the Caddy admin endpoint :2019), but
+  // these services run console loops, not FrankenPHP — the inherited check can
+  // never pass and permanently brands working containers "unhealthy" in
+  // `docker ps`. Disable it: `restart: unless-stopped` is the liveness
+  // mechanism for these processes, and the manager's own health verdict probes
+  // the public HTTP surface, never the Docker health flag of these two.
   const worker = baseService(spec.images.worker, ['instance'], spec.resources, SECRET_AWARE_ENV);
-  worker.volumes = [jwtMount, ...persistentMounts];
+  worker.volumes = [dotenvMount, jwtMount, ...persistentMounts];
   worker.depends_on = { backend: { condition: 'service_started' } };
+  worker.healthcheck = { disable: true };
 
   const scheduler = baseService(spec.images.scheduler, ['instance'], spec.resources, SECRET_AWARE_ENV);
-  scheduler.volumes = [jwtMount, ...persistentMounts];
+  scheduler.volumes = [dotenvMount, jwtMount, ...persistentMounts];
+  scheduler.healthcheck = { disable: true };
   // `$$` defers expansion to the container shell (see the redis note below).
   scheduler.command = [
     'sh',
