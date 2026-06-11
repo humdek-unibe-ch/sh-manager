@@ -174,10 +174,11 @@ export function buildInstanceCompose(spec: InstanceComposeSpec): ComposeDocument
 
   const scheduler = baseService(spec.images.scheduler, ['instance'], spec.resources, SECRET_AWARE_ENV);
   scheduler.volumes = [jwtMount, ...persistentMounts];
+  // `$$` defers expansion to the container shell (see the redis note below).
   scheduler.command = [
     'sh',
     '-lc',
-    `while true; do php bin/console app:scheduled-jobs:execute-due --env=prod --no-interaction; sleep \${SCHEDULED_JOBS_TICK_SECONDS:-${tick}}; done`,
+    `while true; do php bin/console app:scheduled-jobs:execute-due --env=prod --no-interaction; sleep $\${SCHEDULED_JOBS_TICK_SECONDS:-${tick}}; done`,
   ];
 
   const mysql = baseService(spec.images.mysql, ['instance'], spec.resources, SECRET_AWARE_ENV);
@@ -199,16 +200,27 @@ export function buildInstanceCompose(spec: InstanceComposeSpec): ComposeDocument
 
   // Redis enforces the generated password; both the server and the healthcheck
   // read it from the container environment (loaded via the secret env_file).
+  // `$$` is the compose-file escape: a single `$REDIS_PASSWORD` would be
+  // interpolated by `docker compose` at PARSE time from the host env / project
+  // `.env` (where the secret deliberately does not exist), silently starting
+  // redis with an EMPTY --requirepass and warning "REDIS_PASSWORD is not set"
+  // on every compose invocation. Escaped, the literal `$REDIS_PASSWORD`
+  // reaches the container shell, which expands it from the secret env_file.
   const redis = baseService(spec.images.redis, ['instance'], spec.resources, SECRET_AWARE_ENV);
-  redis.command = ['sh', '-lc', 'exec redis-server --requirepass "$REDIS_PASSWORD"'];
+  redis.command = ['sh', '-lc', 'exec redis-server --requirepass "$$REDIS_PASSWORD"'];
   redis.healthcheck = {
-    test: ['CMD-SHELL', 'redis-cli -a "$REDIS_PASSWORD" ping | grep -q PONG'],
+    test: ['CMD-SHELL', 'redis-cli -a "$$REDIS_PASSWORD" ping | grep -q PONG'],
     interval: '10s',
     timeout: '5s',
     retries: 10,
   };
 
+  // The hub is internal-only (private instance network; TLS terminates at the
+  // edge proxy). Without SERVER_NAME the dunglas/mercure Caddy defaults to
+  // auto-HTTPS on a self-minted local CA and 308-redirects plain HTTP, so the
+  // backend's publishes to http://mercure/.well-known/mercure would never work.
   const mercure = baseService(spec.images.mercure, ['instance'], spec.resources, SECRET_AWARE_ENV);
+  mercure.environment = { SERVER_NAME: ':80' };
 
   const services: Record<string, unknown> = {
     frontend,

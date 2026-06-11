@@ -42,4 +42,13 @@ describe('BFF URL invariant', () => {
     expect(env.SELFHELP_FRONTEND_VERSION).toBe('1.4.2');
     expect(env).not.toHaveProperty('SELFHELP_VERSION');
   });
+
+  it('always sets the internal Mercure hub URL the backend publishes to', () => {
+    // Regression: the backend's Mercure hub service hard-fails to instantiate
+    // when MERCURE_URL is unset (`new Hub(null)` TypeError), which 500'd every
+    // request and broke `app:create-admin-user` during provisioning.
+    const env = buildInstanceEnv(input);
+    expect(env.MERCURE_URL).toBe('http://mercure/.well-known/mercure');
+    expect(env.MERCURE_PUBLIC_URL).toBe('https://website1.example.ch/.well-known/mercure');
+  });
 });

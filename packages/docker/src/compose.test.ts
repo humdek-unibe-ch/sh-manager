@@ -115,6 +115,26 @@ describe('buildInstanceCompose (production)', () => {
     expect((redis.healthcheck as { test: string[] }).test.join(' ')).toContain('REDIS_PASSWORD');
   });
 
+  it('defers secret env expansion to the container shell, never compose parse time', () => {
+    // Regression: a single `$REDIS_PASSWORD` is interpolated by `docker
+    // compose` when it PARSES the file — from the host env / project `.env`,
+    // where the secret intentionally does not exist. Redis then silently
+    // started with an empty --requirepass (auth disabled) and every compose
+    // call warned "REDIS_PASSWORD variable is not set". `$$` keeps the
+    // literal `$VAR` for the container shell, which has the secret env_file.
+    const yaml = generateInstanceComposeYaml(prodSpec);
+    expect(yaml).toContain('$$REDIS_PASSWORD');
+    expect(yaml).not.toMatch(/[^$]\$REDIS_PASSWORD/);
+    expect(yaml).toContain('$${SCHEDULED_JOBS_TICK_SECONDS:-60}');
+  });
+
+  it('serves the Mercure hub over plain HTTP on the private network', () => {
+    // Regression: without SERVER_NAME the dunglas/mercure Caddy auto-HTTPSes
+    // with a self-minted local CA and 308-redirects plain HTTP, so backend
+    // publishes to http://mercure/.well-known/mercure could never succeed.
+    expect(svc(doc, 'mercure').environment).toEqual({ SERVER_NAME: ':80' });
+  });
+
   it('never inlines a raw secret value in the compose document', () => {
     const yaml = generateInstanceComposeYaml(prodSpec);
     // Compose only references env files / env vars; it must not contain literal secrets.

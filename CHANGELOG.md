@@ -8,7 +8,7 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `0.1.5`). Registry releases
+- **The manager tool** uses its own semver (currently `1.0.6`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
@@ -16,7 +16,26 @@ The manager has two version axes (see
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
 
+## [1.0.6] - 2026-06-11
+
+Version bump to 1.0.6.
+
 ## [Unreleased]
+
+### Fixed
+- **Backend Mercure hub URL** — generated instances now set `MERCURE_URL`
+  (`http://mercure/.well-known/mercure`) in the non-secret instance `.env`,
+  and the compose `mercure` service serves plain HTTP on the private network
+  (`SERVER_NAME=:80`). Without the URL the backend's hub service failed to
+  instantiate (`new Hub(null)` TypeError), 500-ing every request and breaking
+  `app:create-admin-user` during provisioning — the docker e2e failure.
+- **Redis password enforcement** — the generated compose escaped
+  (`$$REDIS_PASSWORD`) the redis command/healthcheck so the secret is expanded
+  by the container shell from the secret env file instead of being interpolated
+  (to empty) by `docker compose` at parse time. Redis now actually requires the
+  generated password, and the misleading "REDIS_PASSWORD variable is not set"
+  warnings on every compose call are gone. The scheduler tick variable uses the
+  same container-time expansion.
 
 ## [0.1.5] - 2026-06-11
 

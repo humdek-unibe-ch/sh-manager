@@ -65,6 +65,11 @@ export function buildInstanceEnv(input: InstanceEnvInput): Record<string, string
     // Server-side frontend -> Symfony over the internal Docker network.
     SYMFONY_INTERNAL_URL: routing.internalSymfonyUrl,
     SYMFONY_API_PREFIX: routing.symfonyApiPrefix,
+    // Internal hub URL the backend publishes to (plain HTTP on the private
+    // instance network; the hub serves :80 via SERVER_NAME in the compose).
+    // REQUIRED: the backend's Mercure hub service hard-fails to instantiate
+    // when MERCURE_URL is unset (`new Hub(null)`), which 500s every request.
+    MERCURE_URL: 'http://mercure/.well-known/mercure',
     MERCURE_PUBLIC_URL: input.mercurePublicUrl,
     SCHEDULED_JOBS_TICK_SECONDS: String(input.schedulerTickSeconds ?? 60),
     // JWT key *paths* are not secret (the keys themselves live in ./secrets/jwt,
