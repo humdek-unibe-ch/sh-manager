@@ -8,7 +8,7 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `1.0.7`). Registry releases
+- **The manager tool** uses its own semver (currently `1.0.8`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
@@ -16,7 +16,7 @@ The manager has two version axes (see
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
 
-## [Unreleased]
+## [1.0.8] - 2026-06-11
 
 ### Fixed
 - **CMS admin login no longer 500s on Linux hosts** — the per-instance JWT
