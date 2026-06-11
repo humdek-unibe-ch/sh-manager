@@ -8,13 +8,24 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `1.0.8`). Registry releases
+- **The manager tool** uses its own semver (currently `1.0.9`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
   **`0.x`** line (core, frontend, scheduler, worker — all `0.1.0`).
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
+
+## [1.0.9] - 2026-06-11
+
+### Fixed
+- **Release image publishing no longer fails with "unknown blob"** — the
+  `manager-release` workflow now provisions a BuildKit (docker-container)
+  builder so the release image is pushed to GHCR directly by BuildKit instead
+  of through the runner's Docker daemon, whose push path aborted the v1.0.8
+  release with `ERROR: unknown blob` after every layer had already uploaded.
+  Provenance attestations are disabled explicitly so the pushed artifact stays
+  a plain image manifest whose digest is what cosign signs and operators pin.
 
 ## [1.0.8] - 2026-06-11
 
