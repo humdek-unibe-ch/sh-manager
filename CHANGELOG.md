@@ -8,13 +8,25 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `1.0.12`). Registry releases
+- **The manager tool** uses its own semver (currently `1.0.13`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
   **`0.x`** line (core, frontend, scheduler, worker — all `0.1.0`).
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
+
+## [1.0.13] - 2026-06-11
+
+### Fixed
+- **The image reports its real version again** — releases 1.0.11 and 1.0.12
+  were tagged with only the root `package.json` bumped, while the
+  `MANAGER_VERSION` constant (what `--version`, the web UI header, the
+  inventory stamp, and `self-update` all use) stayed at `1.0.10`. Those images
+  therefore mis-reported themselves and `self-update` saw a permanently
+  available update. The constant is now pinned to `package.json` by a unit
+  test, so the release gate fails on any future drift. Use 1.0.13 (or later);
+  skip 1.0.11/1.0.12.
 
 ## [1.0.12] - 2026-06-11
 

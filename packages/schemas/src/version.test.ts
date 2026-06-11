@@ -1,13 +1,29 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   assertSchemaCompatible,
   checkSchemaCompatibility,
+  MANAGER_VERSION,
   parseSchemaVersion,
   requiresManagerSatisfied,
   SchemaCompatibilityError,
 } from './version.js';
+
+describe('MANAGER_VERSION', () => {
+  it('matches the root package.json version (a release bump must change both)', () => {
+    // Regression: v1.0.11/v1.0.12 were tagged with only package.json bumped,
+    // so the published images reported 1.0.10 and self-update saw a
+    // permanently available update. This pins the two sources together —
+    // the release gate (npm run check) fails when they drift.
+    const pkgPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'package.json');
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { version: string };
+    expect(MANAGER_VERSION).toBe(pkg.version);
+  });
+});
 
 describe('parseSchemaVersion', () => {
   it('parses major.minor strings', () => {
