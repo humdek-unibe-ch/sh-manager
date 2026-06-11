@@ -15,6 +15,8 @@
  * Secrets are written as `0600` files under `<instance>/secrets/` (`0700`). The
  * non-secret `.env` only references the JWT key *paths*; the actual secret
  * values live in `secrets/secrets.env`, which compose loads through `env_file`.
+ * Exception: the bind-mounted `secrets/jwt/` keypair is `0644`/`0755` so the
+ * containers' `www-data` user can read it (see {@link JWT_KEY_FILE_MODE}).
  */
 import { generateKeyPairSync, randomBytes } from 'node:crypto';
 import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -22,6 +24,19 @@ import path from 'node:path';
 
 export const SECRET_FILE_MODE = 0o600;
 export const SECRET_DIR_MODE = 0o700;
+/**
+ * The JWT keypair is the ONE exception to 0600/0700: `secrets/jwt/` is
+ * bind-mounted read-only into the backend/worker/scheduler containers, whose
+ * PHP runs as `www-data` (uid 33) while the host files belong to whoever runs
+ * the manager (e.g. uid 1001 on a CI runner). With owner-only modes uid 33
+ * cannot read the keys on a Linux host, so JWT signing fails and every login
+ * 500s — while health/provision (which never touch the keys) stay green.
+ * World-readable is safe here: the private key is AES-256 passphrase-encrypted
+ * and the passphrase itself stays in 0600 files (`secrets.env`,
+ * `jwt_passphrase`) that are NOT part of the mount.
+ */
+export const JWT_KEY_FILE_MODE = 0o644;
+export const JWT_KEY_DIR_MODE = 0o755;
 /** Path (relative to the instance dir) of the compose-loaded secret env file. */
 export const SECRETS_ENV_RELATIVE_PATH = 'secrets/secrets.env';
 /** Path (relative to the instance dir) of the JWT keypair directory. */
@@ -147,6 +162,8 @@ export interface SecretFileSpec {
 /** Every secret artifact to write under the instance `secrets/` directory. */
 export function instanceSecretFiles(secrets: InstanceSecrets): SecretFileSpec[] {
   const f = (relPath: string, contents: string): SecretFileSpec => ({ relPath, contents, mode: SECRET_FILE_MODE });
+  // Container-readable (see JWT_KEY_FILE_MODE): mounted into uid-33 services.
+  const k = (relPath: string, contents: string): SecretFileSpec => ({ relPath, contents, mode: JWT_KEY_FILE_MODE });
   return [
     f('app_secret', `${secrets.appSecret}\n`),
     f('db_password', `${secrets.databasePassword}\n`),
@@ -154,8 +171,8 @@ export function instanceSecretFiles(secrets: InstanceSecrets): SecretFileSpec[] 
     f('redis_password', `${secrets.redisPassword}\n`),
     f('mercure_jwt_secret', `${secrets.mercureJwtSecret}\n`),
     f('jwt_passphrase', `${secrets.jwtPassphrase}\n`),
-    f('jwt/private.pem', secrets.jwtPrivateKeyPem),
-    f('jwt/public.pem', secrets.jwtPublicKeyPem),
+    k('jwt/private.pem', secrets.jwtPrivateKeyPem),
+    k('jwt/public.pem', secrets.jwtPublicKeyPem),
     f('secrets.env', renderSecretsEnv(secrets)),
   ];
 }
@@ -248,7 +265,8 @@ export async function writeInstanceSecrets(
   io: SecretIO = nodeSecretIO,
 ): Promise<string[]> {
   await io.ensureDir(secretsDir, SECRET_DIR_MODE);
-  await io.ensureDir(path.join(secretsDir, 'jwt'), SECRET_DIR_MODE);
+  // The jwt/ dir is the bind-mount source: uid 33 must be able to traverse it.
+  await io.ensureDir(path.join(secretsDir, 'jwt'), JWT_KEY_DIR_MODE);
   const written: string[] = [];
   for (const spec of instanceSecretFiles(secrets)) {
     const abs = path.join(secretsDir, spec.relPath);

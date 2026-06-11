@@ -16,6 +16,24 @@ The manager has two version axes (see
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
 
+## [Unreleased]
+
+### Fixed
+- **CMS admin login no longer 500s on Linux hosts** — the per-instance JWT
+  keypair (`secrets/jwt/`) was written `0600`/`0700` like every other secret,
+  but it is bind-mounted into the backend/worker/scheduler containers whose
+  PHP runs as `www-data` (uid 33). On a Linux host uid 33 could not read the
+  keys, so JWT signing failed and every `/auth/login` returned an opaque 500
+  while health checks and provisioning (which never touch the keys) stayed
+  green — Windows/macOS Docker Desktop masked the bug with permissive mount
+  modes. The keypair is now written `0644`/`0755`; this leaks nothing usable
+  because the private key is AES-256 passphrase-encrypted and the passphrase
+  stays in `0600` files outside the mounted directory.
+- **Docker e2e failures are self-explanatory** — when an e2e login or backend
+  health wait fails, the harness now dumps the tail of each qa-e2e backend's
+  `var/log/prod.log` (where Symfony logs the real exception) into the test
+  output, so a CI failure shows the root cause instead of an opaque 500.
+
 ## [1.0.7] - 2026-06-11
 
 ### Added

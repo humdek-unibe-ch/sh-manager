@@ -155,7 +155,33 @@ export async function waitForBackendHealthy(backendBase: string, timeoutMs = 240
     }
     await delay(3000);
   }
+  await dumpBackendDiagnostics('waitForBackendHealthy');
   throw new Error(`backend not healthy at ${url} within ${timeoutMs}ms (last: ${last})`);
+}
+
+/**
+ * On-failure diagnostics: the backend formats every unexpected error as an
+ * opaque 500 envelope, so a failing e2e assertion alone cannot explain WHY
+ * (three CI iterations were burned on exactly this). Dump the tail of each
+ * running qa-e2e backend's `var/log/prod.log` (where the real exception +
+ * trace land) so the Actions log is self-explanatory. Best effort only.
+ */
+async function dumpBackendDiagnostics(context: string): Promise<void> {
+  try {
+    const { stdout } = await execFileAsync('docker', ['ps', '--format', '{{.Names}}']);
+    const backends = stdout
+      .split(/\r?\n/)
+      .map((s) => s.trim())
+      .filter((n) => n.includes('qa-e2e') && n.includes('backend'));
+    for (const name of backends) {
+      const log = await execFileAsync('docker', [
+        'exec', name, 'sh', '-c', 'tail -n 30 var/log/prod.log 2>/dev/null || echo "(no prod.log)"',
+      ]).catch((err) => ({ stdout: `(exec failed: ${err instanceof Error ? err.message : String(err)})` }));
+      console.error(`--- [${context}] ${name} var/log/prod.log (tail) ---\n${log.stdout}`);
+    }
+  } catch (err) {
+    console.error(`--- [${context}] diagnostics unavailable: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 /** Log in as the CMS admin directly against the backend; returns the JWT access token. */
@@ -163,6 +189,7 @@ export async function loginAdmin(backendBase: string, email: string, password: s
   const r = await httpJson('POST', `${backendBase}/cms-api/v1/auth/login`, { body: { email, password } });
   const token = r.json?.data?.access_token;
   if (r.status !== 200 || typeof token !== 'string' || token.length === 0) {
+    await dumpBackendDiagnostics('loginAdmin');
     throw new Error(`admin login failed at ${backendBase}: HTTP ${r.status} ${r.text.slice(0, 200)}`);
   }
   return token;

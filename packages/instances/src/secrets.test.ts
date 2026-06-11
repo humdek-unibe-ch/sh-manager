@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  JWT_KEY_DIR_MODE,
+  JWT_KEY_FILE_MODE,
   SECRET_DIR_MODE,
   SECRET_FILE_MODE,
   generateCloneSecrets,
@@ -63,20 +65,42 @@ describe('generateInstanceSecrets', () => {
 });
 
 describe('writeInstanceSecrets', () => {
-  it('writes every secret file with 0600 and the secrets dirs with 0700', async () => {
+  it('writes secret files 0600 (dir 0700) and the mounted jwt keypair 0644 (dir 0755)', async () => {
     const io = new RecordingSecretIO();
     const secrets = generateInstanceSecrets(opts);
     const written = await writeInstanceSecrets('/opt/selfhelp/instances/website1/secrets', secrets, io);
 
-    // Both the secrets dir and the jwt subdir are created 0700.
-    expect(io.dirs.every((d) => d.mode === SECRET_DIR_MODE)).toBe(true);
-    expect(io.dirs.map((d) => d.dir).some((d) => d.endsWith('jwt'))).toBe(true);
+    // The secrets dir stays 0700; the bind-mounted jwt subdir must be 0755 so
+    // the containers' www-data (uid 33) can traverse it on a Linux host.
+    const jwtDir = io.dirs.find((d) => d.dir.endsWith('jwt'));
+    const otherDirs = io.dirs.filter((d) => d !== jwtDir);
+    expect(jwtDir?.mode).toBe(JWT_KEY_DIR_MODE);
+    expect(otherDirs.every((d) => d.mode === SECRET_DIR_MODE)).toBe(true);
 
-    // Every file is written 0600.
+    // Regression: the jwt keypair is read by uid 33 inside the containers;
+    // 0600 host files made JWT signing fail and every CMS login 500 in CI.
+    // The private key is passphrase-encrypted, so 0644 leaks nothing usable.
     expect(io.files.length).toBe(instanceSecretFiles(secrets).length);
-    expect(io.files.every((f) => f.mode === SECRET_FILE_MODE)).toBe(true);
+    for (const f of io.files) {
+      const isJwtKey = /jwt[\\/](private|public)\.pem$/.test(f.file);
+      expect(f.mode).toBe(isJwtKey ? JWT_KEY_FILE_MODE : SECRET_FILE_MODE);
+    }
     expect(written.some((p) => p.endsWith('secrets.env'))).toBe(true);
     expect(written.some((p) => p.replace(/\\/g, '/').endsWith('jwt/private.pem'))).toBe(true);
+  });
+
+  it('keeps the mounted private key passphrase-encrypted and the passphrase out of the mount', () => {
+    const secrets = generateInstanceSecrets(opts);
+    const files = instanceSecretFiles(secrets);
+    const privateKey = files.find((f) => f.relPath === 'jwt/private.pem');
+    expect(privateKey?.contents).toContain('BEGIN ENCRYPTED PRIVATE KEY');
+    // The passphrase lives only in 0600 files outside the jwt/ mount dir.
+    const passphraseCarriers = files.filter((f) => f.contents.includes(secrets.jwtPassphrase));
+    expect(passphraseCarriers.length).toBeGreaterThan(0);
+    for (const f of passphraseCarriers) {
+      expect(f.relPath.startsWith('jwt/')).toBe(false);
+      expect(f.mode).toBe(SECRET_FILE_MODE);
+    }
   });
 
   it('writes the raw secret values only into 0600 files, never elsewhere', () => {
