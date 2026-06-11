@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { MANAGER_VERSION } from '@shm/schemas';
 import { RegistryClient, RegistryError } from '@shm/registry';
+import { discoverEngineRoot } from '@shm/docker';
 import { FileOperatorStore } from '@shm/auth';
 import type { BootstrapActions } from './actions.js';
 import { createBootstrapServer, type ServerMode } from './server.js';
@@ -73,7 +74,11 @@ export async function startWebUi(opts: WebUiOptions = {}): Promise<{ host: strin
   const managerVersion = opts.managerVersion ?? process.env.SHM_MANAGER_VERSION ?? MANAGER_VERSION;
 
   const trustedKeys = await loadTrustedKeys(trustedKeysPath);
-  const deps = realDeps(root, trustedKeys);
+  // Same engine-path discovery as the CLI: the wizard's install must emit
+  // engine-side bind sources when the manager runs containerized with the
+  // state root mounted at a different path (Docker Desktop / Windows).
+  const mapping = await discoverEngineRoot({ root });
+  const deps = realDeps(root, trustedKeys, mapping ? { engineRoot: mapping.engineRoot } : {});
 
   let lastHealthOk = false;
 

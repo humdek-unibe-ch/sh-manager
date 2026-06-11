@@ -31,6 +31,7 @@ import {
   generateInstanceComposeYaml,
   composeCommands,
   renderDotEnv,
+  toEnginePath,
   type ComposeRunner,
 } from '@shm/docker';
 import { proxyComposeToYaml } from '@shm/traefik';
@@ -54,6 +55,12 @@ export interface ServerBootstrapInput {
   managerVersion: string;
   mode: InstanceMode;
   root: string;
+  /**
+   * The Docker ENGINE's view of `root` when it differs from the manager
+   * container's (Docker Desktop, non-default mounts). Bind-mount sources in
+   * generated compose files are emitted from the engine's point of view.
+   */
+  engineRoot?: string;
   letsencryptEmail?: string;
   proxyNetwork?: string;
 }
@@ -68,10 +75,14 @@ export interface ServerBootstrapArtifacts {
 export function buildServerBootstrap(input: ServerBootstrapInput): ServerBootstrapArtifacts {
   const network = input.proxyNetwork ?? 'selfhelp_proxy';
   const proxyComposePath = `${proxyDir(input.root)}/compose.yaml`;
+  const proxyHostBindDir = input.engineRoot
+    ? toEnginePath(proxyDir(input.root), { containerRoot: input.root, engineRoot: input.engineRoot })
+    : undefined;
   const proxyComposeYaml = proxyComposeToYaml({
     mode: input.mode === 'production' ? 'production' : 'local',
     network,
     letsencryptEmail: input.letsencryptEmail,
+    ...(proxyHostBindDir ? { hostBindDir: proxyHostBindDir } : {}),
   });
   const inventory: ServerInventory = {
     inventoryVersion: 1,
@@ -100,6 +111,8 @@ export interface InstanceInstallInput {
   domain?: string;
   localPort?: number;
   root: string;
+  /** Engine view of `root` when it differs (see {@link ServerBootstrapInput.engineRoot}). */
+  engineRoot?: string;
   managerVersion: string;
   channel?: ReleaseChannel;
   registry: { id: string; url: string; metadataSha256: string };
@@ -207,6 +220,15 @@ export function buildInstanceInstallArtifacts(input: InstanceInstallInput): Inst
     }),
   );
 
+  // Bind sources are engine-side paths: absolute when the engine sees the
+  // state root elsewhere (Docker Desktop), relative otherwise (unchanged).
+  const hostBindDir = input.engineRoot
+    ? toEnginePath(instancePaths(input.instanceId, input.root).dir, {
+        containerRoot: input.root,
+        engineRoot: input.engineRoot,
+      })
+    : undefined;
+
   const composeYaml = generateInstanceComposeYaml({
     instanceId: input.instanceId,
     mode: input.mode,
@@ -214,6 +236,7 @@ export function buildInstanceInstallArtifacts(input: InstanceInstallInput): Inst
     domain: input.domain,
     localPort: input.localPort,
     resources: input.resources,
+    ...(hostBindDir ? { hostBindDir } : {}),
   });
 
   const readme = generateInstanceReadme(manifest, { managerVersion: input.managerVersion, root: input.root });

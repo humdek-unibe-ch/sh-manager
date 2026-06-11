@@ -3,4 +3,5 @@
 export * from './compose.js';
 export * from './env.js';
 export * from './guards.js';
+export * from './host-paths.js';
 export * from './runner.js';

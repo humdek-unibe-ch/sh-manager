@@ -23,7 +23,7 @@ import type {
   TrustedKeysFile,
 } from '@shm/schemas';
 import type { ComposeRunner } from '@shm/docker';
-import { DEFAULT_PROXY_NETWORK, buildInstanceRouting, composeCommands, composeProjectName, generateInstanceComposeYaml } from '@shm/docker';
+import { DEFAULT_PROXY_NETWORK, buildInstanceRouting, composeCommands, composeProjectName, generateInstanceComposeYaml, toEnginePath } from '@shm/docker';
 import type { Fetcher } from '@shm/registry';
 import { RegistryClient } from '@shm/registry';
 import {
@@ -88,6 +88,14 @@ import { assembleSupportBundle, redactEnv } from '@shm/support';
 
 export interface ActionDeps {
   root: string;
+  /**
+   * The Docker ENGINE's view of `root` when it differs from this process's
+   * (manager running containerized with the state mounted at another path —
+   * the Docker Desktop / Windows case). Every path handed to the engine
+   * (compose bind sources, backup helper mounts) is rewritten through it.
+   * Unset = same-path mounts, today's Linux production behaviour.
+   */
+  engineRoot?: string;
   managerVersion: string;
   trustedKeys: TrustedKeysFile;
   runner: ComposeRunner;
@@ -243,6 +251,7 @@ export async function serverInit(deps: ActionDeps, opts: ServerInitOptions): Pro
     managerVersion: deps.managerVersion,
     mode: opts.mode,
     root: deps.root,
+    ...(deps.engineRoot ? { engineRoot: deps.engineRoot } : {}),
     ...(opts.letsencryptEmail ? { letsencryptEmail: opts.letsencryptEmail } : {}),
     ...(opts.proxyNetwork ? { proxyNetwork: opts.proxyNetwork } : {}),
   });
@@ -356,6 +365,7 @@ export async function instanceInstall(
     ...(opts.domain ? { domain: opts.domain } : {}),
     ...(opts.localPort !== undefined ? { localPort: opts.localPort } : {}),
     root: deps.root,
+    ...(deps.engineRoot ? { engineRoot: deps.engineRoot } : {}),
     managerVersion: deps.managerVersion,
     channel,
     registry: { id: index.publisher.name, url: opts.registryUrl, metadataSha256: client.lastSuccessfulCheck?.metadataSha256 ?? '' },
@@ -696,6 +706,7 @@ export async function instanceUpdate(deps: ActionDeps, instanceId: string, opts:
             ? { domain: manifest.domain }
             : { localPort: Number(new URL(manifest.routing.publicFrontendUrl).port) }),
           root: deps.root,
+          ...(deps.engineRoot ? { engineRoot: deps.engineRoot } : {}),
           managerVersion: deps.managerVersion,
           channel,
           registry: { id: manifest.registry.id, url: manifest.registry.url, metadataSha256: client.lastSuccessfulCheck?.metadataSha256 ?? '' },
@@ -1094,6 +1105,9 @@ export async function instanceRestore(
         images: restoredManifest.images,
         domain: opts.newDomain,
         ...(restoredManifest.resources ? { resources: restoredManifest.resources } : {}),
+        ...(deps.engineRoot
+          ? { hostBindDir: toEnginePath(paths.dir, { containerRoot: deps.root, engineRoot: deps.engineRoot }) }
+          : {}),
       }),
     );
   } else if (!isClone) {
@@ -1255,6 +1269,7 @@ export async function instanceClone(
     mode,
     ...(mode === 'production' ? { domain: opts.targetDomain } : { localPort: opts.targetLocalPort }),
     root: deps.root,
+    ...(deps.engineRoot ? { engineRoot: deps.engineRoot } : {}),
     managerVersion: deps.managerVersion,
     channel,
     registry: {

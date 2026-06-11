@@ -90,6 +90,19 @@ describe('buildServerBootstrap', () => {
     expect(b.inventory.proxy.network).toBe('selfhelp_proxy');
     expect(b.inventory.instances).toHaveLength(0);
   });
+  it('emits the Let\'s Encrypt bind engine-side when the engine sees the root elsewhere', () => {
+    const engineRoot = '/run/desktop/mnt/host/d/selfhelp';
+    const b = buildServerBootstrap({
+      serverId: 's1',
+      managerVersion: '0.1.0',
+      mode: 'production',
+      root,
+      engineRoot,
+      letsencryptEmail: 'ops@example.ch',
+    });
+    expect(b.proxyComposeYaml).toContain(`${engineRoot}/proxy/letsencrypt:/letsencrypt`);
+    expect(b.proxyComposeYaml).not.toContain('./letsencrypt');
+  });
 });
 
 describe('buildInstanceInstallArtifacts', () => {
@@ -112,6 +125,21 @@ describe('buildInstanceInstallArtifacts', () => {
     const a = buildInstanceInstallArtifacts(installInput('production'));
     expect(a.composeYaml).toContain('selfhelp_proxy');
     expect(a.composeYaml).toContain('traefik.enable=true');
+  });
+
+  // Docker Desktop / non-default state mounts: the engine sees the state root
+  // at a different path than the manager container, so compose bind sources
+  // must be absolute from the ENGINE's point of view.
+  it('emits engine-side bind sources when the engine sees the root elsewhere', () => {
+    const engineRoot = '/run/desktop/mnt/host/d/selfhelp';
+    const a = buildInstanceInstallArtifacts({ ...installInput('production'), engineRoot });
+    expect(a.composeYaml).toContain(`${engineRoot}/instances/website1/secrets/jwt:/app/config/jwt:ro`);
+    expect(a.composeYaml).not.toContain('./secrets/jwt');
+  });
+
+  it('keeps relative bind sources without an engineRoot (same-path Linux mounts)', () => {
+    const a = buildInstanceInstallArtifacts(installInput('production'));
+    expect(a.composeYaml).toContain('./secrets/jwt:/app/config/jwt:ro');
   });
 });
 

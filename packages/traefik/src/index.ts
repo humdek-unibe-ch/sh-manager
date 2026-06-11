@@ -17,6 +17,13 @@ export interface ProxyComposeOptions {
   mode: 'production' | 'local';
   network?: string;
   letsencryptEmail?: string;
+  /**
+   * ENGINE-visible absolute path of the proxy directory. Set when the manager
+   * container sees the state root at a different path than the Docker engine
+   * (Docker Desktop, non-default mounts) so the Let's Encrypt bind source is
+   * emitted absolute for the engine. Unset keeps the relative `./letsencrypt`.
+   */
+  hostBindDir?: string;
 }
 
 export function buildProxyCompose(opts: ProxyComposeOptions): Record<string, unknown> {
@@ -42,7 +49,8 @@ export function buildProxyCompose(opts: ProxyComposeOptions): Record<string, unk
       '--entrypoints.web.http.redirections.entrypoint.to=websecure',
       '--entrypoints.web.http.redirections.entrypoint.scheme=https',
     );
-    volumes.push('./letsencrypt:/letsencrypt');
+    const letsencryptHostDir = opts.hostBindDir ? `${opts.hostBindDir}/letsencrypt` : './letsencrypt';
+    volumes.push(`${letsencryptHostDir}:/letsencrypt`);
   }
 
   return {

@@ -26,4 +26,20 @@ describe('buildProxyCompose', () => {
   it('renders YAML', () => {
     expect(proxyComposeToYaml({ mode: 'local' })).toContain('traefik');
   });
+
+  it('emits the Let\'s Encrypt bind absolute for the engine when hostBindDir is set', () => {
+    const doc = buildProxyCompose({
+      mode: 'production',
+      letsencryptEmail: 'ops@example.ch',
+      hostBindDir: '/run/desktop/mnt/host/d/selfhelp/proxy',
+    });
+    const traefik = (doc.services as { traefik: { volumes: string[] } }).traefik;
+    expect(traefik.volumes).toContain('/run/desktop/mnt/host/d/selfhelp/proxy/letsencrypt:/letsencrypt');
+    expect(traefik.volumes).not.toContain('./letsencrypt:/letsencrypt');
+  });
+
+  it('keeps the relative Let\'s Encrypt bind without hostBindDir (same-path mounts)', () => {
+    const doc = buildProxyCompose({ mode: 'production', letsencryptEmail: 'ops@example.ch' });
+    expect((doc.services as { traefik: { volumes: string[] } }).traefik.volumes).toContain('./letsencrypt:/letsencrypt');
+  });
 });

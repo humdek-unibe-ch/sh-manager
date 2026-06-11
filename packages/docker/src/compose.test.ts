@@ -159,6 +159,33 @@ describe('buildInstanceCompose (local)', () => {
   });
 });
 
+describe('engine-side bind sources (hostBindDir)', () => {
+  // Docker Desktop / non-default mounts: the engine sees the state folder at a
+  // different path than the manager container, so bind sources must be emitted
+  // absolute from the ENGINE's point of view.
+  const engineDir = '/run/desktop/mnt/host/d/selfhelp/instances/website1';
+  const doc = buildInstanceCompose({ ...prodSpec, hostBindDir: engineDir });
+
+  it('emits the JWT bind absolute for the engine on every Symfony service', () => {
+    for (const name of ['backend', 'worker', 'scheduler']) {
+      expect(svc(doc, name).volumes).toContain(`${engineDir}/secrets/jwt:/app/config/jwt:ro`);
+    }
+  });
+
+  it('keeps env_file references relative (read client-side by the compose CLI)', () => {
+    expect(svc(doc, 'backend').env_file).toEqual(['.env', 'secrets/secrets.env']);
+  });
+
+  it('still passes the aggregated safety guard', () => {
+    expect(() => assertComposeSafe(doc)).not.toThrow();
+  });
+
+  it('default (no hostBindDir) keeps the relative bind — Linux production regression', () => {
+    const plain = buildInstanceCompose(prodSpec);
+    expect(svc(plain, 'backend').volumes).toContain('./secrets/jwt:/app/config/jwt:ro');
+  });
+});
+
 describe('resource limits', () => {
   it('applies optional memory/cpu limits and custom log rotation', () => {
     const doc = buildInstanceCompose({

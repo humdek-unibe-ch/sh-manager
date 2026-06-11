@@ -62,6 +62,15 @@ export interface InstanceComposeSpec {
   schedulerTickSeconds?: number;
   /** Local mode default: include a Mailpit container (no real outbound mail). */
   includeMailpit?: boolean;
+  /**
+   * ENGINE-visible absolute path of this instance's directory. Bind-mount
+   * sources are interpreted by the Docker engine, so when the manager container
+   * sees the state root at a different path than the engine does (Docker
+   * Desktop, non-default mounts), they must be emitted absolute from the
+   * engine's point of view. Unset (same-path mounts, the documented Linux
+   * production layout) keeps the relative `./…` sources.
+   */
+  hostBindDir?: string;
 }
 
 export type ComposeDocument = Record<string, unknown>;
@@ -136,8 +145,12 @@ export function buildInstanceCompose(spec: InstanceComposeSpec): ComposeDocument
   }
 
   // Backend/worker/scheduler run the Symfony app: they load secret env and
-  // mount the per-instance JWT keypair read-only.
-  const jwtMount = `${JWT_KEYS_HOST_DIR}:${JWT_KEYS_CONTAINER_DIR}:ro`;
+  // mount the per-instance JWT keypair read-only. Bind sources are resolved by
+  // the ENGINE: relative when manager + engine share the path, absolute
+  // engine-side otherwise. The env_file entries above stay relative either way
+  // (they are read client-side by the compose CLI inside the manager).
+  const jwtHostDir = spec.hostBindDir ? `${spec.hostBindDir}/secrets/jwt` : JWT_KEYS_HOST_DIR;
+  const jwtMount = `${jwtHostDir}:${JWT_KEYS_CONTAINER_DIR}:ro`;
 
   // Persistent application data shared by all three Symfony services so uploads
   // and installed plugin artifacts survive container replacement and are

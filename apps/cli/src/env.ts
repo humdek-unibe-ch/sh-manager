@@ -16,7 +16,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import type { LockServiceEntry, TrustedKeysFile } from '@shm/schemas';
 import { MANAGER_VERSION, validateTrustedKeys } from '@shm/schemas';
-import { RealComposeRunner } from '@shm/docker';
+import { RealComposeRunner, toEnginePath } from '@shm/docker';
 import type { Fetcher, FetchResponse } from '@shm/registry';
 import type { PreflightResourceFacts, ServiceProbeResult } from '@shm/core';
 import type { ActionDeps } from './actions.js';
@@ -120,9 +120,23 @@ async function imageDigest(image: string): Promise<string> {
   return stdout.trim();
 }
 
-export function realDeps(root: string, trustedKeys: TrustedKeysFile): ActionDeps {
+export interface RealDepsOptions {
+  /**
+   * The Docker ENGINE's view of `root` (discovered via `discoverEngineRoot`
+   * from `@shm/docker`) when it differs from this process's view — the Docker
+   * Desktop / non-default-mount case.
+   */
+  engineRoot?: string;
+}
+
+export function realDeps(root: string, trustedKeys: TrustedKeysFile, opts: RealDepsOptions = {}): ActionDeps {
+  // Paths handed to the ENGINE (bind-mount sources of the backup/restore
+  // helper containers) must be the engine's view of the state folder.
+  const mapping = opts.engineRoot ? { containerRoot: root, engineRoot: opts.engineRoot } : undefined;
+  const engineDir = (dir: string): string => toEnginePath(dir, mapping);
   return {
     root,
+    ...(opts.engineRoot ? { engineRoot: opts.engineRoot } : {}),
     managerVersion: MANAGER_VERSION,
     trustedKeys,
     runner: new RealComposeRunner(),
@@ -175,7 +189,7 @@ export function realDeps(root: string, trustedKeys: TrustedKeysFile): ActionDeps
       }
     },
     archiveVolume: async (volumeName, outFile): Promise<void> => {
-      const dir = path.dirname(outFile);
+      const dir = engineDir(path.dirname(outFile));
       const base = path.basename(outFile);
       await execFileAsync('docker', [
         'run',
@@ -196,7 +210,7 @@ export function realDeps(root: string, trustedKeys: TrustedKeysFile): ActionDeps
       }
     },
     extractVolume: async (tgz, volumeName): Promise<void> => {
-      const dir = path.dirname(tgz);
+      const dir = engineDir(path.dirname(tgz));
       const base = path.basename(tgz);
       // Mounting a named volume auto-creates it. Replace any existing contents
       // first so a same-instance restore does not leave stale files behind.

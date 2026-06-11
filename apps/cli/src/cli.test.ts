@@ -162,6 +162,29 @@ describe('CLI actions (offline)', () => {
     ).resolves.toBeTruthy();
   });
 
+  it('emits engine-side bind sources end to end when the engine sees the root elsewhere', async () => {
+    // The Docker Desktop / Windows case: the manager container sees the state
+    // root at `root`, the engine sees it under /run/desktop/mnt/host/… . The
+    // generated proxy + instance compose files must bind from the ENGINE view.
+    const engineRoot = '/run/desktop/mnt/host/d/selfhelp';
+    const d: ActionDeps = { ...(await makeDeps()), engineRoot };
+    await serverInit(d, { serverId: 'win', mode: 'production', letsencryptEmail: 'ops@example.ch' });
+    const proxyCompose = await readFile(path.join(root, 'proxy', 'compose.yaml'), 'utf8');
+    expect(proxyCompose).toContain(`${engineRoot}/proxy/letsencrypt:/letsencrypt`);
+
+    await instanceInstall(d, {
+      instanceId: 'demo1',
+      displayName: 'Demo 1',
+      mode: 'local',
+      localPort: 8080,
+      registryUrl: 'https://humdek-unibe-ch.github.io/sh2-plugin-registry/',
+      version: 'latest',
+    });
+    const compose = await readFile(instancePaths('demo1', root).composePath, 'utf8');
+    expect(compose).toContain(`${engineRoot}/instances/demo1/secrets/jwt:/app/config/jwt:ro`);
+    expect(compose).not.toContain('./secrets/jwt');
+  });
+
   it('installs an instance from the signed fixture registry', async () => {
     const d = await makeDeps();
     await serverInit(d, { serverId: 's1', mode: 'production', letsencryptEmail: 'ops@example.ch' });

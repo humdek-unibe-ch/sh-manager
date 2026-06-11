@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import type { InstanceMode, ReleaseChannel } from '@shm/schemas';
 import { CrossInstanceError } from '@shm/core';
+import { discoverEngineRoot } from '@shm/docker';
 import type { RemoveMode } from '@shm/instances';
 import type { RestoreMode } from '@shm/backup';
 import {
@@ -57,7 +58,11 @@ const DEFAULT_TRUSTED_KEYS =
 
 async function deps(root: string) {
   const trustedKeys = await loadTrustedKeys(DEFAULT_TRUSTED_KEYS);
-  return realDeps(root, trustedKeys);
+  // When containerized, learn how the ENGINE sees the state root (Docker
+  // Desktop mounts Windows folders under /run/desktop/mnt/host/…) so compose
+  // bind sources and backup mounts are emitted from the engine's perspective.
+  const mapping = await discoverEngineRoot({ root });
+  return realDeps(root, trustedKeys, mapping ? { engineRoot: mapping.engineRoot } : {});
 }
 
 function fail(err: unknown): never {
