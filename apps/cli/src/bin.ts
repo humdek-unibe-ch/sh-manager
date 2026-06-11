@@ -88,9 +88,19 @@ function fail(err: unknown): never {
   process.exit(1);
 }
 
+// Root-only version flag, deliberately NOT registered via program.version():
+// commander parses root options anywhere in argv, so a global `--version`
+// swallows `instance install/update ... --version <x>` — the CLI printed the
+// manager version and exited instead of installing the requested version.
+if (process.argv.length === 3 && ['--version', '-V', 'version'].includes(process.argv[2] as string)) {
+  console.log(MANAGER_VERSION);
+  process.exit(0);
+}
+
 const program = new Command();
-program.name('sh-manager').description('SelfHelp Manager: Docker-only connected installer/updater/server manager.').version(MANAGER_VERSION);
+program.name('sh-manager').description('SelfHelp Manager: Docker-only connected installer/updater/server manager.');
 program.option('--root <dir>', 'SelfHelp root directory', DEFAULT_ROOT);
+program.addHelpText('after', '\nRun `sh-manager --version` to print the manager version.');
 
 program
   .command('self-update')

@@ -8,13 +8,26 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `1.0.13`). Registry releases
+- **The manager tool** uses its own semver (currently `1.0.14`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
   **`0.x`** line (core, frontend, scheduler, worker — all `0.1.0`).
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
+
+## [1.0.14] - 2026-06-11
+
+### Fixed
+- **`instance install --version <x>` / `instance update --version <x>` work
+  again** — the root `--version` flag (print the manager version) was
+  registered globally, and commander consumes global options anywhere in the
+  argv, so any command carrying its own `--version <version>` option printed
+  the manager version and exited without doing anything. This is why
+  installing a pinned/tagged SelfHelp version "silently did nothing". The
+  manager-version flag now only acts on a bare `sh-manager --version` (also
+  `-V` / `version`); everywhere else `--version` belongs to the subcommand.
+  Covered by argv-level regression tests that spawn the real entrypoint.
 
 ## [1.0.13] - 2026-06-11
 
