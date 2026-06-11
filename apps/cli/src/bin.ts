@@ -110,7 +110,20 @@ program
         // the latest release could not be determined.
         return;
       }
-      if (!check.updateAvailable) return;
+      if (!check.updateAvailable) {
+        if (check.runtime !== 'docker') return;
+        // The manager version is current, but the long-running GUI container
+        // may still run an older image (created before the last pull) —
+        // reconcile it so "self-update says up to date" implies "the GUI is
+        // up to date" too.
+        const result = await applySelfUpdate(check);
+        if (result.webRestarted) {
+          console.log('The web GUI container was on an older image and has been restarted on the current one.');
+        } else if (result.webRestartHint) {
+          console.log(result.webRestartHint);
+        }
+        return;
+      }
       console.log('\nApplying update...');
       const result = await applySelfUpdate(check);
       for (const step of result.steps) console.log(`  done    ${step}`);

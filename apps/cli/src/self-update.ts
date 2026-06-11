@@ -204,7 +204,10 @@ export interface ApplySelfUpdateResult {
 /** The subset of `docker inspect` the GUI-container recreate needs. */
 interface WebContainerInfo {
   id: string;
+  /** Image REFERENCE the container was created from (`Config.Image`). */
   image: string;
+  /** Image ID (sha256) the container is actually running (`.Image`). */
+  imageId: string;
   cmd: string[];
   env: string[];
   binds: string[];
@@ -224,6 +227,7 @@ async function inspectWebContainer(exec: ExecLike, name: string): Promise<WebCon
   try {
     const j = JSON.parse(raw) as {
       Id?: string;
+      Image?: string;
       Config?: { Image?: string; Cmd?: string[] | null; Env?: string[] | null };
       HostConfig?: {
         Binds?: string[] | null;
@@ -236,6 +240,7 @@ async function inspectWebContainer(exec: ExecLike, name: string): Promise<WebCon
     return {
       id: j.Id ?? '',
       image: j.Config?.Image ?? '',
+      imageId: j.Image ?? '',
       cmd: j.Config?.Cmd ?? [],
       env: j.Config?.Env ?? [],
       binds: j.HostConfig?.Binds ?? [],
@@ -340,10 +345,32 @@ export async function applySelfUpdate(check: SelfUpdateCheck, opts: ApplySelfUpd
     };
   }
 
+  const newImage = nextWebImage(info.image, image, check.latestVersion);
+
+  // Restart only when the container is actually behind the freshly pulled
+  // image. This also catches a GUI container created from an OLDER `:latest`
+  // while the manager version itself is already current (the pulls above were
+  // then no-ops). When the image-id comparison is impossible, fall back to
+  // "restart when a newer version was just pulled".
+  let stale = check.updateAvailable;
+  try {
+    const targetId = (await exec('docker', ['image', 'inspect', newImage, '--format', '{{.Id}}'])).stdout.trim();
+    if (targetId) stale = info.imageId !== targetId;
+  } catch {
+    /* keep the fallback */
+  }
+  if (!stale) {
+    return {
+      applied: true,
+      steps,
+      webRestarted: false,
+      webRestartHint: `The GUI container (${webName}) is already running the current image.`,
+    };
+  }
+
   try {
     await exec('docker', ['rm', '-f', webName]);
     steps.push(`docker rm -f ${webName}`);
-    const newImage = nextWebImage(info.image, image, check.latestVersion);
     await exec('docker', webRunArgs(info, webName, newImage));
     steps.push(`docker run -d --name ${webName} ${newImage} (ports/mounts/args preserved)`);
     return { applied: true, steps, webRestarted: true };

@@ -8,13 +8,26 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `1.0.11`). Registry releases
+- **The manager tool** uses its own semver (currently `1.0.12`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
   **`0.x`** line (core, frontend, scheduler, worker — all `0.1.0`).
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
+
+## [1.0.12] - 2026-06-11
+
+### Fixed
+- **`self-update` now also refreshes a stale web GUI container when the
+  manager version is already current** — upgrading through an older manager
+  (whose `self-update` only printed the pull command) left the long-running
+  `sh-manager-web` container on the previous image forever: by the time the
+  new CLI ran, the version check said "up to date" and the GUI was never
+  restarted. `self-update` now compares the GUI container's image ID with the
+  freshly pulled image and recreates the container when they differ, so "up
+  to date" implies the GUI is too. It also no longer restarts a container
+  that already runs the exact current image.
 
 ## [1.0.11] - 2026-06-11
 

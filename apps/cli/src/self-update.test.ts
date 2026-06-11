@@ -113,6 +113,7 @@ function dockerCheck(latest = '1.0.11'): SelfUpdateCheck {
 
 const WEB_INSPECT_JSON = JSON.stringify({
   Id: 'f00dfeedfacef00dfeedfacef00dfeedfacef00dfeedfacef00dfeedfacef00d',
+  Image: 'sha256:oldimage',
   Config: {
     Image: 'ghcr.io/humdek-unibe-ch/sh-manager:latest',
     Cmd: ['web', '--host', '0.0.0.0', '--port', '8765'],
@@ -129,7 +130,10 @@ const WEB_INSPECT_JSON = JSON.stringify({
 
 describe('manager self-update apply (docker runtime)', () => {
   it('pulls the new tags and recreates the web GUI container with its original ports, mounts and args', async () => {
-    const { calls, exec } = recordingExec({ 'docker inspect sh-manager-web': WEB_INSPECT_JSON });
+    const { calls, exec } = recordingExec({
+      'docker inspect sh-manager-web': WEB_INSPECT_JSON,
+      'docker image inspect': 'sha256:newimage\n',
+    });
 
     const result = await applySelfUpdate(dockerCheck(), { exec });
 
@@ -191,6 +195,41 @@ describe('manager self-update apply (docker runtime)', () => {
     expect(result.webRestarted).toBe(false);
     expect(result.webRestartHint).toContain('not restarted');
     expect(calls.some((c) => c.args[0] === 'rm')).toBe(false);
+  });
+
+  it('skips the restart when the GUI container already runs the exact image the pull produced', async () => {
+    const { calls, exec } = recordingExec({
+      'docker inspect sh-manager-web': WEB_INSPECT_JSON,
+      'docker image inspect': 'sha256:oldimage\n', // same id as the running container
+    });
+
+    const result = await applySelfUpdate(dockerCheck(), { exec });
+
+    expect(result.applied).toBe(true);
+    expect(result.webRestarted).toBe(false);
+    expect(result.webRestartHint).toContain('already running the current image');
+    expect(calls.some((c) => c.args[0] === 'rm')).toBe(false);
+    expect(calls.some((c) => c.args[0] === 'run')).toBe(false);
+  });
+
+  it('restarts a stale GUI container even when the manager version is already current (up-to-date reconcile)', async () => {
+    const { calls, exec } = recordingExec({
+      'docker inspect sh-manager-web': WEB_INSPECT_JSON, // running sha256:oldimage
+      'docker image inspect': 'sha256:newimage\n', // :latest on disk is newer
+    });
+    const check: SelfUpdateCheck = {
+      currentVersion: '1.0.11',
+      latestVersion: '1.0.11',
+      updateAvailable: false,
+      runtime: 'docker',
+      instructions: [],
+    };
+
+    const result = await applySelfUpdate(check, { exec });
+
+    expect(result.webRestarted).toBe(true);
+    const joined = calls.map((c) => `${c.cmd} ${c.args.join(' ')}`);
+    expect(joined).toContain('docker rm -f sh-manager-web');
   });
 
   it('degrades to a restart hint (never a failed apply) when recreating the GUI container fails', async () => {
