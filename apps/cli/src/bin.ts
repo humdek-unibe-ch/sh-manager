@@ -36,6 +36,7 @@ import { HttpBackendOperationsClient } from './operations-client.js';
 import { MANAGER_VERSION, loadTrustedKeys, realDeps } from './env.js';
 import { formatHealth, formatPreflight, formatSteps, formatTable } from './output.js';
 import { checkSelfUpdate, formatSelfUpdate } from './self-update.js';
+import { generateWrapperScript, type WrapperShell } from './wrapper.js';
 import type { ManagerRole } from '@shm/auth';
 import {
   adminAllowEmailAdd,
@@ -77,9 +78,10 @@ function fail(err: unknown): never {
         'This server is not initialized yet. Run first:\n' +
           '  sh-manager server init --server-id <id> --mode production --email <letsencrypt-email>\n' +
           '  (local/testing: sh-manager server init --server-id <id> --mode local)\n' +
-          'If you DID initialize and run the manager via Docker, the state volume is not mounted at\n' +
-          '/opt/selfhelp inside the container - reuse the exact same -v flag for every command\n' +
-          '(Windows Git Bash: prefix commands with MSYS_NO_PATHCONV=1 or use a named volume).',
+          'If you DID initialize and run the manager via Docker, this command was started without the\n' +
+          'state folder mounted at /opt/selfhelp - reuse the exact same -v flag for every command,\n' +
+          'or generate the wrapper script once and use it instead:\n' +
+          '  docker run --rm <image> wrapper --shell powershell > shm.ps1   (bash: --shell bash > shm.sh)',
       );
     }
   }
@@ -99,6 +101,30 @@ program
       console.log(formatSelfUpdate(check));
       // Scripts can branch on the exit code: 0 = up to date, 2 = update available.
       if (check.updateAvailable) process.exitCode = 2;
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program
+  .command('wrapper')
+  .description('Print a small `shm` wrapper script that runs the manager image with the right mounts (save it into your state folder)')
+  .requiredOption('--shell <shell>', 'powershell|bash')
+  .option('--state-root <path>', 'bake an explicit state folder path (default: the folder the saved script lives in)')
+  .option('--image <ref>', 'manager image reference (default: the official :latest image)')
+  .option('--web-port <port>', 'published GUI port for `shm web`', (v) => parseInt(v, 10), 8765)
+  .action((opts) => {
+    try {
+      // Only the script goes to stdout so `… wrapper --shell powershell > shm.ps1` stays clean.
+      process.stdout.write(
+        generateWrapperScript({
+          shell: opts.shell as WrapperShell,
+          root: opts.stateRoot as string | undefined,
+          image: opts.image as string | undefined,
+          webPort: opts.webPort as number,
+        }),
+      );
+      console.error('Save the script into your state folder, then run it from anywhere (e.g. .\\shm.ps1 server init …).');
     } catch (err) {
       fail(err);
     }
