@@ -46,8 +46,11 @@ Task-based runbooks live under [`operator/`](operator/).
   instance, via the web wizard or the CLI.
 - [GUI instance management](operator/gui-instance-management.md) — manage the
   full instance lifecycle from the persistent web UI: health, backups, update
-  dry-run + execute, restore, clone, remove, live operation logs, and the
-  automatic CMS-operations drain loop.
+  dry-run + execute, restore, clone, change address, remove, live operation
+  logs, and the automatic CMS-operations drain loop.
+- [Domains, DNS and local ports](operator/domains-and-ports.md) — set up DNS
+  for a production instance and change an instance's domain or localhost port
+  later (GUI dialog or `sh-manager instance set-address`).
 - [Windows quickstart](operator/windows-quickstart.md) — test the whole story
   on Windows + Docker Desktop using only the published manager image: local
   mode on ports (no domains/SSL), multiple side-by-side instances, the GUI,

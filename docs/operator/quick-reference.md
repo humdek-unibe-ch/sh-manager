@@ -74,7 +74,17 @@ Services: `frontend`, `backend`, `worker`, `scheduler`, `mysql`, `redis`,
 | Validate + plan a restore | `sh-manager instance restore website1 <backupId>` |
 | Restore in place | `sh-manager instance restore website1 <backupId> --apply` |
 | Restore as a clone | `sh-manager instance restore website1 <backupId> --mode restore_as_clone --new-domain copy.example.ch --apply` |
-| Clone a live instance | `sh-manager instance clone website1 website1-staging --domain staging.example.ch --apply` |
+| Clone a live instance (production source) | `sh-manager instance clone website1 website1-staging --domain staging.example.ch --apply` |
+| Clone a live instance (local source) | `sh-manager instance clone localtest localtest-copy --target-local-port 9124 --apply` |
+
+## Change address (domain / port)
+
+| Task | Command |
+| --- | --- |
+| Move a production instance to a new domain | `sh-manager instance set-address website1 --domain new.example.ch` |
+| Move a local instance to a new port | `sh-manager instance set-address localtest --port 9200` |
+| Write the config only (apply later) | `sh-manager instance set-address website1 --domain new.example.ch --no-restart` |
+| Hard-fail when DNS does not point here | `sh-manager instance set-address website1 --domain new.example.ch --strict-dns` |
 
 ## Recover
 
@@ -97,8 +107,9 @@ Services: `frontend`, `backend`, `worker`, `scheduler`, `mysql`, `redis`,
 ## Operators (persistent web UI)
 
 The persistent UI also manages the full instance lifecycle from the browser
-(list, health, backups, update dry-run + execute, restore, clone, remove, live
-operation logs) — see [GUI instance management](gui-instance-management.md).
+(list, health, backups, update dry-run + execute, restore, clone, change
+address, remove, live operation logs) — see
+[GUI instance management](gui-instance-management.md).
 
 | Task | Command |
 | --- | --- |

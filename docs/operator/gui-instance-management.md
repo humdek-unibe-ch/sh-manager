@@ -2,14 +2,23 @@
 
 Audience: Server operators
 Status: Active
-Applies to: `sh-manager` (manager tool `0.1.6+`, persistent web mode)
+Applies to: `sh-manager` (manager tool `1.2.0+`, persistent web mode)
 Last verified: 2026-06-12
 Source of truth: `apps/web/src/server.ts`, `apps/web/src/instances.ts`, `apps/web/src/jobs.ts`, `apps/web/src/poller.ts`, `apps/web/src/ui/features/manager/`
 
 The persistent-mode web UI manages the full instance lifecycle from the
 browser: list and inspect instances, run health checks, browse backups,
 preview updates, and execute create / update / backup / restore / clone /
-remove — with every action journaled and visible as a **live log** in the GUI.
+change-address / remove — with every action journaled and visible as a
+**live log** in the GUI.
+
+The console uses the same **admin-shell layout** as the SelfHelp CMS admin
+UI: your **instances live in the left sidebar** (with live status dots and
+their domain/port), the **center** shows the dashboard or the selected
+instance's workspace, and the header carries the signed-in operator and the
+**Sign out** action. Environment checks (Docker, internet, registry,
+resources) **run automatically** when the dashboard loads — nothing stays
+"Pending" waiting for a click, and any check can be re-run on demand.
 
 The bootstrap wizard and the operations console are the same server in two
 modes. **Bootstrap mode** (fresh state folder) only installs and self-locks;
@@ -75,40 +84,57 @@ self-update status, and the **Instances** section.
 
 ## What each page does
 
-- **Instances list** — every instance from the server inventory with its
-  status badge (`active` / `disabled` / `broken`), mode, domain/port, and
-  installed version. The list reflects the **inventory/manifest state only**
-  — it does not poll containers, so it stays instant with many instances.
-  Live container/health state is checked **on demand** from the instance
-  detail page. A `broken` instance (for example a missing manifest) shows
-  the reason instead of crashing — repair it with
+- **Dashboard** — environment status (auto-run checks), the instance
+  inventory table, the manager's own version + self-update status, and the
+  CLI-only diagnostics. The overview metrics show active/broken instance
+  counts at a glance.
+- **Sidebar** — every instance with a live status dot (`active` /
+  `disabled` / `broken`, plus "operation running"); click one to open its
+  workspace in the center. The list reflects the **inventory/manifest state
+  only** — it does not poll containers, so it stays instant with many
+  instances. A `broken` instance (for example a missing manifest) shows the
+  reason instead of crashing — repair it with
   `sh-manager instance repair <id>` (see
   [safe mode & recovery](safe-mode-and-recovery.md)).
-- **Instance detail** — manifest summary, the **backups list** (id, date,
+- **Instance workspace** — manifest summary, the **backups list** (id, date,
   size, versions metadata), the operation history, and a **Run health
   check** button (backend + frontend + per-service container checks). Health
   is checked on demand when you click the button; nothing polls the
   containers in the background.
-- **Update** — always runs a **dry-run first** (resolved plan + preflight:
-  ok / warning / blocked, with reasons). Executing asks for explicit
-  confirmation flags when the plan carries migration risk.
-- **Backups** — create a backup, or restore one. A restore **always takes an
-  automatic pre-restore backup first**, so the pre-restore state stays
-  recoverable. The backup file stays on the server (the GUI shows the path;
-  there is no browser download).
-- **Clone** — copy an instance to a new id + domain/port. Clones always get
-  **fresh secrets**; credentials are never copied.
-- **Create** — the same plan/install path as the wizard. The generated admin
-  password is **never shown in the browser** and never enters the journal log
-  or state files: provisioning writes it to a restricted `0600` file on the
-  server (`<root>/instances/<id>/secrets/admin_password`) and the operation
-  result shows that file's path. Read it over SSH once, then remove it:
+- **Create (step wizard)** — the **New instance** button opens a full-width
+  multi-step wizard (the same guided experience as the bootstrap installer):
+  **Basics** (name, id, admin account) → **Address** (production domain or
+  local port) → **Release** (version picked from the **verified registry
+  dropdown** — never typed by hand) → **Review & install**. The install then
+  streams its **journaled log live inside the wizard**; when it finishes you
+  can open the new instance directly. The generated admin password is
+  **never shown in the browser** and never enters the journal log or state
+  files: provisioning writes it to a restricted `0600` file on the server
+  (`<root>/instances/<id>/secrets/admin_password`) and the operation result
+  shows that file's path. Read it over SSH once, then remove it:
 
   ```bash
   ssh you@server
   cat /opt/selfhelp/instances/<id>/secrets/admin_password   # path shown in the operation result
   rm /opt/selfhelp/instances/<id>/secrets/admin_password    # optional, after the first login
   ```
+- **Update** — always runs a **dry-run first** (resolved plan + preflight:
+  ok / warning / blocked, with reasons). The target version comes from the
+  **registry dropdown** ("latest" or a pinned release). Executing asks for
+  explicit confirmation flags when the plan carries migration risk.
+- **Backups** — create a backup, or restore one. A restore **always takes an
+  automatic pre-restore backup first**, so the pre-restore state stays
+  recoverable. The backup file stays on the server (the GUI shows the path;
+  there is no browser download).
+- **Clone** — copy an instance to a new id. The target address follows the
+  source's mode: **production sources get a new domain, local sources get a
+  new localhost port**. Clones always get **fresh secrets**; credentials are
+  never copied.
+- **Change address** — move a production instance to a **new domain** or a
+  local instance to a **new port**, directly from the manager; the instance
+  restarts automatically to apply it. See
+  [Domains, DNS and local ports](domains-and-ports.md) for the DNS
+  checklist and the CLI equivalent (`sh-manager instance set-address`).
 - **Remove** — three modes, same as the CLI: `disable` (reversible),
   `remove_containers_keep_data`, and `full_delete` (requires typing
   `delete <id>`).
@@ -146,15 +172,19 @@ Long-running actions return `202 { operationId }` — poll the operation.
 | `POST /api/instances/:id/backups/:backupId/restore` | Pre-restore backup, then restore. |
 | `POST /api/instances/:id/update/dry-run` | Resolve plan + preflight (synchronous). |
 | `POST /api/instances/:id/update` | Execute an update. |
-| `POST /api/instances/:id/clone` | Clone to a new instance. |
+| `POST /api/instances/:id/clone` | Clone to a new instance (domain for production sources, port for local ones). |
+| `POST /api/instances/:id/address` | Change the routed domain / local port; restarts the instance. |
 | `POST /api/instances/:id/remove` | Disable / remove / full-delete. |
 | `GET /api/operations?instanceId=` | Operation history. |
 | `GET /api/operations/:id` | One operation incl. journaled log lines. |
+| `GET /api/registry/versions?channel=` | Installable versions for the version dropdowns. |
 
 ## See also
 
 - [Install](install.md) — bootstrap wizard and CLI install.
 - [Update](update.md) — update plans, rollback, CMS-requested updates.
+- [Domains, DNS and local ports](domains-and-ports.md) — DNS setup and
+  changing an instance's address (GUI + CLI).
 - [Backup & restore](backup-restore.md) · [Clone & remove](clone-remove.md) —
   the CLI equivalents of the GUI actions.
 - [Security hardening](security-hardening.md) — operators, roles, tokens.

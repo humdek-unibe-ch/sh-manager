@@ -15,10 +15,18 @@ and typed confirmations — see
 Cloning produces an **isolated** copy with **fresh secrets** — the clone never
 shares database passwords, app keys, or any secret with the source.
 
+The target address follows the **source's mode**: a production source is
+cloned onto a new `--domain`, a local (port-published) source onto a new
+`--target-local-port`.
+
 Preview the clone plan (no changes):
 
 ```bash
+# production source → new domain
 sh-manager instance clone website1 website1-staging --domain staging.example.ch
+
+# local source → new localhost port
+sh-manager instance clone localtest localtest-copy --target-local-port 9124
 ```
 
 Apply it (writes fresh, isolated secrets for the target):
@@ -33,7 +41,8 @@ Options:
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `--domain <domain>` | required | New domain for the clone. |
+| `--domain <domain>` | required for production sources | New domain for the clone. |
+| `--target-local-port <port>` | required for local sources | New `127.0.0.1` port for the clone. |
 | `--no-preserve-versions` | preserve | Resolve latest compatible versions instead of pinning the source lock. |
 | `--no-uploads` | copy | Do not copy uploads. |
 | `--no-plugins` | copy | Do not copy plugin artifacts. |
