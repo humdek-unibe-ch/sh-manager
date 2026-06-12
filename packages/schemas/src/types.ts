@@ -367,6 +367,19 @@ export interface TrustedKeysFile {
   keys: TrustedKey[];
 }
 
+/**
+ * Formats the ACTIVE ed25519 trusted keys as the backend's
+ * `SELFHELP_PLUGIN_TRUSTED_KEYS` env value (`keyId=base64pubkey;…`), so a
+ * manager-installed instance verifies plugin signatures against exactly the
+ * keys the manager itself trusts. Revoked keys are excluded.
+ */
+export function formatTrustedKeysEnv(file: TrustedKeysFile): string {
+  return file.keys
+    .filter((k) => k.status === 'active' && k.algorithm === 'ed25519')
+    .map((k) => `${k.keyId}=${k.publicKey}`)
+    .join(';');
+}
+
 // ---------------------------------------------------------------------------
 // Preflight / update plan
 // ---------------------------------------------------------------------------

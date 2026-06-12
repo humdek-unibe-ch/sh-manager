@@ -148,6 +148,34 @@ describe('buildInstanceCompose (production)', () => {
     expect(volumes.plugin_artifacts_public!.name).toBe('selfhelp_website1_plugin_artifacts_public');
   });
 
+  it('hands the data volumes to www-data before any Symfony service starts', () => {
+    // Regression: the engine creates named volumes root-owned, but PHP runs as
+    // www-data (uid 33) — the first in-CMS plugin install died with
+    // `mkdir(): Permission denied` on /app/var/plugins. A one-shot root init
+    // container chowns the mount points; app services gate on its completion.
+    const init = svc(doc, 'volume-init');
+    expect(init.image).toBe(images.backend);
+    expect(init.user).toBe('0');
+    expect(init.entrypoint).toEqual(['sh', '-c']);
+    const script = (init.command as string[]).join(' ');
+    expect(script).toContain('chown 33:33');
+    for (const dir of ['/app/public/uploads', '/app/var/plugins', '/app/public/plugin-artifacts']) {
+      expect(script).toContain(dir);
+    }
+    expect(init.volumes).toEqual([
+      'uploads:/app/public/uploads',
+      'plugin_artifacts:/app/var/plugins',
+      'plugin_artifacts_public:/app/public/plugin-artifacts',
+    ]);
+    // One-shot: no restart policy (compose default "no"), private network only.
+    expect(init.restart).toBeUndefined();
+    expect(init.networks).toEqual(['instance']);
+    for (const name of ['backend', 'worker', 'scheduler']) {
+      const deps = svc(doc, name).depends_on as Record<string, { condition: string }>;
+      expect(deps['volume-init']).toEqual({ condition: 'service_completed_successfully' });
+    }
+  });
+
   it('enforces a Redis password without inlining it', () => {
     const redis = svc(doc, 'redis');
     expect((redis.command as string[]).join(' ')).toContain('requirepass');

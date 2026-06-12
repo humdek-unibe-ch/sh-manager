@@ -62,6 +62,15 @@ const PLUGIN_ARTIFACTS_VOLUME = 'plugin_artifacts';
 const PLUGIN_ARTIFACTS_CONTAINER_DIR = '/app/var/plugins';
 const PLUGIN_ARTIFACTS_PUBLIC_VOLUME = 'plugin_artifacts_public';
 const PLUGIN_ARTIFACTS_PUBLIC_CONTAINER_DIR = '/app/public/plugin-artifacts';
+/**
+ * The uid/gid PHP runs as inside the published core images (www-data on the
+ * Debian-based FrankenPHP image). The named volumes above are created
+ * root-owned by the engine on first mount (the images do not pre-bake the
+ * mount paths), so without an ownership hand-off the very first plugin
+ * install or file upload dies with `mkdir(): Permission denied`.
+ */
+const APP_RUNTIME_UID = 33;
+const VOLUME_INIT_SERVICE = 'volume-init';
 
 export interface InstanceComposeSpec {
   instanceId: string;
@@ -177,9 +186,32 @@ export function buildInstanceCompose(spec: InstanceComposeSpec): ComposeDocument
     `${PLUGIN_ARTIFACTS_PUBLIC_VOLUME}:${PLUGIN_ARTIFACTS_PUBLIC_CONTAINER_DIR}`,
   ];
 
+  // One-shot ownership hand-off for the named data volumes. The engine creates
+  // them root-owned, but Symfony writes as www-data (uid 33): the first plugin
+  // install/upload would fail with `mkdir(): Permission denied`. This service
+  // (the backend image run as root) chowns the mount points and exits; the
+  // Symfony services gate on its successful completion. It re-runs on every
+  // `compose up` and is idempotent + instant.
+  const volumeInit: Record<string, unknown> = {
+    image: spec.images.backend,
+    user: '0',
+    entrypoint: ['sh', '-c'],
+    command: [
+      `chown ${APP_RUNTIME_UID}:${APP_RUNTIME_UID} ${UPLOADS_CONTAINER_DIR} ${PLUGIN_ARTIFACTS_CONTAINER_DIR} ${PLUGIN_ARTIFACTS_PUBLIC_CONTAINER_DIR}`,
+    ],
+    networks: ['instance'],
+    volumes: [...persistentMounts],
+    logging: loggingBlock(spec.resources),
+    healthcheck: { disable: true },
+  };
+  const volumeInitGate = {
+    [VOLUME_INIT_SERVICE]: { condition: 'service_completed_successfully' },
+  };
+
   const backend = baseService(spec.images.backend, ['instance'], spec.resources, SECRET_AWARE_ENV);
   backend.volumes = [dotenvMount, jwtMount, ...persistentMounts];
   backend.depends_on = {
+    ...volumeInitGate,
     mysql: { condition: 'service_healthy' },
     redis: { condition: 'service_healthy' },
   };
@@ -193,11 +225,12 @@ export function buildInstanceCompose(spec: InstanceComposeSpec): ComposeDocument
   // the public HTTP surface, never the Docker health flag of these two.
   const worker = baseService(spec.images.worker, ['instance'], spec.resources, SECRET_AWARE_ENV);
   worker.volumes = [dotenvMount, jwtMount, ...persistentMounts];
-  worker.depends_on = { backend: { condition: 'service_started' } };
+  worker.depends_on = { ...volumeInitGate, backend: { condition: 'service_started' } };
   worker.healthcheck = { disable: true };
 
   const scheduler = baseService(spec.images.scheduler, ['instance'], spec.resources, SECRET_AWARE_ENV);
   scheduler.volumes = [dotenvMount, jwtMount, ...persistentMounts];
+  scheduler.depends_on = { ...volumeInitGate };
   scheduler.healthcheck = { disable: true };
   // `$$` defers expansion to the container shell (see the redis note below).
   scheduler.command = [
@@ -272,6 +305,7 @@ export function buildInstanceCompose(spec: InstanceComposeSpec): ComposeDocument
 
   const services: Record<string, unknown> = {
     frontend,
+    [VOLUME_INIT_SERVICE]: volumeInit,
     backend,
     worker,
     scheduler,

@@ -36,6 +36,19 @@ export interface InstanceEnvInput {
   browserApiPrefix?: string;
   symfonyApiPrefix?: string;
   schedulerTickSeconds?: number;
+  /**
+   * `SELFHELP_PLUGIN_TRUSTED_KEYS` value (`keyId=base64pubkey;…`) handed to
+   * the backend so it can verify official plugin release signatures. Without
+   * it the backend's verifier has NO trusted keys and silently filters every
+   * signed registry plugin out of the CMS plugin catalogue.
+   */
+  pluginTrustedKeys?: string;
+  /**
+   * Registry the instance was installed from. Becomes the backend's default
+   * plugin source (`SELFHELP_PLUGIN_DEFAULT_REGISTRY_URL`) so the CMS lists
+   * plugins from the SAME registry the manager resolves releases against.
+   */
+  registryUrl?: string;
 }
 
 export interface InstanceRouting {
@@ -118,9 +131,16 @@ export function buildInstanceEnv(input: InstanceEnvInput): Record<string, string
     // the regex literally — unquoted, the trailing `$` would be eaten by
     // compose's `${…}` interpolation.
     CORS_ALLOW_ORIGIN: "'^https?://(localhost|127\\.0\\.0\\.1)(:[0-9]+)?$'",
-    // Local mode ships a Mailpit container under this service name; production
-    // operators override it with a real SMTP DSN. Mirrors the backend default.
+    // Local mode ships a Mailpit container under this service name. An
+    // operator-configured SMTP DSN may carry credentials, so it NEVER lands
+    // here: it is written to secrets.env (0600), which compose loads after
+    // this file and therefore overrides this default.
     MAILER_DSN: 'smtp://mailpit:1025',
+    // Trusted plugin-signing keys + the registry the instance came from.
+    // Public keys are not secret. Signature verification stays strict.
+    ...(input.pluginTrustedKeys ? { SELFHELP_PLUGIN_TRUSTED_KEYS: input.pluginTrustedKeys } : {}),
+    SELFHELP_PLUGIN_REQUIRE_SIGNATURE: 'true',
+    ...(input.registryUrl ? { SELFHELP_PLUGIN_DEFAULT_REGISTRY_URL: input.registryUrl } : {}),
   };
 }
 

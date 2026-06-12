@@ -66,6 +66,14 @@ export interface InstanceSecrets {
    * {@link ensureManagerToken} before writing.
    */
   managerToken: string;
+  /**
+   * Operator-configured SMTP DSN (`smtp://user:pass@host:587`). NOT generated:
+   * set at install or via `instance set-mailer`. Lives in secrets.env (0600)
+   * because the DSN may embed credentials; it overrides the non-secret
+   * `.env`'s Mailpit default (secrets.env loads after `.env` in compose).
+   * Unset = the instance keeps the local Mailpit / image default.
+   */
+  mailerDsn?: string;
 }
 
 export interface GenerateSecretsOptions {
@@ -117,6 +125,28 @@ export function ensureManagerToken(secrets: InstanceSecrets): { secrets: Instanc
   return { secrets: { ...secrets, managerToken: urlSafeToken(32) }, minted: true };
 }
 
+/**
+ * Returns a secret set with the operator-configured mailer DSN applied.
+ * `undefined` keeps whatever the set already has; an empty string CLEARS the
+ * override (back to the Mailpit/image default).
+ */
+export function withMailerDsn(secrets: InstanceSecrets, mailerDsn: string | undefined): InstanceSecrets {
+  if (mailerDsn === undefined) return secrets;
+  if (mailerDsn === '') {
+    const { mailerDsn: _cleared, ...rest } = secrets;
+    return rest;
+  }
+  return { ...secrets, mailerDsn };
+}
+
+/**
+ * Mailer DSN with any `user:password@` userinfo masked, safe for UI/CLI
+ * display ("what is configured" without revealing SMTP credentials).
+ */
+export function redactMailerDsn(dsn: string): string {
+  return dsn.replace(/\/\/([^/@]+)@/, '//***@');
+}
+
 /** A clone always receives freshly generated secrets; the source's are never reused. */
 export function generateCloneSecrets(options: GenerateSecretsOptions = {}): InstanceSecrets {
   return generateInstanceSecrets(options);
@@ -164,6 +194,9 @@ export function secretEnvMap(secrets: InstanceSecrets): Record<string, string> {
     // Enables the backend's token-gated CMS<->Manager update loop
     // (SystemManagerController). Empty = loop disabled (backend default).
     SELFHELP_MANAGER_TOKEN: secrets.managerToken,
+    // Operator SMTP override; loads after .env so it wins over the Mailpit
+    // default. Absent when the instance uses local Mailpit / image default.
+    ...(secrets.mailerDsn ? { MAILER_DSN: secrets.mailerDsn } : {}),
   };
 }
 
@@ -261,6 +294,8 @@ export async function readInstanceSecrets(secretsDir: string): Promise<InstanceS
     // (empty = loop disabled) so retries/updates can backfill instead of
     // treating the whole set as incomplete.
     managerToken: get('SELFHELP_MANAGER_TOKEN') ?? '',
+    // Optional operator SMTP override; preserved across retries/updates.
+    ...(get('MAILER_DSN') ? { mailerDsn: get('MAILER_DSN')! } : {}),
   };
 }
 

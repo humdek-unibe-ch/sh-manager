@@ -46,6 +46,7 @@ import {
   instancePaths,
   proxyDir,
   readInstanceSecrets,
+  withMailerDsn,
   writeFileAtomic,
   writeInstanceSecrets,
   type InstanceSecrets,
@@ -126,6 +127,12 @@ export interface InstanceInstallInput {
   pluginLock?: Record<string, LockPluginEntry>;
   createdAt?: string;
   operationId?: string;
+  /**
+   * `SELFHELP_PLUGIN_TRUSTED_KEYS` value for the backend (format from
+   * `formatTrustedKeysEnv`). Installs/updates pass the manager's own trusted
+   * keys so the CMS can verify + list signed registry plugins.
+   */
+  pluginTrustedKeys?: string;
 }
 
 export interface InstanceInstallArtifacts {
@@ -216,6 +223,8 @@ export function buildInstanceInstallArtifacts(input: InstanceInstallInput): Inst
       selfhelpVersion: input.core.version,
       frontendVersion: input.frontend.version,
       publicFrontendUrl,
+      registryUrl: input.registry.url,
+      ...(input.pluginTrustedKeys ? { pluginTrustedKeys: input.pluginTrustedKeys } : {}),
     }),
   );
 
@@ -262,6 +271,11 @@ export interface InstallDeps {
   secrets?: InstanceSecrets;
   /** Injectable secret-file IO (defaults to the real 0600/0700 node writer). */
   secretIO?: SecretIO;
+  /**
+   * Operator SMTP DSN, stored in secrets.env (may carry credentials).
+   * `undefined` keeps an existing override (retry/resume); `''` clears it.
+   */
+  mailerDsn?: string;
 }
 
 /** Writes all instance artifacts atomically and optionally brings the stack up. */
@@ -285,7 +299,10 @@ export async function installInstance(
   // A reused pre-token set gets a manager token minted (safe: it protects no
   // persisted data) so the CMS<->Manager update loop works after the install.
   const existing = deps.secrets ?? (await readInstanceSecrets(paths.secretsDir));
-  const secrets = ensureManagerToken(existing ?? generateInstanceSecrets()).secrets;
+  const secrets = withMailerDsn(
+    ensureManagerToken(existing ?? generateInstanceSecrets()).secrets,
+    deps.mailerDsn,
+  );
   const writtenSecrets = await writeInstanceSecrets(paths.secretsDir, secrets, deps.secretIO);
 
   await writeFileAtomic(paths.composePath, artifacts.composeYaml);
