@@ -8,7 +8,7 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `1.1.1`). Registry releases
+- **The manager tool** uses its own semver (currently `1.2.0`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
@@ -17,6 +17,61 @@ The manager has two version axes (see
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
 
 ## [Unreleased]
+
+## [1.2.0] - 2026-06-12
+
+### Added
+- **Admin-shell console layout** — the operations console now uses the same
+  Mantine admin-panel structure as the SelfHelp CMS UI: instances in a left
+  sidebar (live status dots, domain/port), the dashboard or the selected
+  instance's workspace in the center, and the operator + sign-out in the
+  header.
+- **Multi-step create-instance wizard** — creating an instance from the
+  console now uses the same guided step form as the bootstrap installer
+  (Basics → Address → Release → Review & install) in a 90%-width modal that
+  only closes through Cancel/Close. The install streams its journaled log
+  live inside the wizard, and the new instance can be opened directly when
+  it finishes.
+- **Registry version dropdowns everywhere** — the create wizard and the
+  update dialog pick versions from the verified release registry
+  (`GET /api/registry/versions`); versions are never typed by hand (free
+  text remains only as an offline fallback).
+- **Change address from the manager** — new `sh-manager instance
+  set-address <id> --domain <domain> | --port <port>` CLI command, BFF route
+  (`POST /api/instances/:id/address`) and GUI dialog. Rewrites the generated
+  config/routing (incl. the Mercure route), updates the inventory and
+  restarts the instance automatically (`--no-restart` to defer,
+  `--strict-dns` to hard-fail on wrong DNS). Re-applying the same address is
+  a supported config-repair path.
+- **New operator runbook** [`docs/operator/domains-and-ports.md`](docs/operator/domains-and-ports.md)
+  — DNS setup for production instances, changing domains/ports from GUI and
+  CLI, how routing is wired, and troubleshooting.
+- **Shared instance validation module** (`apps/web/src/instance-validation.ts`)
+  — create/clone/set-address requests are validated by the same pure module
+  on the server routes, the CLI actions and the UI forms, so the wizard can
+  never submit what the server would reject.
+
+### Fixed
+- **Mercure events 503 on installed instances** — `MERCURE_PUBLIC_URL` now
+  resolves mode-aware: local instances use the internal
+  `http://mercure/.well-known/mercure` hub (the frontend BFF could never
+  reach the previously configured public URL from inside the Docker
+  network), and production instances route
+  `https://<domain>/.well-known/mercure` through Traefik to the Mercure
+  container (new router labels + proxy-network attachment).
+- **Sign-out and all console actions failing with 403 after a page reload**
+  — the session cookie survived reloads but the in-memory CSRF token did
+  not. `GET /api/state` now returns the operator's session (email, roles,
+  CSRF token) and the client re-captures it, so every POST works after a
+  reload.
+- **Clone now works for both port- and domain-published instances** — the
+  clone path (CLI, BFF, GUI dialog) is mode-aware: production sources
+  require a new domain, local sources a new `127.0.0.1` port
+  (`--target-local-port`). Previously a domain was demanded universally,
+  which broke local clones.
+- **Environment checks stuck on "Pending"** — the dashboard runs all four
+  checks (Docker, internet, registry, resources) automatically on load;
+  every check remains re-runnable on demand.
 
 ## [1.1.2] - 2026-06-12
 
