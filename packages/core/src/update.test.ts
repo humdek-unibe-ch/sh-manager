@@ -147,6 +147,41 @@ describe('executeUpdate', () => {
     expect(runner.calls.map((c) => c.args[0])).toEqual(['pull', 'up']);
   });
 
+  it('reinstalls plugins after migrations and before the health gate, rolling back when it fails', async () => {
+    // The recreated containers carry only the baked vendor state, so plugin
+    // restore is part of the gated update path: health must validate the
+    // restored plugins, and a restore failure must roll back like any other.
+    const okOrder: string[] = [];
+    const okReport = await executeUpdate(approved, okPlan(), {
+      runner: new RecordingComposeRunner(), instanceDir: '/tmp/website1',
+      takeBackup: async () => { okOrder.push('backup'); return { backupId: 'backup-1' }; },
+      snapshot: async () => { okOrder.push('snapshot'); },
+      applyArtifacts: async () => { okOrder.push('apply'); },
+      runMigrations: async () => { okOrder.push('migrate'); },
+      restorePlugins: async () => { okOrder.push('plugins'); },
+      checkHealth: async () => { okOrder.push('health'); return healthy; },
+      rollback: async () => { okOrder.push('rollback'); },
+    });
+    expect(okReport.ok).toBe(true);
+    expect(okOrder).toEqual(['backup', 'snapshot', 'apply', 'migrate', 'plugins', 'health']);
+    expect(okReport.steps.map((s) => s.name)).toContain('plugins');
+
+    let rolledBack = false;
+    const failReport = await executeUpdate(approved, okPlan(), {
+      runner: new RecordingComposeRunner(), instanceDir: '/tmp/website1',
+      takeBackup: async () => ({ backupId: 'backup-1' }),
+      snapshot: async () => undefined,
+      applyArtifacts: async () => undefined,
+      runMigrations: async () => undefined,
+      restorePlugins: async () => { throw new Error('composer rate limited'); },
+      checkHealth: async () => healthy,
+      rollback: async () => { rolledBack = true; },
+    });
+    expect(failReport.ok).toBe(false);
+    expect(failReport.rolledBack).toBe(true);
+    expect(rolledBack).toBe(true);
+  });
+
   it('snapshots before mutating and aborts (no pull) when the snapshot fails', async () => {
     const runner = new RecordingComposeRunner();
     let applied = false;

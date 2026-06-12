@@ -8,3 +8,4 @@ export * from './operations.js';
 export * from './bootstrap.js';
 export * from './bootstrap-safety.js';
 export * from './provision.js';
+export * from './plugin-state.js';

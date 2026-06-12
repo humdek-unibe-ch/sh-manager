@@ -208,6 +208,14 @@ export interface UpdateExecutionDeps {
   snapshot: () => Promise<void>;
   applyArtifacts: () => Promise<void>;
   runMigrations: () => Promise<void>;
+  /**
+   * Reinstall the instance's plugins against the NEW core after the containers
+   * were recreated from fresh images (vendor resets to the baked state while
+   * the database still records the installed plugins). Runs after migrations
+   * and before the health check; a failure triggers the normal rollback.
+   * Optional: instances without plugin support skip it.
+   */
+  restorePlugins?: () => Promise<void>;
   checkHealth: () => Promise<HealthReport>;
   /**
    * Restore the snapshot captured by {@link snapshot} (previous config +
@@ -337,6 +345,11 @@ export async function executeUpdate(
     migrationsAttempted = true;
     await deps.runMigrations();
     steps.push({ name: 'migrate', status: 'done' });
+
+    if (deps.restorePlugins) {
+      await deps.restorePlugins();
+      steps.push({ name: 'plugins', status: 'done' });
+    }
 
     const health = await deps.checkHealth();
     if (!isHealthy(health)) {
