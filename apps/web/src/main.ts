@@ -11,13 +11,14 @@
  * The testable logic lives in `wizard.ts` + `server.ts`.
  */
 import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { MANAGER_VERSION } from '@shm/schemas';
 import { RegistryClient, RegistryError } from '@shm/registry';
 import { discoverEngineRoot } from '@shm/docker';
-import { FileOperatorStore } from '@shm/auth';
+import { FileOperatorStore, isBootstrapRequired } from '@shm/auth';
 import { provisionFailureDetail, type BootstrapActions } from './actions.js';
 import { browseUrl, createBootstrapServer, type ServerMode } from './server.js';
 import { AuditLog, InstanceLocks, OperationJournal, OperationRunner } from './jobs.js';
@@ -64,7 +65,15 @@ export async function startWebUi(opts: WebUiOptions = {}): Promise<{ host: strin
   const root = opts.root ?? process.env.SELFHELP_ROOT ?? '/opt/selfhelp';
   const host = opts.host ?? process.env.SHM_WEB_HOST ?? '127.0.0.1';
   const port = opts.port ?? Number(process.env.SHM_WEB_PORT ?? '8765');
-  const mode = opts.mode ?? ((process.env.SHM_WEB_MODE ?? 'bootstrap') as ServerMode);
+  // Mode default is AUTO: once the server inventory exists, the web UI is the
+  // authenticated operations console (persistent); a fresh state folder gets
+  // the one-shot install wizard (bootstrap). An explicit --mode / SHM_WEB_MODE
+  // always wins.
+  const envMode = process.env.SHM_WEB_MODE;
+  const requestedMode: ServerMode | undefined =
+    opts.mode ?? (envMode === 'bootstrap' || envMode === 'persistent' ? envMode : undefined);
+  const serverInitialized = existsSync(path.join(root, 'selfhelp.server.json'));
+  const mode: ServerMode = requestedMode ?? (serverInitialized ? 'persistent' : 'bootstrap');
   const allowNonLocal = opts.allowNonLocal ?? process.env.SHM_WEB_ALLOW_NONLOCAL === 'true';
   const persistAfterBootstrap = opts.persistAfterBootstrap ?? process.env.SHM_WEB_PERSIST === 'true';
   const clientDir = opts.clientDir ?? process.env.SHM_WEB_CLIENT_DIR ?? path.join(here, '..', 'dist-web');
@@ -235,6 +244,20 @@ export async function startWebUi(opts: WebUiOptions = {}): Promise<{ host: strin
   // Always print the URL an operator can actually open: a wildcard bind
   // (in-container) is reachable via the published localhost port, not 0.0.0.0.
   console.log(`SelfHelp Manager ${mode} UI (v${managerVersion}): ${browseUrl(bound.host, bound.port)}`);
+  if (requestedMode === undefined) {
+    console.log(
+      serverInitialized
+        ? 'Mode auto-selected: persistent (server inventory found) — sign in to manage instances. Force the installer with --mode bootstrap.'
+        : 'Mode auto-selected: bootstrap (fresh state folder) — the install wizard will run. After the first install, the web UI starts as the management console.',
+    );
+  }
+  if (mode === 'persistent' && operatorStore && isBootstrapRequired(await operatorStore.load())) {
+    console.log(
+      'No operator accounts exist yet, so sign-in is not possible. Create the first operator:\n' +
+        '  sh-manager admin create --email you@example.org --roles server_owner\n' +
+        '  (wrapper: ./shm.sh admin create ...  |  .\\shm.ps1 admin create ...)',
+    );
+  }
   if (bound.host === '0.0.0.0' || bound.host === '::') {
     console.log('Reachable only through the published port (the shm wrapper publishes it on 127.0.0.1).');
   } else if (!allowNonLocal) {

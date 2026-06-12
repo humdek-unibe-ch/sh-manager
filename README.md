@@ -207,7 +207,18 @@ a **Vite React SPA + a small Node BFF** (backend-for-frontend), aligned with
   guards against DNS-rebinding, and **self-locks** after a successful install.
 - **Operator login + operations console** (persistent mode): an authenticated
   session (cookie + CSRF) gates the management API; the console shows live server
-  status and the operator actions for instance lifecycle.
+  status and the full instance lifecycle (create, health, logs, backups,
+  restore, update, clone, remove). See
+  [docs/operator/gui-instance-management.md](docs/operator/gui-instance-management.md).
+
+**The mode is auto-detected**: on a fresh state folder `sh-manager web` runs
+the install wizard; once the server is initialized (after the first install)
+it starts the **management console** and asks for an operator sign-in. Create
+operator accounts with
+`sh-manager admin create --email you@example.org --roles server_owner`
+(the generated password is printed once; see
+[docs/operator/security-hardening.md](docs/operator/security-hardening.md)).
+Pass `--mode bootstrap|persistent` to override the detection.
 
 The **BFF** is the only thing the SPA talks to. It exposes the CLI actions as a
 tiny JSON API under `/api`, binds to localhost by default (a non-loopback bind
@@ -216,8 +227,7 @@ back to an inline shell if unbuilt). Reach it remotely via an SSH tunnel:
 
 ```bash
 # on the server (equivalent: sh-manager-web)
-sh-manager web --root /opt/selfhelp        # bootstrap wizard, http://127.0.0.1:8765
-sh-manager web --root /opt/selfhelp --mode persistent --persist   # management UI
+sh-manager web --root /opt/selfhelp        # wizard on a fresh server, console once initialized
 
 # from the Docker image (bind 0.0.0.0 inside; published loopback-only)
 docker run --rm -p 127.0.0.1:8765:8765 \
