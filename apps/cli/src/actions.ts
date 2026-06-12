@@ -499,7 +499,6 @@ export async function instanceInstall(
   };
   const services = await deps.resolveServiceDigests(serviceImages);
 
-  const publicFrontendUrl = opts.mode === 'production' ? `https://${opts.domain}` : `http://localhost:${opts.localPort}`;
   const artifacts = buildInstanceInstallArtifacts({
     instanceId: opts.instanceId,
     displayName: opts.displayName,
@@ -514,7 +513,6 @@ export async function instanceInstall(
     core,
     frontend,
     services,
-    mercurePublicUrl: `${publicFrontendUrl}/.well-known/mercure`,
   });
 
   // Provisioning requires a running stack, so it implies bringUp.
@@ -591,8 +589,12 @@ async function persistOrReuseAdminPassword(
  * Duplicate-domain prevention + optional production DNS-binding check. Throws a
  * clear aggregated error when the domain cannot be installed; returns non-fatal
  * warnings (e.g. DNS not yet pointing here) for the caller to surface.
+ * Shared by install and address changes (structural subset of install options).
  */
-async function assertInstallableDomain(deps: ActionDeps, opts: InstanceInstallOptions): Promise<string[]> {
+async function assertInstallableDomain(
+  deps: ActionDeps,
+  opts: { instanceId: string; mode: InstanceMode; domain?: string; localPort?: number; strictDns?: boolean },
+): Promise<string[]> {
   const existingEntries = await new InventoryStore(deps.root)
     .read()
     .then((inv) => inv.instances)
@@ -927,7 +929,6 @@ export async function instanceUpdate(deps: ActionDeps, instanceId: string, opts:
           core,
           frontend,
           services,
-          mercurePublicUrl: `${manifest.routing.publicFrontendUrl}/.well-known/mercure`,
           installedPlugins: manifest.installedPlugins,
         });
         await writeFileAtomic(paths.composePath, artifacts.composeYaml);
@@ -1309,7 +1310,6 @@ export async function instanceRestore(
       selfhelpVersion: restoredManifest.versions.selfhelp,
       frontendVersion: restoredManifest.versions.frontend,
       publicFrontendUrl,
-      mercurePublicUrl: `${publicFrontendUrl}/.well-known/mercure`,
     });
     await writeFileAtomic(
       paths.composePath,
@@ -1386,8 +1386,58 @@ export async function instanceRestore(
 // instance clone (plan)
 // ---------------------------------------------------------------------------
 
+/**
+ * Synthesises the minimal core/frontend release shapes the artifact builder
+ * needs from an instance's manifest + lock — for offline operations (clone,
+ * address change) that must pin the EXACT versions/digests already installed
+ * instead of consulting the registry.
+ */
+function releaseShapesFromLock(
+  manifest: InstanceManifest,
+  lock: InstanceLock,
+  keyId: string,
+): { core: CoreRelease; frontend: FrontendRelease } {
+  const channel = manifest.registry.channel;
+  const core: CoreRelease = {
+    kind: 'selfhelp-core-release',
+    id: `selfhelp-core-${lock.core.version}`,
+    version: lock.core.version,
+    channel,
+    releasedAt: lock.generatedAt,
+    minimumDirectUpgradeFrom: lock.core.version,
+    pluginApiVersion: lock.core.pluginApiVersion,
+    backend: { image: manifest.images.backend, digest: lock.core.backendImageDigest },
+    worker: { image: manifest.images.worker, digest: lock.core.workerImageDigest },
+    scheduler: { image: manifest.images.scheduler, digest: lock.core.schedulerImageDigest },
+    frontendCompatibility: { requiredFrontendRange: '*' },
+    database: {
+      migrationRange: lock.core.migrationVersion,
+      destructive: false,
+      requiresBackup: false,
+      manualConfirmationRequired: false,
+    },
+    security: {
+      signature: lock.core.signedPayloadSha256,
+      keyId,
+      signedPayloadSha256: lock.core.signedPayloadSha256,
+    },
+  };
+  const frontend: FrontendRelease = {
+    kind: 'selfhelp-frontend-release',
+    id: `selfhelp-frontend-${manifest.versions.frontend}`,
+    version: manifest.versions.frontend,
+    channel,
+    image: manifest.images.frontend,
+    digest: lock.core.frontendImageDigest,
+    backendCompatibility: { requiredCoreRange: '*', requiredApiVersion: lock.core.pluginApiVersion },
+    security: { signature: lock.core.signedPayloadSha256, keyId },
+  };
+  return { core, frontend };
+}
+
 export interface CloneCliOptions {
-  targetDomain: string;
+  /** Production clones: the clone's new public domain. */
+  targetDomain?: string;
   /** Local-mode clones need their own published localhost port. */
   targetLocalPort?: number;
   preserveVersions?: boolean;
@@ -1405,10 +1455,21 @@ export async function instanceClone(
 ): Promise<{ plan: ClonePlan; executed?: boolean; secretsWritten?: string[]; health?: HealthReport }> {
   const sourceManifest = await readManifestFriendly(deps, sourceInstanceId);
   const sourceLock = await new LockStore(sourceInstanceId, deps.root).read();
+  const mode = sourceManifest.mode;
+  // Mode-aware address requirement: a production clone routes a NEW domain; a
+  // local clone publishes a NEW localhost port (its inventory "domain" is
+  // localhost:<port>). Validated before planning so plan-only calls fail fast.
+  if (mode === 'local' && opts.targetLocalPort === undefined) {
+    throw new Error('Cloning a local instance requires a target local port (--target-local-port).');
+  }
+  if (mode === 'production' && !opts.targetDomain) {
+    throw new Error('Cloning a production instance requires a target domain (--target-domain).');
+  }
+  const targetDomain = mode === 'production' ? opts.targetDomain! : `localhost:${opts.targetLocalPort}`;
   const req: CloneRequest = {
     sourceInstanceId,
     targetInstanceId,
-    targetDomain: opts.targetDomain,
+    targetDomain,
     preserveVersionsFromLock: opts.preserveVersions ?? true,
     generateNewSecrets: true,
     copyUploads: opts.copyUploads ?? true,
@@ -1432,50 +1493,10 @@ export async function instanceClone(
   const sourceProject = composeProjectName(sourceInstanceId);
   const targetProject = composeProjectName(targetInstanceId);
   const channel = sourceManifest.registry.channel;
-  const mode = sourceManifest.mode;
-  if (mode === 'local' && opts.targetLocalPort === undefined) {
-    throw new Error('Cloning a local instance requires a target local port (--target-local-port).');
-  }
-  const publicFrontendUrl =
-    mode === 'production' ? `https://${opts.targetDomain}` : `http://localhost:${opts.targetLocalPort}`;
 
   // Pin the clone to the SOURCE lock's versions + image digests so it runs
-  // exactly the source's images. Synthesise the minimal core/frontend release
-  // shapes the artifact builder needs from the source manifest + lock.
-  const core: CoreRelease = {
-    kind: 'selfhelp-core-release',
-    id: `selfhelp-core-${sourceLock.core.version}`,
-    version: sourceLock.core.version,
-    channel,
-    releasedAt: sourceLock.generatedAt,
-    minimumDirectUpgradeFrom: sourceLock.core.version,
-    pluginApiVersion: sourceLock.core.pluginApiVersion,
-    backend: { image: sourceManifest.images.backend, digest: sourceLock.core.backendImageDigest },
-    worker: { image: sourceManifest.images.worker, digest: sourceLock.core.workerImageDigest },
-    scheduler: { image: sourceManifest.images.scheduler, digest: sourceLock.core.schedulerImageDigest },
-    frontendCompatibility: { requiredFrontendRange: '*' },
-    database: {
-      migrationRange: sourceLock.core.migrationVersion,
-      destructive: false,
-      requiresBackup: false,
-      manualConfirmationRequired: false,
-    },
-    security: {
-      signature: sourceLock.core.signedPayloadSha256,
-      keyId: 'cloned',
-      signedPayloadSha256: sourceLock.core.signedPayloadSha256,
-    },
-  };
-  const frontend: FrontendRelease = {
-    kind: 'selfhelp-frontend-release',
-    id: `selfhelp-frontend-${sourceManifest.versions.frontend}`,
-    version: sourceManifest.versions.frontend,
-    channel,
-    image: sourceManifest.images.frontend,
-    digest: sourceLock.core.frontendImageDigest,
-    backendCompatibility: { requiredCoreRange: '*', requiredApiVersion: sourceLock.core.pluginApiVersion },
-    security: { signature: sourceLock.core.signedPayloadSha256, keyId: 'cloned' },
-  };
+  // exactly the source's images.
+  const { core, frontend } = releaseShapesFromLock(sourceManifest, sourceLock, 'cloned');
 
   const artifacts = buildInstanceInstallArtifacts({
     instanceId: targetInstanceId,
@@ -1494,7 +1515,6 @@ export async function instanceClone(
     core,
     frontend,
     services: sourceLock.services,
-    mercurePublicUrl: `${publicFrontendUrl}/.well-known/mercure`,
     installedPlugins: sourceManifest.installedPlugins,
     pluginLock: sourceLock.plugins,
     ...(sourceManifest.resources ? { resources: sourceManifest.resources } : {}),
@@ -1543,6 +1563,145 @@ export async function instanceClone(
   );
 
   return { plan, executed: true, secretsWritten, health };
+}
+
+// ---------------------------------------------------------------------------
+// instance set-address (change production domain / local port, then restart)
+// ---------------------------------------------------------------------------
+
+export interface SetAddressOptions {
+  /** Production instances: the new public domain. */
+  domain?: string;
+  /** Local instances: the new published localhost port. */
+  localPort?: number;
+  /** Recreate the containers so the new address takes effect (default true). */
+  restart?: boolean;
+  /** Production: block (not just warn) when DNS does not resolve to this server. */
+  strictDns?: boolean;
+}
+
+export interface SetAddressResult {
+  changed: boolean;
+  previousDomain: string;
+  domain: string;
+  publicUrl: string;
+  warnings: string[];
+  restarted: boolean;
+  health?: HealthReport;
+}
+
+/**
+ * Changes where an instance is reachable — the routed domain (production) or
+ * the published localhost port (local) — by regenerating the instance's
+ * compose/.env/manifest/README from the pinned lock versions and recreating
+ * the containers. The mode itself never changes here.
+ *
+ * Re-applying the CURRENT address is intentionally allowed: it regenerates the
+ * runtime config from the lock and restarts, which is also the documented way
+ * to roll out manager-side config fixes (e.g. Mercure routing) to an existing
+ * instance without an update.
+ */
+export async function instanceSetAddress(
+  deps: ActionDeps,
+  instanceId: string,
+  opts: SetAddressOptions,
+): Promise<SetAddressResult> {
+  const manifest = await readManifestFriendly(deps, instanceId);
+  const lockStore = new LockStore(instanceId, deps.root);
+  const lock = await lockStore.read();
+  const mode = manifest.mode;
+
+  if (mode === 'production' && !opts.domain) {
+    throw new Error('Changing a production instance address requires --domain.');
+  }
+  if (mode === 'local' && opts.localPort === undefined) {
+    throw new Error('Changing a local instance address requires --port.');
+  }
+  if (mode === 'local' && (!Number.isInteger(opts.localPort) || opts.localPort! < 1 || opts.localPort! > 65535)) {
+    throw new Error('Local port must be an integer between 1 and 65535.');
+  }
+
+  // Same duplicate-domain / DNS-binding rules as an install; the instance's
+  // own current claim is excluded so re-applying the same address is valid.
+  const warnings = await assertInstallableDomain(deps, {
+    instanceId,
+    mode,
+    ...(mode === 'production' ? { domain: opts.domain! } : { localPort: opts.localPort! }),
+    ...(opts.strictDns !== undefined ? { strictDns: opts.strictDns } : {}),
+  });
+
+  const newDomain = mode === 'production' ? opts.domain! : `localhost:${opts.localPort}`;
+  const previousDomain = manifest.domain;
+  const changed = newDomain !== previousDomain;
+
+  // Regenerate compose/.env/README/manifest with the pinned lock versions —
+  // never the registry — so an address change can run fully offline and can
+  // never bump code. The lock itself is NOT rewritten (versions are unchanged).
+  const { core, frontend } = releaseShapesFromLock(manifest, lock, 'address-change');
+  const paths = instancePaths(instanceId, deps.root);
+  const artifacts = buildInstanceInstallArtifacts({
+    instanceId,
+    displayName: manifest.displayName,
+    mode,
+    ...(mode === 'production' ? { domain: opts.domain! } : { localPort: opts.localPort! }),
+    root: deps.root,
+    ...(deps.engineRoot ? { engineRoot: deps.engineRoot } : {}),
+    managerVersion: deps.managerVersion,
+    channel: manifest.registry.channel,
+    registry: { id: lock.registry.id, url: lock.registry.url, metadataSha256: lock.registry.metadataSha256 },
+    core,
+    frontend,
+    services: lock.services,
+    installedPlugins: manifest.installedPlugins,
+    pluginLock: lock.plugins,
+    ...(manifest.resources ? { resources: manifest.resources } : {}),
+  });
+  await writeFileAtomic(paths.composePath, artifacts.composeYaml);
+  await writeFileAtomic(paths.envPath, artifacts.envText);
+  await writeFileAtomic(paths.readmePath, artifacts.readme);
+  await new ManifestStore(instanceId, deps.root).write({
+    ...artifacts.manifest,
+    createdAt: manifest.createdAt,
+    updatedAt: deps.now?.() ?? new Date().toISOString(),
+  });
+
+  // Reflect the new address in the server inventory (domain is the routing key).
+  const inventoryStore = new InventoryStore(deps.root);
+  const inventory = await inventoryStore.read().catch(() => null);
+  if (inventory) {
+    const entry = inventory.instances.find((e) => e.instanceId === instanceId);
+    if (entry) {
+      entry.domain = newDomain;
+      await inventoryStore.write(inventory);
+    }
+  }
+
+  const restart = opts.restart ?? true;
+  let health: HealthReport | undefined;
+  if (restart) {
+    // The compose declares the shared proxy network as external; make sure it
+    // exists even on servers bootstrapped before multi-instance support.
+    if (deps.ensureNetwork) {
+      const network = inventory?.proxy.network ?? DEFAULT_PROXY_NETWORK;
+      await deps.ensureNetwork(network);
+    }
+    await deps.runner.run(paths.dir, composeCommands.upDetached());
+    health = evaluateHealth(
+      instanceId,
+      await deps.probeHealth(artifacts.manifest.routing.publicFrontendUrl, artifacts.manifest.routing.browserApiPrefix),
+      deps.now,
+    );
+  }
+
+  return {
+    changed,
+    previousDomain,
+    domain: newDomain,
+    publicUrl: artifacts.manifest.routing.publicFrontendUrl,
+    warnings,
+    restarted: restart,
+    ...(health ? { health } : {}),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1896,7 +2055,6 @@ async function reconstructManifestFromState(
       selfhelpVersion: lock.core.version,
       frontendVersion,
       publicFrontendUrl,
-      mercurePublicUrl: `${publicFrontendUrl}/.well-known/mercure`,
     }),
     installedPlugins: Object.entries(lock.plugins).map(([id, p]) => ({ id, version: p.version })),
   };

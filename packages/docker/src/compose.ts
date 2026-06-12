@@ -5,8 +5,9 @@
  *
  * Hard invariants enforced here (see the distribution plan):
  * - every instance gets its own networks/volumes and unique compose project;
- * - only the frontend container is attached to the shared proxy network;
- * - backend/worker/scheduler/db/redis/mercure stay on the private network;
+ * - only edge-routed services (frontend, and in production the Mercure hub
+ *   under /.well-known/mercure) attach to the shared proxy network;
+ * - backend/worker/scheduler/db/redis stay on the private network;
  * - every long-running service has log rotation configured;
  * - no runtime service mounts the Docker socket;
  * - MySQL data lives in a per-instance persistent volume.
@@ -239,12 +240,35 @@ export function buildInstanceCompose(spec: InstanceComposeSpec): ComposeDocument
     retries: 10,
   };
 
-  // The hub is internal-only (private instance network; TLS terminates at the
-  // edge proxy). Without SERVER_NAME the dunglas/mercure Caddy defaults to
-  // auto-HTTPS on a self-minted local CA and 308-redirects plain HTTP, so the
-  // backend's publishes to http://mercure/.well-known/mercure would never work.
-  const mercure = baseService(spec.images.mercure, ['instance'], spec.resources, SECRET_AWARE_ENV);
+  // The hub serves plain HTTP on :80; TLS terminates at the edge proxy.
+  // Without SERVER_NAME the dunglas/mercure Caddy defaults to auto-HTTPS on a
+  // self-minted local CA and 308-redirects plain HTTP, so the backend's
+  // publishes to http://mercure/.well-known/mercure would never work.
+  //
+  // Production additionally routes the hub at the edge under
+  // https://<domain>/.well-known/mercure: subscribers (the frontend BFF and
+  // mobile apps) connect via MERCURE_PUBLIC_URL, and without this router the
+  // path fell through to the frontend's catch-all Host() rule and 404'd —
+  // every events subscription failed. Traefik prefers the longer rule, so the
+  // Host && PathPrefix router wins over the frontend's bare Host router for
+  // exactly this path. Local mode keeps the hub private (the BFF subscribes
+  // over the instance network).
+  const mercureNetworks = spec.mode === 'production' ? ['instance', proxyNetwork] : ['instance'];
+  const mercure = baseService(spec.images.mercure, mercureNetworks, spec.resources, SECRET_AWARE_ENV);
   mercure.environment = { SERVER_NAME: ':80' };
+  if (spec.mode === 'production') {
+    const domain = spec.domain;
+    if (!domain) throw new Error('Production compose requires a domain.');
+    mercure.labels = [
+      'traefik.enable=true',
+      `traefik.docker.network=${proxyNetwork}`,
+      `traefik.http.routers.${id}-mercure.rule=Host(\`${domain}\`) && PathPrefix(\`/.well-known/mercure\`)`,
+      `traefik.http.routers.${id}-mercure.entrypoints=websecure`,
+      `traefik.http.routers.${id}-mercure.tls=true`,
+      `traefik.http.routers.${id}-mercure.tls.certresolver=letsencrypt`,
+      `traefik.http.services.${id}-mercure.loadbalancer.server.port=80`,
+    ];
+  }
 
   const services: Record<string, unknown> = {
     frontend,

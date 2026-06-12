@@ -27,6 +27,7 @@ import {
   instanceRemove,
   instanceRepair,
   instanceRestore,
+  instanceSetAddress,
   instanceSupportBundle,
   serverInit,
 } from './actions.js';
@@ -662,6 +663,128 @@ describe('instance lifecycle (offline)', () => {
     expect(res.plan.generateNewSecrets).toBe(true);
     expect(res.plan.steps.length).toBeGreaterThan(0);
     expect(formatSteps('Clone:', res.plan.steps)).toContain('Clone:');
+  });
+
+  it('clones a LOCAL instance by port alone — no domain required', async () => {
+    // Regression: the clone path demanded a target domain even for local
+    // (port-published) instances, so port clones could never run.
+    const { d, copied } = await lifecycleDeps();
+    await serverInit(d, { serverId: 's1', mode: 'local' });
+    await instanceInstall(d, {
+      instanceId: 'localtest',
+      displayName: 'Local Test',
+      mode: 'local',
+      localPort: 9123,
+      registryUrl: 'https://humdek-unibe-ch.github.io/sh2-plugin-registry/',
+      version: 'latest',
+    });
+
+    const res = await instanceClone(d, 'localtest', 'localtest-copy', { targetLocalPort: 9124, apply: true });
+    expect(res.executed).toBe(true);
+    expect(res.plan.targetDomain).toBe('localhost:9124');
+    expect(copied.some((c) => c.to === 'selfhelp_localtest-copy_uploads')).toBe(true);
+
+    // The clone publishes ITS port, not the source's.
+    const compose = await readFile(instancePaths('localtest-copy', root).composePath, 'utf8');
+    expect(compose).toContain('127.0.0.1:9124:3000');
+    expect(compose).not.toContain('127.0.0.1:9123:3000');
+  });
+
+  it('refuses mode-mismatched clone addresses (local without port, production without domain)', async () => {
+    const { d } = await lifecycleDeps();
+    await serverInit(d, { serverId: 's1', mode: 'local' });
+    await instanceInstall(d, {
+      instanceId: 'localtest',
+      displayName: 'Local Test',
+      mode: 'local',
+      localPort: 9123,
+      registryUrl: 'https://humdek-unibe-ch.github.io/sh2-plugin-registry/',
+      version: 'latest',
+    });
+    await instanceInstall(d, {
+      instanceId: 'website1',
+      displayName: 'Website 1',
+      mode: 'production',
+      domain: 'website1.example.ch',
+      registryUrl: 'https://humdek-unibe-ch.github.io/sh2-plugin-registry/',
+      version: 'latest',
+    });
+    await expect(instanceClone(d, 'localtest', 'localtest-copy', { targetDomain: 'copy.example.ch' })).rejects.toThrow(
+      /target local port/i,
+    );
+    await expect(instanceClone(d, 'website1', 'website1-staging', { targetLocalPort: 9124 })).rejects.toThrow(
+      /target domain/i,
+    );
+  });
+
+  it('set-address moves a production instance to a new domain and restarts it', async () => {
+    const { d, runner: lifecycleRunner } = await lifecycleDeps();
+    await installWebsite1(d);
+
+    const res = await instanceSetAddress(d, 'website1', { domain: 'renamed.example.ch' });
+    expect(res.changed).toBe(true);
+    expect(res.previousDomain).toBe('website1.example.ch');
+    expect(res.publicUrl).toBe('https://renamed.example.ch');
+    expect(res.restarted).toBe(true);
+
+    // Manifest, compose routing (frontend + mercure) and inventory all moved.
+    const manifest = await new ManifestStore('website1', root).read();
+    expect(manifest.domain).toBe('renamed.example.ch');
+    const compose = await readFile(instancePaths('website1', root).composePath, 'utf8');
+    expect(compose).toContain('Host(`renamed.example.ch`)');
+    expect(compose).not.toContain('Host(`website1.example.ch`)');
+    const inv = JSON.parse(await readFile(serverInventoryPath(root), 'utf8')) as {
+      instances: { instanceId: string; domain: string }[];
+    };
+    expect(inv.instances.find((i) => i.instanceId === 'website1')?.domain).toBe('renamed.example.ch');
+    // The containers were recreated to pick up the new routing.
+    const lastCall = lifecycleRunner.calls.at(-1);
+    expect(lastCall?.args).toEqual(['up', '-d']);
+
+    // The version lock is untouched — an address change never bumps code.
+    const lock = await new LockStore('website1', root).read();
+    expect(lock.core.version).toBe('0.1.0');
+  });
+
+  it('set-address re-publishes a local instance on a new port and allows a same-port re-apply', async () => {
+    const { d } = await lifecycleDeps();
+    await serverInit(d, { serverId: 's1', mode: 'local' });
+    await instanceInstall(d, {
+      instanceId: 'localtest',
+      displayName: 'Local Test',
+      mode: 'local',
+      localPort: 9123,
+      registryUrl: 'https://humdek-unibe-ch.github.io/sh2-plugin-registry/',
+      version: 'latest',
+    });
+
+    const res = await instanceSetAddress(d, 'localtest', { localPort: 9200 });
+    expect(res.changed).toBe(true);
+    expect(res.domain).toBe('localhost:9200');
+    const compose = await readFile(instancePaths('localtest', root).composePath, 'utf8');
+    expect(compose).toContain('127.0.0.1:9200:3000');
+
+    // Re-applying the SAME address is a supported repair path (regenerates
+    // config from the lock + restarts) and reports changed: false.
+    const again = await instanceSetAddress(d, 'localtest', { localPort: 9200 });
+    expect(again.changed).toBe(false);
+    expect(again.restarted).toBe(true);
+  });
+
+  it('set-address refuses a domain already used by another instance', async () => {
+    const { d } = await lifecycleDeps();
+    await installWebsite1(d);
+    await instanceInstall(d, {
+      instanceId: 'website2',
+      displayName: 'Website 2',
+      mode: 'production',
+      domain: 'website2.example.ch',
+      registryUrl: 'https://humdek-unibe-ch.github.io/sh2-plugin-registry/',
+      version: 'latest',
+    });
+    await expect(instanceSetAddress(d, 'website2', { domain: 'website1.example.ch' })).rejects.toThrow(
+      /already used/i,
+    );
   });
 
   it('clone --apply writes fresh secrets that share nothing with the source on disk', async () => {

@@ -121,7 +121,6 @@ export interface InstanceInstallInput {
   core: CoreRelease;
   frontend: FrontendRelease;
   services: { mysql: LockServiceEntry; redis: LockServiceEntry; mercure: LockServiceEntry };
-  mercurePublicUrl: string;
   resources?: InstanceResourceConfig;
   installedPlugins?: InstalledPlugin[];
   pluginLock?: Record<string, LockPluginEntry>;
@@ -156,7 +155,6 @@ export function buildInstanceInstallArtifacts(input: InstanceInstallInput): Inst
     selfhelpVersion: input.core.version,
     frontendVersion: input.frontend.version,
     publicFrontendUrl,
-    mercurePublicUrl: input.mercurePublicUrl,
   });
 
   const images = {
@@ -218,7 +216,6 @@ export function buildInstanceInstallArtifacts(input: InstanceInstallInput): Inst
       selfhelpVersion: input.core.version,
       frontendVersion: input.frontend.version,
       publicFrontendUrl,
-      mercurePublicUrl: input.mercurePublicUrl,
     }),
   );
 

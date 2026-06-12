@@ -377,10 +377,13 @@ describe('release smoke (offline, signed fixture registry)', () => {
     expect(two.name).toBe('selfhelp_qa-two');
     expect(one.name).not.toBe(two.name);
 
-    // Only the frontend touches the shared proxy network; the data plane stays private.
+    // Only the web entrypoints (frontend + the Mercure hub, which Traefik
+    // routes at /.well-known/mercure) touch the shared proxy network; the
+    // data plane stays private.
     for (const c of [one, two]) {
       expect(c.services.frontend.networks).toEqual(expect.arrayContaining(['instance', 'selfhelp_proxy']));
-      for (const svc of ['backend', 'worker', 'scheduler', 'mysql', 'redis', 'mercure']) {
+      expect(c.services.mercure?.networks).toEqual(expect.arrayContaining(['instance', 'selfhelp_proxy']));
+      for (const svc of ['backend', 'worker', 'scheduler', 'mysql', 'redis']) {
         expect(c.services[svc]?.networks).toEqual(['instance']);
       }
     }

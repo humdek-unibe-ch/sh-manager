@@ -35,7 +35,14 @@ export function findDockerSocketMounts(doc: ComposeDocument): GuardViolation[] {
   return out;
 }
 
-/** Only the frontend may be attached to the shared proxy network. */
+/**
+ * Only edge-routed services may attach to the shared proxy network: the
+ * frontend (the public app) and the Mercure hub (subscriber SSE endpoint under
+ * /.well-known/mercure in production). DB/backend/worker/scheduler/redis must
+ * never be reachable from the shared network.
+ */
+const PROXY_ALLOWED_SERVICES = new Set(['frontend', 'mercure']);
+
 export function findProxyNetworkViolations(
   doc: ComposeDocument,
   proxyNetwork = DEFAULT_PROXY_NETWORK,
@@ -48,9 +55,9 @@ export function findProxyNetworkViolations(
       : networks && typeof networks === 'object'
         ? Object.keys(networks)
         : [];
-    if (list.includes(proxyNetwork) && name !== 'frontend') {
+    if (list.includes(proxyNetwork) && !PROXY_ALLOWED_SERVICES.has(name)) {
       out.push({
-        rule: 'only-frontend-on-proxy',
+        rule: 'only-edge-services-on-proxy',
         detail: `Service "${name}" must not be attached to the shared proxy network "${proxyNetwork}".`,
       });
     }

@@ -22,6 +22,7 @@ import {
   doctor,
   instanceBackup,
   instanceClone,
+  instanceSetAddress,
   instanceHealth,
   instanceInstall,
   instanceList,
@@ -478,8 +479,8 @@ instance
 instance
   .command('clone <source> <target>')
   .description('Show the clone plan for creating <target> from <source>; --apply builds + populates the clone')
-  .requiredOption('--domain <domain>', 'new domain for the clone')
-  .option('--target-local-port <port>', 'published localhost port (cloning a local instance)', (v) => Number(v))
+  .option('--domain <domain>', 'new public domain (cloning a production instance)')
+  .option('--target-local-port <port>', 'new published localhost port (cloning a local instance)', (v) => Number(v))
   .option('--no-preserve-versions', 'resolve latest compatible versions instead of pinning the source lock')
   .option('--no-uploads', 'do not copy uploads')
   .option('--no-plugins', 'do not copy plugin artifacts')
@@ -488,7 +489,7 @@ instance
     try {
       const d = await deps(program.opts().root as string);
       const res = await instanceClone(d, source, target, {
-        targetDomain: opts.domain,
+        ...(opts.domain ? { targetDomain: opts.domain as string } : {}),
         ...(opts.targetLocalPort !== undefined ? { targetLocalPort: opts.targetLocalPort as number } : {}),
         preserveVersions: opts.preserveVersions,
         copyUploads: opts.uploads,
@@ -500,6 +501,35 @@ instance
         console.log(`Fresh secrets written for ${target}: ${res.secretsWritten?.length ?? 0} files (source never copied).`);
         if (res.health) console.log(formatHealth(res.health));
       }
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+instance
+  .command('set-address <id>')
+  .description('Change where an instance is reachable (production: --domain, local: --port), regenerate its config and restart it')
+  .option('--domain <domain>', 'new public domain (production instances)')
+  .option('--port <port>', 'new published localhost port (local instances)', (v) => parseInt(v, 10))
+  .option('--no-restart', 'write the new config only; apply it later with docker compose up -d')
+  .option('--strict-dns', 'production: block (not just warn) when DNS does not resolve to this server', false)
+  .action(async (id: string, opts) => {
+    try {
+      const d = await deps(program.opts().root as string);
+      const res = await instanceSetAddress(d, id, {
+        ...(opts.domain ? { domain: opts.domain as string } : {}),
+        ...(opts.port !== undefined ? { localPort: opts.port as number } : {}),
+        restart: opts.restart as boolean,
+        strictDns: opts.strictDns as boolean,
+      });
+      console.log(
+        res.changed
+          ? `Address changed: ${res.previousDomain} -> ${res.domain}`
+          : `Configuration re-applied for ${res.domain} (address unchanged).`,
+      );
+      for (const w of res.warnings) console.log(`  warning: ${w}`);
+      console.log(res.restarted ? `Instance restarted; reachable at ${res.publicUrl}` : 'Config written. Restart pending (run docker compose up -d in the instance directory).');
+      if (res.health) console.log(formatHealth(res.health));
     } catch (err) {
       fail(err);
     }

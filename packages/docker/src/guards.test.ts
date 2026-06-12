@@ -22,7 +22,7 @@ describe('findDockerSocketMounts', () => {
 });
 
 describe('findProxyNetworkViolations', () => {
-  it('flags a non-frontend service on the proxy network', () => {
+  it('flags a non-edge service on the proxy network', () => {
     const doc = {
       services: {
         frontend: { networks: ['instance', 'selfhelp_proxy'] },
@@ -32,6 +32,18 @@ describe('findProxyNetworkViolations', () => {
     const v = findProxyNetworkViolations(doc);
     expect(v).toHaveLength(1);
     expect(v[0]!.detail).toMatch(/backend/);
+  });
+
+  it('allows the edge-routed Mercure hub on the proxy network', () => {
+    // Production routes the hub at https://<domain>/.well-known/mercure so
+    // subscribers (frontend BFF, mobile) can actually reach it.
+    const doc = {
+      services: {
+        frontend: { networks: ['instance', 'selfhelp_proxy'] },
+        mercure: { networks: ['instance', 'selfhelp_proxy'] },
+      },
+    };
+    expect(findProxyNetworkViolations(doc)).toHaveLength(0);
   });
 });
 

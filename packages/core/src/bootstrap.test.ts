@@ -76,7 +76,6 @@ function installInput(mode: 'production' | 'local') {
       redis: { image: 'redis:7.2', digest: 'sha256:r' },
       mercure: { image: 'dunglas/mercure:0.18', digest: 'sha256:me' },
     },
-    mercurePublicUrl: 'https://website1.example.ch/.well-known/mercure',
     createdAt: '2026-06-05T10:00:00Z',
   };
 }
@@ -126,6 +125,19 @@ describe('buildInstanceInstallArtifacts', () => {
     const a = buildInstanceInstallArtifacts(installInput('production'));
     expect(a.composeYaml).toContain('selfhelp_proxy');
     expect(a.composeYaml).toContain('traefik.enable=true');
+  });
+
+  it('wires Mercure subscribers per mode: edge route in production, internal hub locally', () => {
+    // Regression: local instances wrote MERCURE_PUBLIC_URL=http://localhost:<port>/...
+    // which is unreachable from inside the frontend container, so the BFF's
+    // /api/auth/events failed with 503 on every manager-installed instance.
+    const prod = buildInstanceInstallArtifacts(installInput('production'));
+    expect(prod.envText).toContain('MERCURE_PUBLIC_URL=https://website1.example.ch/.well-known/mercure');
+    expect(prod.composeYaml).toContain('PathPrefix(`/.well-known/mercure`)');
+
+    const local = buildInstanceInstallArtifacts(installInput('local'));
+    expect(local.envText).toContain('MERCURE_PUBLIC_URL=http://mercure/.well-known/mercure');
+    expect(local.envText).not.toContain('MERCURE_PUBLIC_URL=http://localhost');
   });
 
   // Docker Desktop / non-default state mounts: the engine sees the state root

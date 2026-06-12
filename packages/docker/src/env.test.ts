@@ -9,7 +9,6 @@ const input = {
   selfhelpVersion: '1.5.0',
   frontendVersion: '1.4.2',
   publicFrontendUrl: 'https://website1.example.ch',
-  mercurePublicUrl: 'https://website1.example.ch/.well-known/mercure',
 };
 
 describe('BFF URL invariant', () => {
@@ -50,6 +49,20 @@ describe('BFF URL invariant', () => {
     const env = buildInstanceEnv(input);
     expect(env.MERCURE_URL).toBe('http://mercure/.well-known/mercure');
     expect(env.MERCURE_PUBLIC_URL).toBe('https://website1.example.ch/.well-known/mercure');
+  });
+
+  it('hands LOCAL-mode subscribers the internal hub URL, never the host port', () => {
+    // Regression: MERCURE_PUBLIC_URL=http://localhost:<port>/... is the HOST's
+    // address — from inside the frontend container `localhost` is the
+    // container itself, so the BFF's /api/auth/events hub fetch failed with
+    // 503 on every manager-installed local instance.
+    const env = buildInstanceEnv({
+      ...input,
+      mode: 'local',
+      publicFrontendUrl: 'http://localhost:9123',
+    });
+    expect(env.MERCURE_PUBLIC_URL).toBe('http://mercure/.well-known/mercure');
+    expect(env.MERCURE_PUBLIC_URL).not.toContain('localhost');
   });
 
   it('is a superset of the backend image dotenv defaults (mounted at /app/.env)', () => {

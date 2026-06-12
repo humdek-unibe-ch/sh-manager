@@ -46,10 +46,24 @@ describe('buildInstanceCompose (production)', () => {
     }
   });
 
-  it('attaches only the frontend to the shared proxy network', () => {
+  it('attaches only edge-routed services (frontend, mercure) to the shared proxy network', () => {
     expect(svc(doc, 'frontend').networks).toContain('selfhelp_proxy');
-    expect(svc(doc, 'backend').networks).toEqual(['instance']);
+    expect(svc(doc, 'mercure').networks).toContain('selfhelp_proxy');
+    for (const name of ['backend', 'worker', 'scheduler', 'mysql', 'redis']) {
+      expect(svc(doc, name).networks).toEqual(['instance']);
+    }
     expect(findProxyNetworkViolations(doc)).toHaveLength(0);
+  });
+
+  it('routes the Mercure hub at the edge under /.well-known/mercure', () => {
+    // Regression: without this router the path fell through to the frontend's
+    // bare Host() rule and 404'd, so every subscriber (frontend BFF
+    // /api/auth/events, mobile) failed with 503. The longer Host+PathPrefix
+    // rule outranks the frontend router by Traefik's default priority.
+    const labels = (svc(doc, 'mercure').labels as string[]).join(' ');
+    expect(labels).toContain('Host(`website1.example.ch`) && PathPrefix(`/.well-known/mercure`)');
+    expect(labels).toContain('traefik.http.services.website1-mercure.loadbalancer.server.port=80');
+    expect(labels).toContain('traefik.http.routers.website1-mercure.tls.certresolver=letsencrypt');
   });
 
   it('keeps MySQL data in a per-instance persistent volume', () => {
@@ -153,7 +167,7 @@ describe('buildInstanceCompose (production)', () => {
     expect(yaml).toContain('$${SCHEDULED_JOBS_TICK_SECONDS:-60}');
   });
 
-  it('serves the Mercure hub over plain HTTP on the private network', () => {
+  it('serves the Mercure hub over plain HTTP (TLS terminates at the edge)', () => {
     // Regression: without SERVER_NAME the dunglas/mercure Caddy auto-HTTPSes
     // with a self-minted local CA and 308-redirects plain HTTP, so backend
     // publishes to http://mercure/.well-known/mercure could never succeed.
@@ -195,6 +209,12 @@ describe('buildInstanceCompose (local)', () => {
   it('publishes the frontend on a localhost port and includes Mailpit', () => {
     expect(svc(doc, 'frontend').ports).toEqual(['127.0.0.1:8081:3000']);
     expect(Object.keys(doc.services as object)).toContain('mailpit');
+  });
+
+  it('keeps the Mercure hub private in local mode (BFF subscribes internally)', () => {
+    expect(svc(doc, 'mercure').networks).toEqual(['instance']);
+    expect(svc(doc, 'mercure').labels).toBeUndefined();
+    expect(svc(doc, 'mercure').ports).toBeUndefined();
   });
 
   it('still isolates networks/volumes per instance', () => {
