@@ -50,4 +50,20 @@ describe('sh-manager argv parsing', () => {
     expect(res.code).toBe(0);
     expect(res.stdout.trim()).toBe(MANAGER_VERSION);
   }, 60_000);
+
+  it('forgives a redundant leading `sh-manager` token (wrapper paste case)', async () => {
+    // `./shm.ps1 sh-manager instance install` reaches the container as
+    // `sh-manager instance install …`. With stripping, commander parses the
+    // real subcommand (missing --id error) instead of `unknown command`.
+    const res = await runCli(['sh-manager', 'instance', 'install', '--version', 'latest']);
+    expect(res.code).not.toBe(0);
+    expect(res.stderr).not.toContain("unknown command 'sh-manager'");
+    expect(res.stderr).toContain("required option '--id <id>' not specified");
+  }, 60_000);
+
+  it('prints the version for `sh-manager sh-manager --version`', async () => {
+    const res = await runCli(['sh-manager', '--version']);
+    expect(res.code).toBe(0);
+    expect(res.stdout.trim()).toBe(MANAGER_VERSION);
+  }, 60_000);
 });

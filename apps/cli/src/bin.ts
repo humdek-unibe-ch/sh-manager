@@ -15,7 +15,7 @@ import type { InstanceMode, ReleaseChannel } from '@shm/schemas';
 import { CrossInstanceError } from '@shm/core';
 import { discoverEngineRoot } from '@shm/docker';
 import { OFFICIAL_REGISTRY_URL } from '@shm/registry';
-import type { RemoveMode } from '@shm/instances';
+import { instancePaths, type RemoveMode } from '@shm/instances';
 import type { RestoreMode } from '@shm/backup';
 import {
   doctor,
@@ -25,6 +25,7 @@ import {
   instanceInstall,
   instanceList,
   instanceRemove,
+  instanceRepair,
   instanceRestore,
   instanceSafeMode,
   instanceSupportBundle,
@@ -32,7 +33,8 @@ import {
   drainInstanceOperations,
   serverInit,
 } from './actions.js';
-import { HttpBackendOperationsClient } from './operations-client.js';
+import { stripRedundantManagerToken } from './argv.js';
+import { ComposeExecBackendOperationsClient, HttpBackendOperationsClient } from './operations-client.js';
 import { MANAGER_VERSION, loadTrustedKeys, realDeps } from './env.js';
 import { formatHealth, formatPreflight, formatSteps, formatTable } from './output.js';
 import { applySelfUpdate, checkSelfUpdate, formatSelfUpdate } from './self-update.js';
@@ -88,11 +90,16 @@ function fail(err: unknown): never {
   process.exit(1);
 }
 
+// Forgive a redundant leading `sh-manager` token before any parsing
+// (`./shm.ps1 sh-manager instance health x` must behave like the same command
+// without the token).
+const argv = stripRedundantManagerToken(process.argv);
+
 // Root-only version flag, deliberately NOT registered via program.version():
 // commander parses root options anywhere in argv, so a global `--version`
 // swallows `instance install/update ... --version <x>` — the CLI printed the
 // manager version and exited instead of installing the requested version.
-if (process.argv.length === 3 && ['--version', '-V', 'version'].includes(process.argv[2] as string)) {
+if (argv.length === 3 && ['--version', '-V', 'version'].includes(argv[2] as string)) {
   console.log(MANAGER_VERSION);
   process.exit(0);
 }
@@ -337,22 +344,33 @@ instance
 instance
   .command('process-operations <id>')
   .description('Drain all pending CMS-requested update operations for an instance (--watch runs it as a supervised loop)')
-  .requiredOption('--backend-url <url>', "internal base URL of this instance's backend")
-  .option('--token <token>', 'per-instance manager token (default: env SELFHELP_MANAGER_TOKEN)')
+  .option('--backend-url <url>', "internal base URL of this instance's backend (default: exec into the backend container — no published port needed)")
+  .option('--token <token>', 'per-instance manager token, only with --backend-url (default: env SELFHELP_MANAGER_TOKEN)')
   .option('--watch', 'keep running, draining pending operations every --interval seconds (for systemd/supervised use)', false)
   .option('--interval <seconds>', 'poll interval in --watch mode (default 15)', (v) => parseInt(v, 10), 15)
   .action(async (id: string, opts) => {
     try {
-      const token = (opts.token as string | undefined) ?? process.env.SELFHELP_MANAGER_TOKEN;
-      if (!token) {
-        throw new Error('A per-instance manager token is required (--token or SELFHELP_MANAGER_TOKEN).');
-      }
       const d = await deps(program.opts().root as string);
-      const client = new HttpBackendOperationsClient({
-        backendBaseUrl: opts.backendUrl as string,
-        managerToken: token,
-        instanceId: id,
-      });
+      let client;
+      if (opts.backendUrl) {
+        const token = (opts.token as string | undefined) ?? process.env.SELFHELP_MANAGER_TOKEN;
+        if (!token) {
+          throw new Error('A per-instance manager token is required with --backend-url (--token or SELFHELP_MANAGER_TOKEN).');
+        }
+        client = new HttpBackendOperationsClient({
+          backendBaseUrl: opts.backendUrl as string,
+          managerToken: token,
+          instanceId: id,
+        });
+      } else {
+        // Default transport: exec the HTTP call inside the backend container.
+        // The token stays in the container's own env; nothing is published.
+        client = new ComposeExecBackendOperationsClient({
+          runner: d.runner,
+          instanceDir: instancePaths(id, program.opts().root as string).dir,
+          instanceId: id,
+        });
+      }
       const drainOnce = async () => {
         const outcomes = await drainInstanceOperations(d, id, client);
         if (outcomes.length === 0) {
@@ -515,6 +533,19 @@ instance
     }
   });
 
+instance
+  .command('repair <id>')
+  .description('Reconstruct a missing/corrupted instance manifest (newest backup snapshot, else inventory + lock + compose) and re-register the instance')
+  .action(async (id: string) => {
+    try {
+      const res = await instanceRepair(await deps(program.opts().root as string), id);
+      console.log(res.repaired ? `Repaired ${id} (source: ${res.source}).` : `Nothing to repair for ${id}.`);
+      for (const note of res.notes) console.log(`  ${note}`);
+    } catch (err) {
+      fail(err);
+    }
+  });
+
 const safeMode = instance
   .command('safe-mode')
   .description('Toggle system safe mode (boot backend with core bundles only — no plugins) for an instance');
@@ -645,4 +676,4 @@ serverDoctor.action(async () => {
   }
 });
 
-program.parseAsync(process.argv).catch(fail);
+program.parseAsync(argv).catch(fail);

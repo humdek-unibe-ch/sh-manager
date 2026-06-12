@@ -26,6 +26,11 @@ describe('generateWrapperScript (powershell)', () => {
     expect(script).toContain('--name "sh-manager-cli-$PID"');
   });
 
+  it("strips a pasted leading 'sh-manager' token before the web detection", () => {
+    expect(script).toContain("$CliArgs[0] -eq 'sh-manager'");
+    expect(script.indexOf("-eq 'sh-manager'")).toBeLessThan(script.indexOf("-eq 'web'"));
+  });
+
   it('uses the official image by default and forwards the exit code', () => {
     expect(script).toContain("'ghcr.io/humdek-unibe-ch/sh-manager:latest'");
     expect(script).toContain('exit $LASTEXITCODE');
@@ -64,6 +69,11 @@ describe('generateWrapperScript (bash)', () => {
   it('names the containers after the manager (GUI fixed, CLI per-shell)', () => {
     expect(script).toContain('--name sh-manager-web');
     expect(script).toContain('--name "sh-manager-cli-$$"');
+  });
+
+  it("strips a pasted leading 'sh-manager' token before the web detection", () => {
+    expect(script).toContain(`if [ "\${1:-}" = 'sh-manager' ]; then shift; fi`);
+    expect(script.indexOf("= 'sh-manager' ]")).toBeLessThan(script.indexOf("= 'web' ]"));
   });
 
   it('bakes an explicit root with shell-safe quoting', () => {

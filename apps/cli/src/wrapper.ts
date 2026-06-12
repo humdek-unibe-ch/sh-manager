@@ -57,14 +57,20 @@ $DockerArgs = @(
   '-v', '/var/run/docker.sock:/var/run/docker.sock',
   '-v', "\${Root}:/opt/selfhelp"
 )
+# Forgive a pasted leading 'sh-manager' token (the image entrypoint already IS
+# the manager): .\\shm.ps1 sh-manager web behaves like .\\shm.ps1 web.
+$CliArgs = @($args)
+if ($CliArgs.Count -gt 0 -and $CliArgs[0] -eq 'sh-manager') {
+  $CliArgs = @($CliArgs | Select-Object -Skip 1)
+}
 # Recognisable container names: the GUI is the single long-running container
 # ("name already in use" means it is already running - docker rm -f sh-manager-web);
 # one-shot CLI calls get a per-shell suffix so parallel shells never collide.
-if ($args.Count -gt 0 -and $args[0] -eq 'web') {
-  $Rest = @($args | Select-Object -Skip 1)
+if ($CliArgs.Count -gt 0 -and $CliArgs[0] -eq 'web') {
+  $Rest = @($CliArgs | Select-Object -Skip 1)
   docker @DockerArgs --name sh-manager-web -p "127.0.0.1:\${WebPort}:\${WebPort}" $Image web --host 0.0.0.0 --port $WebPort @Rest
 } else {
-  docker @DockerArgs --name "sh-manager-cli-$PID" $Image @args
+  docker @DockerArgs --name "sh-manager-cli-$PID" $Image @CliArgs
 }
 exit $LASTEXITCODE
 `;
@@ -92,6 +98,9 @@ DOCKER_ARGS=(run --rm
   --add-host=host.docker.internal:host-gateway
   -v /var/run/docker.sock:/var/run/docker.sock
   -v "$ROOT:/opt/selfhelp")
+# Forgive a pasted leading 'sh-manager' token (the image entrypoint already IS
+# the manager): ./shm.sh sh-manager web behaves like ./shm.sh web.
+if [ "\${1:-}" = 'sh-manager' ]; then shift; fi
 # Recognisable container names: the GUI is the single long-running container
 # ("name already in use" means it is already running - docker rm -f sh-manager-web);
 # one-shot CLI calls get a per-shell suffix so parallel shells never collide.

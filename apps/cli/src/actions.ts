@@ -9,6 +9,8 @@ import { createHash, randomBytes } from 'node:crypto';
 import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import semver from 'semver';
+import { parse as parseYaml } from 'yaml';
+import { validateInstanceManifest } from '@shm/schemas';
 import type {
   BackupManifest,
   CoreRelease,
@@ -57,18 +59,21 @@ import {
   ManifestStore,
   SECRET_DIR_MODE,
   SECRET_FILE_MODE,
+  ensureManagerToken,
   generateCloneSecrets,
   instancePaths,
   instancesDir,
   nodeSecretIO,
   planRemove,
   proxyDir,
+  readInstanceSecrets,
   secretsForRestore,
   serverInventoryPath,
   validateDomainForInstall,
   writeFileAtomic,
   writeInstanceSecrets,
   type GenerateSecretsOptions,
+  type InstancePaths,
   type RemoveMode,
   type RemovePlan,
   type SecretIO,
@@ -344,7 +349,69 @@ export async function serverInit(deps: ActionDeps, opts: ServerInitOptions): Pro
 
 export async function instanceList(deps: ActionDeps): Promise<{ instanceId: string; domain: string; status: string; composeProject: string }[]> {
   const inv = await new InventoryStore(deps.root).read();
-  return inv.instances.map((i) => ({ instanceId: i.instanceId, domain: i.domain, status: i.status, composeProject: i.composeProject }));
+  const rows: { instanceId: string; domain: string; status: string; composeProject: string }[] = [];
+  for (const i of inv.instances) {
+    // A registered instance whose manifest is missing/invalid must surface as
+    // `broken` (repairable) instead of exploding later with a raw ENOENT.
+    const manifestOk = await new ManifestStore(i.instanceId, deps.root)
+      .read()
+      .then(() => true)
+      .catch(() => false);
+    rows.push({
+      instanceId: i.instanceId,
+      domain: i.domain,
+      status: manifestOk ? i.status : 'broken',
+      composeProject: i.composeProject,
+    });
+  }
+
+  // Instance directories on disk that the inventory does not know about
+  // (interrupted installs, hand-edited state) surface as broken too — an
+  // instance must never disappear silently. A folder holding ONLY retained
+  // backups (what full_delete leaves behind on purpose) is not an instance.
+  const known = new Set(rows.map((r) => r.instanceId));
+  const dirNames = await readdir(instancesDir(deps.root), { withFileTypes: true })
+    .then((entries) => entries.filter((d) => d.isDirectory()).map((d) => d.name))
+    .catch(() => [] as string[]);
+  for (const name of dirNames) {
+    if (known.has(name)) continue;
+    if (await looksLikeInstanceState(instancePaths(name, deps.root))) {
+      rows.push({ instanceId: name, domain: '', status: 'broken', composeProject: composeProjectName(name) });
+    }
+  }
+  return rows;
+}
+
+/** True when the directory carries real instance state (not just retained backups). */
+async function looksLikeInstanceState(paths: InstancePaths): Promise<boolean> {
+  for (const marker of [paths.manifestPath, paths.lockPath, paths.composePath, paths.secretsDir]) {
+    if (await stat(marker).then(() => true, () => false)) return true;
+  }
+  return false;
+}
+
+/**
+ * Reads an instance manifest, turning a raw ENOENT into operator guidance:
+ * which state root was searched, which instances exist there, and how to
+ * repair a damaged instance. Every id-taking CLI action reads through this.
+ */
+async function readManifestFriendly(deps: ActionDeps, instanceId: string): Promise<InstanceManifest> {
+  try {
+    return await new ManifestStore(instanceId, deps.root).read();
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    const known = await new InventoryStore(deps.root)
+      .read()
+      .then((inv) => inv.instances.map((i) => i.instanceId))
+      .catch(() => [] as string[]);
+    throw new Error(
+      `Instance "${instanceId}" not found in this state root (${deps.root}). ` +
+        (known.length > 0
+          ? `Known instances: ${known.join(', ')}.`
+          : 'No instances are registered on this server.') +
+        ` If the instance's files exist but its manifest is missing or damaged, run: sh-manager instance repair ${instanceId}`,
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -680,7 +747,7 @@ function pickCompatibleFrontend(core: CoreRelease, frontends: FrontendRelease[])
 // ---------------------------------------------------------------------------
 
 export async function instanceHealth(deps: ActionDeps, instanceId: string): Promise<HealthReport> {
-  const manifest = await new ManifestStore(instanceId, deps.root).read();
+  const manifest = await readManifestFriendly(deps, instanceId);
   const probes = await deps.probeHealth(manifest.routing.publicFrontendUrl, manifest.routing.browserApiPrefix);
   return evaluateHealth(instanceId, probes, deps.now);
 }
@@ -715,7 +782,7 @@ export interface InstanceUpdateOptions {
 
 export async function instanceUpdate(deps: ActionDeps, instanceId: string, opts: InstanceUpdateOptions): Promise<{ plan: UpdatePlan; executed: boolean; report?: Awaited<ReturnType<typeof executeUpdate>> }> {
   const manifestStore = new ManifestStore(instanceId, deps.root);
-  const manifest = await manifestStore.read();
+  const manifest = await readManifestFriendly(deps, instanceId);
   const channel = opts.channel ?? manifest.registry.channel;
   const client = registryClient(deps, manifest.registry.url);
   const index = await client.getIndex();
@@ -767,6 +834,19 @@ export async function instanceUpdate(deps: ActionDeps, instanceId: string, opts:
   const lockStore = new LockStore(instanceId, deps.root);
   const core = plan.core;
   const frontend = plan.frontend;
+
+  // Backfill the per-instance manager token for instances installed before the
+  // token existed: the update recreates the containers anyway, so the backend
+  // picks up SELFHELP_MANAGER_TOKEN from the rewritten secrets.env and the
+  // CMS<->Manager update loop becomes available. Minting is safe (the token
+  // protects no persisted data); existing tokens are never changed.
+  const onDiskSecrets = await readInstanceSecrets(paths.secretsDir);
+  if (onDiskSecrets !== null) {
+    const ensured = ensureManagerToken(onDiskSecrets);
+    if (ensured.minted) {
+      await writeInstanceSecrets(paths.secretsDir, ensured.secrets, deps.secretIO);
+    }
+  }
 
   // Resolve the target runtime-service images from the target core's runtime
   // policy, falling back to the instance's current images. The MySQL data volume
@@ -940,7 +1020,7 @@ export async function processInstanceOperations(
   instanceId: string,
   client: BackendOperationsClient,
 ): Promise<ProcessOutcome> {
-  const manifest = await new ManifestStore(instanceId, deps.root).read();
+  const manifest = await readManifestFriendly(deps, instanceId);
   return processNextOperation({
     trustedInstanceId: manifest.instanceId,
     client,
@@ -960,7 +1040,7 @@ export async function drainInstanceOperations(
   instanceId: string,
   client: BackendOperationsClient,
 ): Promise<ProcessOutcome[]> {
-  const manifest = await new ManifestStore(instanceId, deps.root).read();
+  const manifest = await readManifestFriendly(deps, instanceId);
   return drainOperations({
     trustedInstanceId: manifest.instanceId,
     client,
@@ -1026,7 +1106,7 @@ export async function instanceBackup(
   instanceId: string,
   opts: BackupOptions = {},
 ): Promise<{ backupId: string; backupDir: string; manifest: BackupManifest }> {
-  const manifest = await new ManifestStore(instanceId, deps.root).read();
+  const manifest = await readManifestFriendly(deps, instanceId);
   const lock = await new LockStore(instanceId, deps.root).read();
   const paths = instancePaths(instanceId, deps.root);
   const project = composeProjectName(instanceId);
@@ -1317,8 +1397,8 @@ export async function instanceClone(
   targetInstanceId: string,
   opts: CloneCliOptions,
 ): Promise<{ plan: ClonePlan; executed?: boolean; secretsWritten?: string[]; health?: HealthReport }> {
+  const sourceManifest = await readManifestFriendly(deps, sourceInstanceId);
   const sourceLock = await new LockStore(sourceInstanceId, deps.root).read();
-  const sourceManifest = await new ManifestStore(sourceInstanceId, deps.root).read();
   const req: CloneRequest = {
     sourceInstanceId,
     targetInstanceId,
@@ -1536,7 +1616,7 @@ export async function instanceSupportBundle(
   deps: ActionDeps,
   instanceId: string,
 ): Promise<{ dir: string; files: string[] }> {
-  const manifest = await new ManifestStore(instanceId, deps.root).read();
+  const manifest = await readManifestFriendly(deps, instanceId);
   const lock = await new LockStore(instanceId, deps.root).read();
   const paths = instancePaths(instanceId, deps.root);
 
@@ -1579,6 +1659,241 @@ export async function instanceSupportBundle(
   for (const f of bundle.files) await writeFile(path.join(dir, f.name), f.content);
 
   return { dir, files: bundle.files.map((f) => f.name) };
+}
+
+// ---------------------------------------------------------------------------
+// instance repair (reconstruct a missing/invalid manifest)
+// ---------------------------------------------------------------------------
+
+export interface RepairOutcome {
+  repaired: boolean;
+  /** Where the manifest came from: already valid, a backup snapshot, or rebuilt. */
+  source: 'intact' | 'backup' | 'reconstructed';
+  manifestPath: string;
+  notes: string[];
+}
+
+/**
+ * Repairs an instance whose `selfhelp.instance.json` is missing or invalid
+ * (the "instance is gone" failure). Sources, in order of fidelity:
+ *
+ * 1. Intact manifest → only re-register a missing inventory entry.
+ * 2. The newest backup's manifest snapshot (every backup stores a full copy).
+ * 3. Reconstruction from inventory entry + lock file + compose file (versions
+ *    from the lock, images/mode/port from compose, domain from the inventory).
+ *
+ * Never touches containers, volumes or backups. Secrets are only ever
+ * extended: a missing per-instance manager token is minted (same backfill as
+ * `instanceUpdate`); existing secret values are never changed.
+ */
+export async function instanceRepair(deps: ActionDeps, instanceId: string): Promise<RepairOutcome> {
+  const store = new ManifestStore(instanceId, deps.root);
+  const paths = instancePaths(instanceId, deps.root);
+  const invStore = new InventoryStore(deps.root);
+  const notes: string[] = [];
+  const now = deps.now?.() ?? new Date().toISOString();
+
+  const dirExists = await stat(paths.dir)
+    .then((s) => s.isDirectory())
+    .catch(() => false);
+  const inventory = await invStore.read().catch(() => null);
+  const entry = inventory?.instances.find((i) => i.instanceId === instanceId) ?? null;
+  if (!dirExists && !entry) {
+    throw new Error(
+      `Instance "${instanceId}" has no directory under ${instancesDir(deps.root)} and no inventory entry — nothing to repair. ` +
+        'To recover a fully deleted instance, restore it from a backup copy or reinstall it.',
+    );
+  }
+
+  // Backfill the per-instance manager token for pre-token installs (mirrors
+  // the instanceUpdate backfill). Additive only — an existing token is never
+  // changed; the backend picks it up when its container is next recreated.
+  let mintedToken = false;
+  const onDiskSecrets = await readInstanceSecrets(paths.secretsDir);
+  if (onDiskSecrets !== null) {
+    const ensured = ensureManagerToken(onDiskSecrets);
+    if (ensured.minted) {
+      await writeInstanceSecrets(paths.secretsDir, ensured.secrets, deps.secretIO);
+      mintedToken = true;
+      notes.push(
+        'Minted the missing per-instance manager token (SELFHELP_MANAGER_TOKEN); recreate the backend container to enable the CMS-requested update loop.',
+      );
+    }
+  }
+
+  // 1. Intact manifest: the only possible repair is a missing inventory entry.
+  const intact = await store.read().catch(() => null);
+  if (intact) {
+    if (!entry && inventory) {
+      await invStore.upsertInstance(
+        {
+          instanceId,
+          domain: intact.domain,
+          path: paths.dir,
+          composeProject: composeProjectName(instanceId),
+          status: 'active',
+        },
+        inventory,
+      );
+      notes.push('Manifest is valid; re-registered the instance in the server inventory.');
+      return { repaired: true, source: 'intact', manifestPath: store.path, notes };
+    }
+    if (!mintedToken) notes.push('Manifest and inventory are consistent; nothing to repair.');
+    return { repaired: mintedToken, source: 'intact', manifestPath: store.path, notes };
+  }
+
+  // 2. Newest backup snapshot wins: it is a validated, full-fidelity copy.
+  const snapshot = await newestBackupManifestSnapshot(paths.backupsDir, instanceId);
+  let manifest: InstanceManifest;
+  let source: 'backup' | 'reconstructed';
+  if (snapshot) {
+    manifest = { ...snapshot.manifest, updatedAt: now };
+    source = 'backup';
+    notes.push(
+      `Restored the manifest from backup ${snapshot.backupId} (instance state as of ${snapshot.manifest.updatedAt}); ` +
+        'review it if the instance changed since that backup.',
+    );
+  } else {
+    manifest = await reconstructManifestFromState(deps, instanceId, entry?.domain ?? null, now);
+    source = 'reconstructed';
+    notes.push(
+      'Reconstructed the manifest from the inventory + lock + compose file. Display name, creation time and ' +
+        'registry channel are best-effort defaults — review them.',
+    );
+  }
+
+  await store.write(manifest);
+  notes.push(`Wrote ${store.path}.`);
+
+  // 3. Make sure the inventory knows the instance again.
+  if (inventory && !entry) {
+    await invStore.upsertInstance(
+      {
+        instanceId,
+        domain: manifest.domain,
+        path: paths.dir,
+        composeProject: composeProjectName(instanceId),
+        status: 'active',
+      },
+      inventory,
+    );
+    notes.push('Re-registered the instance in the server inventory.');
+  }
+  return { repaired: true, source, manifestPath: store.path, notes };
+}
+
+/** Newest backup directory containing a valid manifest snapshot for this instance. */
+async function newestBackupManifestSnapshot(
+  backupsDir: string,
+  instanceId: string,
+): Promise<{ backupId: string; createdAt: string; manifest: InstanceManifest } | null> {
+  const names = await readdir(backupsDir, { withFileTypes: true })
+    .then((entries) => entries.filter((d) => d.isDirectory()).map((d) => d.name))
+    .catch(() => [] as string[]);
+  const candidates: { backupId: string; createdAt: string; manifest: InstanceManifest }[] = [];
+  for (const name of names) {
+    try {
+      const raw: unknown = JSON.parse(await readFile(path.join(backupsDir, name, 'selfhelp.instance.json'), 'utf8'));
+      const v = validateInstanceManifest(raw);
+      if (!v.valid || !v.value || v.value.instanceId !== instanceId) continue;
+      const backupMeta = JSON.parse(
+        await readFile(path.join(backupsDir, name, 'backup-manifest.json'), 'utf8'),
+      ) as BackupManifest;
+      candidates.push({ backupId: name, createdAt: backupMeta.createdAt ?? v.value.updatedAt, manifest: v.value });
+    } catch {
+      // Unreadable backup folder: skip it as a repair source.
+    }
+  }
+  candidates.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return candidates[0] ?? null;
+}
+
+/**
+ * Rebuilds a manifest with no backup snapshot available: versions/plugins from
+ * the lock file, images + mode + local port from the generated compose file,
+ * domain from the inventory entry. Throws with recovery guidance when even
+ * these sources are gone.
+ */
+async function reconstructManifestFromState(
+  deps: ActionDeps,
+  instanceId: string,
+  inventoryDomain: string | null,
+  now: string,
+): Promise<InstanceManifest> {
+  const paths = instancePaths(instanceId, deps.root);
+  const lock = await new LockStore(instanceId, deps.root).read().catch(() => null);
+  const composeText = await readFile(paths.composePath, 'utf8').catch(() => null);
+  if (!lock || composeText === null) {
+    throw new Error(
+      `Cannot repair "${instanceId}": no backup manifest snapshot and ${lock ? 'no compose file' : 'no lock file'} ` +
+        `under ${paths.dir}. Restore the instance from a backup or reinstall it.`,
+    );
+  }
+
+  const compose = parseYaml(composeText) as {
+    services?: Record<string, { image?: string; ports?: unknown[] }>;
+  };
+  const services = compose.services ?? {};
+  const image = (name: string): string => {
+    const img = services[name]?.image;
+    if (!img) throw new Error(`Cannot repair "${instanceId}": the compose file declares no image for service "${name}".`);
+    return img;
+  };
+  const images = {
+    backend: image('backend'),
+    frontend: image('frontend'),
+    scheduler: image('scheduler'),
+    worker: image('worker'),
+    mysql: image('mysql'),
+    redis: image('redis'),
+    mercure: image('mercure'),
+  };
+
+  // The generated compose publishes a localhost port ONLY in local mode
+  // (production routes through the shared proxy network instead).
+  const portEntry = (services.frontend?.ports ?? []).find((p): p is string => typeof p === 'string') ?? null;
+  const mode: InstanceMode = portEntry ? 'local' : 'production';
+  const localPort = portEntry ? Number(portEntry.split(':')[1]) : undefined;
+  const domain = inventoryDomain || (mode === 'local' && localPort !== undefined ? `localhost:${localPort}` : '');
+  if (domain === '') {
+    throw new Error(
+      `Cannot repair "${instanceId}": the server inventory has no domain for this production instance. ` +
+        'Restore from a backup, or re-register the instance first.',
+    );
+  }
+  const publicFrontendUrl = mode === 'production' ? `https://${domain}` : `http://localhost:${localPort}`;
+  const frontendVersion = images.frontend.includes(':')
+    ? images.frontend.slice(images.frontend.lastIndexOf(':') + 1)
+    : lock.core.version;
+
+  return {
+    manifestVersion: 1,
+    instanceId,
+    displayName: instanceId,
+    domain,
+    mode,
+    createdAt: now,
+    updatedAt: now,
+    registry: { id: lock.registry.id, url: lock.registry.url, channel: 'stable' },
+    versions: {
+      selfhelp: lock.core.version,
+      backend: lock.core.version,
+      frontend: frontendVersion,
+      scheduler: lock.core.version,
+      worker: lock.core.version,
+      pluginApi: lock.core.pluginApiVersion,
+    },
+    images,
+    routing: buildInstanceRouting({
+      instanceId,
+      mode,
+      selfhelpVersion: lock.core.version,
+      frontendVersion,
+      publicFrontendUrl,
+      mercurePublicUrl: `${publicFrontendUrl}/.well-known/mercure`,
+    }),
+    installedPlugins: Object.entries(lock.plugins).map(([id, p]) => ({ id, version: p.version })),
+  };
 }
 
 // ---------------------------------------------------------------------------
