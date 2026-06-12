@@ -18,6 +18,11 @@ A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instanc
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-06-12
+
+### Fixed
+- **Login form card width increased** — the sign-in card width is now 640px (was 540px) to prevent text cutoff in the "No operator accounts yet" alert box.
+
 ## [1.1.1] - 2026-06-12
 
 ### Changed

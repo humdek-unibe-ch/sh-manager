@@ -40,7 +40,7 @@ export function LoginForm({ client, onSuccess }: LoginFormProps): JSX.Element {
         radius="md"
         p="xl"
         w="100%"
-        maw={420}
+        maw={640}
         onSubmit={(e) => {
           e.preventDefault();
           login.mutate();
