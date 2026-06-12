@@ -57,15 +57,19 @@ sh-manager instance install --id website1 --domain website1.example.ch \
 
 The generated admin password is printed **once** and saved to the owner-only
 file `<instance>/secrets/admin_password` — capture it now and delete the file
-after your first sign-in. Prefer the **web wizard** for a guided first install.
+after your first sign-in. Prefer the **web console's create wizard** for a
+guided first install (it also creates the operator account and initializes
+the server on the way).
 
 → Detail: [install](install.md).
 
 ## Phase 2 — Configure (immediately after install)
 
-Do the post-install tasks before going live: store the admin password, switch
-the web UI to authenticated persistent mode, create operators, schedule backups,
-and (for CMS-driven updates) wire the per-instance operation processor.
+Do the post-install tasks before going live: store the admin password, create
+least-privilege operators, configure outbound mail
+(`sh-manager instance mailer <id> --set <dsn>` or the instance's **Email…**
+action in the GUI), schedule backups, and (for CMS-driven updates) wire the
+per-instance operation processor.
 
 → Detail: [post-install checklist](post-install-checklist.md) and
 [security hardening](security-hardening.md).
@@ -109,15 +113,27 @@ install — no URL or token to configure:
 sh-manager instance process-operations website1
 ```
 
+The same drain also finalizes **in-CMS plugin installs/updates/uninstalls**.
+Production instances run the backend in `managed` plugin mode: the CMS admin
+UI verifies the plugin signature and stages the artifacts, then parks the
+operation for the operator — and on a managed server the manager *is* that
+operator. The drain runs the composer step inside the backend container,
+finalizes the operation (migrations, bundle registration, lock file), enables
+new installs, snapshots the resulting composer state to the instance's plugin
+volume, syncs the worker + scheduler containers from that snapshot, and
+restarts the three Symfony services. The snapshot also makes plugins survive
+container recreates and core updates: updates re-require every installed
+plugin against the new core automatically, and address/mailer changes restore
+the snapshot if the recreate dropped it.
+
 ### Scheduling the update-operations loop
 
 A CMS-requested update only leaves `requested` until something drains it. Two
 supported setups:
 
-- **Persistent web UI (simplest)** — while
-  `sh-manager web --mode persistent --persist` runs, a background poller drains
-  all inventory instances every 15 s (`SHM_CMS_POLL_SECONDS` overrides) and
-  journals each run — see
+- **Web console (simplest)** — while `sh-manager web` (wrapper: `./shm.sh up`)
+  runs, a background poller drains all inventory instances every 15 s
+  (`SHM_CMS_POLL_SECONDS` overrides) and journals each run — see
   [GUI instance management](gui-instance-management.md).
 - **Headless** — wire one of the supervised triggers shipped in
   [`deploy/`](../../deploy/README.md): **systemd (recommended)**,

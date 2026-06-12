@@ -112,30 +112,34 @@ export SELFHELP_ROOT="$HOME/sh-root"
 
 ## 4. Install an instance — Option A: the GUI wizard
 
-Build the wizard SPA once, then start the localhost-only web UI:
+Build the SPA once, then start the localhost-only web console:
 
 ```bash
 npm run build
 npm -w @shm/web exec sh-manager-web -- --root "$HOME/sh-root"
-# SelfHelp Manager bootstrap UI listening on http://127.0.0.1:8765
+# SelfHelp Manager console (vX.Y.Z): http://127.0.0.1:8765
 ```
 
-Open <http://127.0.0.1:8765> and walk the wizard:
+Open <http://127.0.0.1:8765>. On the fresh root the console first asks you to
+**create the operator account** (any e-mail + password — this is the manager
+sign-in, not the CMS admin), then opens the **create-instance wizard**
+automatically:
 
-1. **Environment checks** — Docker, outbound HTTPS, host resources. All should
-   be green (the internet check needs any outbound HTTPS, not the registry).
-2. **Registry** — enter `http://127.0.0.1:8787/` as the registry URL. The
-   wizard fetches the index and verifies the release signature against your
-   dev trusted-keys file: expect "Registry reachable and signature verified".
-3. **Instance** — choose mode **local**, id `demo1`, port `8080`, channel
-   `test`, version `0.1.0`, and an admin email.
-4. **Install** — the wizard pulls the images, brings the stack up, provisions
-   (DB → migrations → admin user → caches → health), and shows the generated
-   admin password **once** (masked, click *Reveal*). Save it; it is also in
-   the owner-only file `<instance>/secrets/admin_password` until you delete it.
-
-The wizard self-locks after a successful bootstrap install — that is by
-design (see [post-install-checklist.md](post-install-checklist.md)).
+1. **Welcome → Preflight** — Docker, outbound HTTPS, registry, host
+   resources run automatically. All should be green (the internet check needs
+   any outbound HTTPS, not the registry).
+2. **Basics** — display name, id `demo1`, an admin e-mail (leave the mailer
+   DSN empty to use the bundled Mailpit).
+3. **Address** — mode **Local Docker test**, port `8080`.
+4. **Release** — registry `http://127.0.0.1:8787/`, channel `test`, version
+   `0.1.0`. The wizard fetches the index and verifies the release signature
+   against your dev trusted-keys file.
+5. **Review → Install** — the wizard initializes the server, pulls the
+   images, brings the stack up, provisions (DB → migrations → admin user →
+   plugins → caches → health), and streams the journaled log live. The
+   generated CMS admin password is saved in the owner-only file
+   `<instance>/secrets/admin_password` — read it there and delete the file
+   after the first sign-in.
 
 ## 4b. Install an instance — Option B: the CLI
 

@@ -22,8 +22,9 @@ never controls Docker directly.
   support bundles.
 
 It ships **two interfaces over the same logic**: the `sh-manager` **CLI** (the
-canonical interface) and a localhost **web UI** (`sh-manager-web`) — an install
-wizard, an operations console, and operator login.
+canonical interface) and a localhost **web UI** (`sh-manager-web`) — one
+operations console with operator login and a guided, full-page wizard for
+creating instances (the first run also sets up the server itself).
 
 ## Install the manager
 
@@ -78,20 +79,42 @@ npm install && npm run build
 npm run cli -- --help
 ```
 
-## Update the manager
+## Manager lifecycle (update / remove / reinstall / purge)
+
+The generated wrapper script (`shm.ps1` / `shm.sh`) carries the whole manager
+lifecycle. All state lives in the mounted state folder
+(`/opt/selfhelp`, `D:\selfhelp`, …), so the manager container itself is
+**disposable**: removing and reinstalling it never touches instances, and a
+fresh manager reconnects to every existing instance automatically.
 
 ```bash
-sh-manager self-update           # check + APPLY (wrapper: .\shm.ps1 self-update)
-sh-manager self-update --check   # check only (exit code 2 = update available)
+./shm.sh up           # start the web GUI in the background (http://127.0.0.1:8765)
+./shm.sh down         # stop + remove the GUI container (instances keep running)
+./shm.sh update       # self-update: pull the new image + restart the GUI on it
+./shm.sh reinstall    # down + docker pull + up (fresh container, same state)
+./shm.sh web          # run the GUI in the foreground (Ctrl-C stops it)
 ```
 
-`sh-manager self-update` checks the official GitHub releases and applies the
-update for your runtime: on the Docker image it pulls the new tags and
-**restarts the `sh-manager-web` GUI container** on the new image (same port,
-mounts, and arguments); on a source checkout it runs
-`git pull --ff-only && npm ci && npm run build`. The web UI's operations
-console shows the same "update available" status. Long-running
-`process-operations` loops must be restarted after an update. Release notes:
+(Windows: the same verbs on `.\shm.ps1`.) Equivalent low-level commands:
+
+```bash
+sh-manager self-update           # check + APPLY (wrapper: ./shm.sh update)
+sh-manager self-update --check   # check only (exit code 2 = update available)
+sh-manager server status         # initialized? which instances are managed?
+sh-manager server purge --confirm "purge selfhelp"   # DANGER: delete everything
+```
+
+`self-update` checks the official GitHub releases and applies the update for
+your runtime: on the Docker image it pulls the new tags and **restarts the
+`sh-manager-web` GUI container** on the new image (same port, mounts, and
+arguments); on a source checkout it runs `git pull --ff-only && npm ci &&
+npm run build`. Long-running `process-operations` loops must be restarted
+after an update.
+
+`server purge` is the full tear-down: it removes **every instance**
+(containers, volumes, data, secrets), the shared Traefik proxy, and all server
+state — backups are kept unless `--delete-backups` is passed. It requires the
+literal confirmation `--confirm "purge selfhelp"`. Release notes:
 [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Documentation
@@ -184,9 +207,19 @@ sh-manager instance list
 sh-manager instance health website1
 sh-manager instance update --dry-run website1
 sh-manager instance update website1 --accept-migration-risk
+
+# outbound mail (SMTP) per instance: show / set / back to default
+sh-manager instance mailer website1
+sh-manager instance mailer website1 --set smtp://user:pass@mail.example.org:587
+sh-manager instance mailer website1 --clear
+
+sh-manager server status    # initialized? which instances?
 sh-manager doctor
 sh-manager self-update      # update the manager (--check: report only, exit 2 = update available)
-sh-manager web              # serve the web UI (wizard / operations console)
+sh-manager web              # serve the web UI (operations console + create wizard)
+
+# DANGER: remove everything the manager created (keeps backups unless --delete-backups)
+sh-manager server purge --confirm "purge selfhelp"
 ```
 
 Configuration via env: `SELFHELP_ROOT` (default `/opt/selfhelp`),
@@ -202,23 +235,25 @@ a **Vite React SPA + a small Node BFF** (backend-for-frontend), aligned with
 `sh-selfhelp_frontend`: **React 19**, **Mantine 9**, **Tailwind 4**, and
 **@tanstack/react-query**.
 
-- **Install wizard** (bootstrap mode): preflight checks → mode/domain/instance
-  config → review → install, with a success screen. It binds to `127.0.0.1`,
-  guards against DNS-rebinding, and **self-locks** after a successful install.
-- **Operator login + operations console** (persistent mode): an authenticated
-  session (cookie + CSRF) gates the management API; the console shows live server
-  status and the full instance lifecycle (create, health, logs, backups,
-  restore, update, clone, remove). See
-  [docs/operator/gui-instance-management.md](docs/operator/gui-instance-management.md).
+There is **one UI: the operations console.** An authenticated session
+(cookie + CSRF) gates the management API; the console shows live server
+status and the full instance lifecycle (create, health, logs, backups,
+restore, update, clone, remove, outbound mail). It binds to `127.0.0.1` and
+guards against DNS-rebinding. See
+[docs/operator/gui-instance-management.md](docs/operator/gui-instance-management.md).
 
-**The mode is auto-detected**: on a fresh state folder `sh-manager web` runs
-the install wizard; once the server is initialized (after the first install)
-it starts the **management console** and asks for an operator sign-in. Create
-operator accounts with
-`sh-manager admin create --email you@example.org --roles server_owner`
-(the generated password is printed once; see
-[docs/operator/security-hardening.md](docs/operator/security-hardening.md)).
-Pass `--mode bootstrap|persistent` to override the detection.
+- **First run**: on a fresh state folder the console asks you to create the
+  first operator account in the browser (localhost-only) — no CLI needed.
+  Additional operators:
+  `sh-manager admin create --email you@example.org --roles server_owner`
+  (the generated password is printed once; see
+  [docs/operator/security-hardening.md](docs/operator/security-hardening.md)).
+- **Create-instance wizard**: a guided, full-page flow (Welcome → Preflight →
+  Basics → Address → Release → Review → live install log). It opens
+  automatically when no instances exist yet; the **first** install also
+  bootstraps the server (shared proxy + inventory) and, in production mode,
+  asks for the Let's Encrypt e-mail. Re-run the preflight checks any time from
+  the dashboard.
 
 The **BFF** is the only thing the SPA talks to. It exposes the CLI actions as a
 tiny JSON API under `/api`, binds to localhost by default (a non-loopback bind
@@ -227,7 +262,7 @@ back to an inline shell if unbuilt). Reach it remotely via an SSH tunnel:
 
 ```bash
 # on the server (equivalent: sh-manager-web)
-sh-manager web --root /opt/selfhelp        # wizard on a fresh server, console once initialized
+sh-manager web --root /opt/selfhelp        # operations console (first-run setup on a fresh server)
 
 # from the Docker image (bind 0.0.0.0 inside; published loopback-only)
 docker run --rm -p 127.0.0.1:8765:8765 \

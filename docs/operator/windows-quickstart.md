@@ -12,8 +12,10 @@ runs. Use it to:
 
 - install one or **several** SelfHelp instances side by side on different
   localhost ports (local mode: plain HTTP, no domains, no SSL certificates),
-- open the **GUI** (install wizard / operations console) in your browser,
-- test the CMS, update instances, and update the manager itself.
+- open the **GUI** (operations console with a guided create-instance wizard)
+  in your browser,
+- test the CMS, update instances, and update / remove / reinstall the manager
+  itself.
 
 If you want to hack on the manager/CMS source and publish test releases to a
 local registry instead, use the
@@ -96,27 +98,31 @@ printed password. Repeat on `:8090` for `demo2`.
 ## 4. The GUI
 
 ```powershell
-.\shm.ps1 web
+.\shm.ps1 up     # background (recommended); .\shm.ps1 web runs it in the foreground
 ```
 
 Open the printed URL, <http://localhost:8765> (the wrapper publishes the port
 loopback-only and binds the UI correctly inside the container; the manager
-version is shown in the page header):
+version is shown in the page header). There is **one UI — the operations
+console**:
 
-- On a fresh state folder it runs the **install wizard** (environment checks →
-  registry → instance config → install) and self-locks after success. You can
-  do the whole first install from the GUI instead of step 2/3 above.
-- Once the server is initialized (after the first install), `.\shm.ps1 web`
-  auto-selects **persistent mode** and serves the authenticated
-  **operations console**: live environment checks, manager version + update
-  status, and full **instance management** — list/health/backups, update
-  dry-run + execute, restore, clone, remove, with live operation logs (see
-  [GUI instance management](gui-instance-management.md)). Create an operator
-  first:
+- **First run**: the browser asks you to create the **operator account**
+  (e-mail + password; localhost-only, possible only while no operator
+  exists). Alternatively create it from the CLI:
   `.\shm.ps1 admin create --email you@example.test --roles server_owner`
   (the generated password is printed once; add `--password ...` to choose one).
+- **No instances yet?** The guided **create-instance wizard** opens
+  automatically (Welcome → Preflight → Basics → Address → Release → Review →
+  live install log) — you can do the whole first install from the GUI instead
+  of step 2/3 above, including the server initialization.
+- The console gives you live environment checks, manager version + update
+  status, and full **instance management** — list/health/backups, update
+  dry-run + execute, restore, clone, change address, outbound e-mail, remove,
+  with live operation logs (see
+  [GUI instance management](gui-instance-management.md)).
 
-Stop it with `Ctrl+C`.
+Stop it with `.\shm.ps1 down` (foreground runs: `Ctrl+C`). Instances keep
+running — the GUI container is just the management interface.
 
 In Docker Desktop the GUI container is named `sh-manager-web` (CLI calls run as
 short-lived `sh-manager-cli-<pid>` containers); instance stacks are grouped
@@ -139,37 +145,58 @@ manual token):
 .\shm.ps1 instance process-operations demo1
 ```
 
-Even easier: keep the persistent GUI running (`.\shm.ps1 web --mode persistent
---persist`) — it drains CMS-requested operations for all instances every 15
-seconds and shows each run's log in the operation history (see
+Even easier: keep the GUI running in the background (`.\shm.ps1 up`) — it
+drains CMS-requested operations for all instances every 15 seconds and shows
+each run's log in the operation history (see
 [GUI instance management](gui-instance-management.md)). An instance installed
 by an older manager gets the token backfilled by its next
 `instance update` or `instance repair`.
 
-## 6. Update the manager itself
+## 6. Manager lifecycle: update, remove, reinstall
+
+The manager container is **disposable** — all state lives in your state
+folder, so removing or reinstalling the manager never touches instances, and
+a fresh manager **reconnects to every existing instance automatically**
+(check with `.\shm.ps1 server status`).
 
 ```powershell
-.\shm.ps1 self-update           # checks, pulls the new image, restarts the GUI
+.\shm.ps1 update                # self-update: pull the new image + restart the GUI on it
 .\shm.ps1 self-update --check   # check only (exit 2 = update available)
+
+.\shm.ps1 down                  # remove the manager GUI container (instances keep running)
+.\shm.ps1 up                    # start it again
+
+.\shm.ps1 reinstall             # down + docker pull + up: a fresh manager container
+                                # that shows all existing instances again
 ```
 
-`self-update` pulls the new image tags and — when the `sh-manager-web` GUI
-container is running — recreates it on the new image with the same port,
-mounts, and arguments (a terminal attached to the old GUI container is
-released; the GUI comes back on <http://localhost:8765> after a few seconds).
-Every next `.\shm.ps1 ...` call uses the new image — the wrapper always runs
-`:latest` and `--rm` containers carry no state; everything lives in your state
-folder. The GUI shows the same information on the operations console
-("Manager version" card).
+`update`/`self-update` pulls the new image tags and — when the
+`sh-manager-web` GUI container is running — recreates it on the new image with
+the same port, mounts, and arguments (the GUI comes back on
+<http://localhost:8765> after a few seconds). Every next `.\shm.ps1 ...` call
+uses the new image — the wrapper always runs `:latest` and `--rm` containers
+carry no state; everything lives in your state folder. The GUI shows the same
+information on the operations console ("Manager version" card).
 
 ## 7. Clean up
 
 ```powershell
+# remove one instance (containers + volumes; typed confirmation required)
 .\shm.ps1 instance remove demo2 --mode full_delete --delete-volumes --confirm "delete demo2"
-# after removing all instances:
+
+# OR: full purge — every instance, the shared proxy, all server state
+# (keeps backups unless --delete-backups):
+.\shm.ps1 server purge --confirm "purge selfhelp"
+
+# then stop the GUI and (optionally) delete the state folder:
+.\shm.ps1 down
 cd \
 Remove-Item -Recurse -Force D:\selfhelp
 ```
+
+After a purge the same state folder can be reused immediately: `.\shm.ps1 up`
+starts the console again and the wizard walks you through a fresh first
+install.
 
 ## How this works (and the manual alternative)
 

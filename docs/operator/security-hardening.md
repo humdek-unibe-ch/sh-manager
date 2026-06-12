@@ -25,19 +25,21 @@ root-equivalent. This page is the production checklist plus the model behind it.
 
 - The BFF binds to **`127.0.0.1`** by default. A non-loopback bind is refused
   unless you pass `--allow-non-local` explicitly.
-- The **bootstrap** wizard is unauthenticated but localhost-only, has a
-  **Host-header allowlist** against DNS-rebinding, and **self-locks** after a
-  successful install.
-- **Persistent** (management) mode requires an authenticated operator **session**
-  for every API call, with **CSRF** on state-changing requests
-  (`x-shm-csrf`), and an `HttpOnly; SameSite=Strict` session cookie.
-- The **instance management APIs** (create/update/backup/restore/clone/remove,
-  see [GUI instance management](gui-instance-management.md)) exist **only** in
-  persistent mode. Every action runs through the operation **journal**
-  (`<root>/manager/operations/`, secret-redacted logs), is appended to the
-  **audit log** (`<root>/manager/audit.jsonl`: operator, action, instance,
-  result), and is serialized by a **per-instance lock** — one mutating
-  operation per instance at a time.
+- A **Host-header allowlist** defends against DNS-rebinding on every request.
+- Every API call requires an authenticated operator **session**, with **CSRF**
+  on state-changing requests (`x-shm-csrf`), and an
+  `HttpOnly; SameSite=Strict` session cookie.
+- The single pre-auth exception is the **first-operator setup**
+  (`POST /api/setup/operator`): localhost-only, and rejected with `409` the
+  moment any operator exists — afterwards accounts are created only by a
+  signed-in `server_owner` or the CLI.
+- Every **instance management** action
+  (create/update/backup/restore/clone/mailer/remove, see
+  [GUI instance management](gui-instance-management.md)) runs through the
+  operation **journal** (`<root>/manager/operations/`, secret-redacted logs),
+  is appended to the **audit log** (`<root>/manager/audit.jsonl`: operator,
+  action, instance, result), and is serialized by a **per-instance lock** —
+  one mutating operation per instance at a time.
 
 ### Reaching the UI remotely
 
@@ -49,12 +51,14 @@ ssh -L 8765:127.0.0.1:8765 you@your-server
 ```
 
 Only set `--allow-non-local` if you front the BFF with your own authenticated,
-TLS-terminating proxy, and only in persistent (authenticated) mode.
+TLS-terminating proxy.
 
-## Operators (persistent mode)
+## Operators
 
-Persistent mode authenticates operators against an operator store
-(`<root>/manager/operators.json`). Manage operators with the CLI:
+The console authenticates operators against an operator store
+(`<root>/manager/operators.json`). The **first** operator is created on the
+console's one-time setup screen (localhost-only) or with `admin create`;
+manage all operators with the CLI:
 
 ```bash
 # create a local operator; omitting --password generates a strong one and
@@ -88,8 +92,9 @@ bundles.
 ## Production checklist
 
 - [ ] Docker Engine + Compose v2 installed; the host passes `sh-manager doctor`.
-- [ ] The wizard/BFF is **not** internet-exposed; access is via SSH tunnel.
-- [ ] Management uses **persistent mode** with real operators (least privilege).
+- [ ] The web console/BFF is **not** internet-exposed; access is via SSH tunnel.
+- [ ] Real operator accounts exist with least privilege (the first-run owner
+      plus narrow `instance_operator`/`read_only` accounts).
 - [ ] `SELFHELP_TRUSTED_KEYS` is **unset** (the default is the pinned official
       production key shipped with the manager) or points at the official
       trusted-keys file; no `dev`-keyed releases are accepted.

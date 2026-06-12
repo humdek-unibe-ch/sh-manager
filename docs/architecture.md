@@ -88,32 +88,29 @@ tool needs:
 
 - Binds to **`127.0.0.1`** by default. A non-loopback bind is **refused** unless
   the operator explicitly opts in (`--allow-non-local`).
-- A **Host-header allowlist** defends the unauthenticated localhost bootstrap
-  flow against DNS-rebinding (returns `421` otherwise).
-- **Bootstrap mode** is unauthenticated but localhost-only and **self-locks**
-  after a successful install (state-changing routes return `410`) unless
-  persistent mode is enabled.
-- **Persistent mode** requires an authenticated operator **session** for every
-  API route, with **CSRF** (`x-shm-csrf` header) on state-changing requests. The
-  session cookie is `shm_session` (`HttpOnly; SameSite=Strict`).
+- A **Host-header allowlist** defends against DNS-rebinding (returns `421`
+  otherwise).
+- Every API route requires an authenticated operator **session**, with **CSRF**
+  (`x-shm-csrf` header) on state-changing requests. The session cookie is
+  `shm_session` (`HttpOnly; SameSite=Strict`).
+- One pre-auth exception: `POST /api/setup/operator` creates the **first**
+  operator account. It is localhost-only and rejected with `403` as soon as
+  any operator exists.
 - The static SPA shell + hashed assets are always served (they contain no
   secrets) so the sign-in screen can load before authentication.
 
-JSON API surface (all under `/api`):
-
-| Method + path | Purpose |
-| --- | --- |
-| `GET /api/state` | Current wizard/server snapshot. |
-| `POST /api/config` | Patch the wizard config (bootstrap). |
-| `POST /api/advance` / `POST /api/back` | Move through the wizard. |
-| `POST /api/check/:step` | Run a preflight check (`docker`, `internet`, `registry`, `resources`). |
-| `POST /api/install` | Run the bootstrap install + health check. |
-| `POST /api/login` / `POST /api/logout` | Operator session lifecycle (persistent mode). |
+JSON API surface (all under `/api`): auth (`login`/`logout`/`meta`,
+`setup/operator`), server (`status`, `preflight`), instances (CRUD, health,
+backups, restore, update dry-run/execute, clone, address, mailer, remove),
+operations (history + journaled logs), and registry version listings — see
+[GUI instance management](operator/gui-instance-management.md) for the
+endpoint table.
 
 The SPA talks to this API through one typed client
-(`apps/web/src/ui/lib/api-client.ts`), which captures the CSRF token on login and
-replays it on every later state-changing request, and turns non-2xx responses
-into a typed `ApiError` (status + human message) for friendly UI.
+(`apps/web/src/ui/lib/api-client.ts`), which captures the CSRF token on
+login/first-operator setup and replays it on every later state-changing
+request, and turns non-2xx responses into a typed `ApiError` (status + human
+message) for friendly UI.
 
 ### Dev vs. production wiring
 

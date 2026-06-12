@@ -43,11 +43,11 @@ Task-based runbooks live under [`operator/`](operator/).
 **Task runbooks:**
 
 - [Install](operator/install.md) — bootstrap a server and install the first
-  instance, via the web wizard or the CLI.
+  instance, via the web console's guided wizard or the CLI.
 - [GUI instance management](operator/gui-instance-management.md) — manage the
-  full instance lifecycle from the persistent web UI: health, backups, update
-  dry-run + execute, restore, clone, change address, remove, live operation
-  logs, and the automatic CMS-operations drain loop.
+  full instance lifecycle from the web console: health, backups, update
+  dry-run + execute, restore, clone, change address, outbound mail, remove,
+  live operation logs, and the automatic CMS-operations drain loop.
 - [Domains, DNS and local ports](operator/domains-and-ports.md) — set up DNS
   for a production instance and change an instance's domain or localhost port
   later (GUI dialog or `sh-manager instance set-address`).

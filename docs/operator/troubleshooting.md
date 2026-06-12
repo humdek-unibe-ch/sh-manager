@@ -166,8 +166,9 @@ Components reported `not_configured` are optional and not failures.
 - The BFF binds to **`127.0.0.1:8765`** by default and refuses a non-loopback
   bind without `--allow-non-local`. Reach a remote server over an SSH tunnel:
   `ssh -L 8765:127.0.0.1:8765 you@your-server`.
-- The **bootstrap** wizard **self-locks** after a successful install. To manage
-  the server afterwards, run **persistent mode** and log in as an operator (see
+- Sign-in fails / no account yet? The **first** operator is created on the
+  console's one-time setup screen (only while zero operators exist) or with
+  `sh-manager admin create` (see
   [security hardening](security-hardening.md)).
 - A blocked request may be the Host-header (DNS-rebinding) guard — use the tunnel
   and `http://127.0.0.1:8765`, not a public hostname.
@@ -186,8 +187,8 @@ Nothing is draining the operations queue. The CMS System page shows the
 **manager loop** component ("last seen") — `down` or stale means no drain loop
 has contacted this instance recently. Start one:
 
-- the persistent web UI (`sh-manager web --mode persistent --persist`) drains
-  all instances automatically — see
+- the web console (`sh-manager web`, wrapper: `./shm.sh up`) drains all
+  instances automatically — see
   [GUI instance management](gui-instance-management.md);
 - or run `sh-manager instance process-operations <id>` once / wire the
   systemd-or-cron trigger from [`deploy/`](../../deploy/README.md);

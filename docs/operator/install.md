@@ -55,18 +55,20 @@ at `/opt/selfhelp` on both sides is the documented default; if you mount a
 *different* host folder there, the manager discovers the engine-side path by
 inspecting its own container and translates generated bind mounts
 automatically (override with `SELFHELP_ENGINE_ROOT`, see Configuration).
-Where this page says `sh-manager ...`, run `shm ...`; for the wizard run
-`docker run --rm -p 127.0.0.1:8765:8765 ... web --host 0.0.0.0`
-(see "Option A"). Running from a source checkout (`npm run cli -- ...`) is for
-development.
+Where this page says `sh-manager ...`, run `shm ...`; for the web UI run
+`./shm.sh up` (background) or `./shm.sh web` (foreground). Running from a
+source checkout (`npm run cli -- ...`) is for development.
 
-## Option A — the web wizard (recommended)
+## Option A — the web UI (recommended)
 
-1. Start the wizard on the server (bootstrap mode, localhost only):
+1. Start the web console on the server (localhost only):
 
 ```bash
-# from the Docker image (binds 0.0.0.0 inside the container; the published
-# port stays loopback-only on the server):
+# via the wrapper (recommended; runs in the background):
+./shm.sh up
+
+# or directly from the Docker image (binds 0.0.0.0 inside the container; the
+# published port stays loopback-only on the server):
 docker run --rm -p 127.0.0.1:8765:8765 \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v /opt/selfhelp:/opt/selfhelp \
@@ -74,7 +76,7 @@ docker run --rm -p 127.0.0.1:8765:8765 \
 
 # or from a source checkout:
 sh-manager web --root /opt/selfhelp
-# "SelfHelp Manager bootstrap UI listening on http://127.0.0.1:8765"
+# "SelfHelp Manager console (vX.Y.Z): http://127.0.0.1:8765"
 ```
 
 2. From your machine, open an SSH tunnel and browse to it:
@@ -84,33 +86,40 @@ ssh -L 8765:127.0.0.1:8765 you@your-server
 # then open http://127.0.0.1:8765
 ```
 
-3. Work through the wizard:
-   - **Welcome → Mode**: choose *Production server* or *Local Docker test*, and
-     set a **server id**.
-   - **Preflight**: run the Docker, internet, registry, and resource checks. Each
-     must pass (or warn) before you can continue. Nothing is created yet.
-   - **Domain**: production = public domain (+ Let's Encrypt email); local =
-     localhost port. Production validates DNS before installing.
-   - **Instance**: display name, instance id, release channel, version, registry.
-   - **Review**: confirm, then **Install**. The wizard creates Docker resources
-     and writes files, runs provisioning, and shows a success screen.
+3. **First run only**: the browser asks you to create the **operator
+   account** (e-mail + password, localhost-only, possible only while zero
+   operators exist). You are signed in right away; later starts show the
+   normal sign-in page.
 
-4. On success the wizard shows the public URL, the important paths, and — when
-   you configured an admin email — the **generated admin password**, masked
-   behind a *Reveal* button and shown **once** (it disappears when you leave or
-   reload the page). The same password is also saved on the server in the
-   owner-only file `<instance>/secrets/admin_password`; store it in your
-   password manager and delete the file after your first sign-in.
+4. The console opens the guided **create-instance wizard** automatically
+   when no instances exist yet (later: the **New instance** button). Work
+   through it:
+   - **Welcome**: what the wizard will do.
+   - **Preflight**: Docker, internet, registry, and resource checks run
+     automatically. Each must pass (or warn) before you can continue —
+     nothing is created yet.
+   - **Basics**: display name, instance id, admin e-mail, and (optional) an
+     **outbound-mail SMTP DSN** (defaults to the bundled Mailpit; change it
+     any time later via the instance's **Email…** action).
+   - **Address**: *Production server* = public domain (+ the **Let's Encrypt
+     e-mail** on the very first install, which also bootstraps the shared
+     proxy); *Local Docker test* = localhost port. Production validates DNS
+     before installing.
+   - **Release**: channel + version from the verified registry dropdown.
+   - **Review**: confirm, then **Install**. The wizard initializes the server
+     (first install only), creates Docker resources, writes files, runs
+     provisioning, and streams the journaled install log live.
 
-The wizard **self-locks** after a successful install: the installer can no longer
-change anything. From then on, starting the web UI again (`sh-manager web`, no
-flags) **auto-selects persistent mode** — the authenticated operations console
-with full instance lifecycle management. Create an operator account first
-(`sh-manager admin create --email you@example.org --roles server_owner`; the
-generated password is printed once), then sign in (see
-[GUI instance management](gui-instance-management.md) and
-[security hardening](security-hardening.md)). Persistent mode is reached the
-same way as the wizard: localhost bind + SSH tunnel, never internet-exposed.
+5. On success the result shows the public URL and the important paths. The
+   **generated admin password is never shown in the browser**: it is saved on
+   the server in the owner-only file `<instance>/secrets/admin_password`.
+   Read it over SSH, store it in your password manager, and delete the file
+   after your first sign-in.
+
+See [GUI instance management](gui-instance-management.md) and
+[security hardening](security-hardening.md) for the console and operator
+model. The console is always reached the same way: localhost bind + SSH
+tunnel, never internet-exposed.
 
 ## Option B — the CLI
 

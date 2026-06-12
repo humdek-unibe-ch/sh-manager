@@ -50,18 +50,18 @@ curl -fsS https://website1.example.ch/health   # public readiness probe via the 
 
 ## 3. Lock down management access
 
-The bootstrap wizard self-locks after install. From now on `sh-manager web`
-auto-selects authenticated **persistent mode** (the management console);
-create least-privilege operators for it.
+The web console is authenticated: the first run created the owner operator
+account (in the browser or via `admin create`). Add least-privilege operators
+for everyone else.
 
 ```bash
-# create the owner (password generated + shown once when --password is omitted),
-# then add operators with the narrowest role they need
-sh-manager admin create --email ops@example.ch --roles server_owner --name "Ops"
+# add operators with the narrowest role they need
+# (password generated + shown once when --password is omitted)
+sh-manager admin create --email teammate@example.ch --roles instance_operator
 sh-manager admin role grant teammate@example.ch instance_operator
 ```
 
-- [ ] Persistent-mode BFF is **not** internet-exposed (reach it via SSH tunnel).
+- [ ] The management BFF is **not** internet-exposed (reach it via SSH tunnel).
 - [ ] Operators created with least privilege (`server_owner` /
       `instance_operator` / `read_only`).
 - [ ] Work through the full [security hardening](security-hardening.md) checklist.

@@ -50,8 +50,19 @@ Services: `frontend`, `backend`, `worker`, `scheduler`, `mysql`, `redis`,
 | Install + provision | `sh-manager instance install --id website1 --domain website1.example.ch --version latest --provision --admin-email ops@example.ch` |
 | Install local (port, no SSL) | `sh-manager instance install --id demo1 --mode local --port 8080 --version latest --provision --admin-email you@example.test` |
 | Use a dev/test registry | add `--registry <url>` (default: the official registry) |
-| Web wizard (localhost BFF) | `sh-manager web` (alias: `sh-manager-web --root /opt/selfhelp`) |
+| Install with a real SMTP relay | add `--mailer-dsn smtp://user:pass@mail.example.org:587` |
+| Web UI (localhost BFF) | `sh-manager web` (alias: `sh-manager-web --root /opt/selfhelp`; wrapper: `./shm.sh up`) |
 | Generate the `shm` wrapper script | `sh-manager wrapper --shell powershell\|bash > shm.ps1` (save into the state folder) |
+| Server initialized? | `sh-manager server status` |
+
+## Outbound mail (SMTP)
+
+| Task | Command |
+| --- | --- |
+| Show the instance mailer config | `sh-manager instance mailer website1` (credentials redacted) |
+| Set an SMTP relay | `sh-manager instance mailer website1 --set smtp://user:pass@mail.example.org:587` |
+| Back to the default (bundled Mailpit) | `sh-manager instance mailer website1 --clear` |
+| Write only, apply later | add `--no-restart` |
 
 ## Update
 
@@ -62,8 +73,9 @@ Services: `frontend`, `backend`, `worker`, `scheduler`, `mysql`, `redis`,
 | Target a version | `sh-manager instance update website1 --version 0.1.1` |
 | Accept destructive migration | `sh-manager instance update website1 --accept-migration-risk` |
 | Process a CMS-requested update | `sh-manager instance process-operations website1` (execs into the backend container; `--backend-url`/`--token` only for remote setups) |
-| Update the manager itself | `sh-manager self-update` (pulls the new image + restarts the web GUI container; source: git pull + build) |
+| Update the manager itself | `sh-manager self-update` (pulls the new image + restarts the web GUI container; source: git pull + build) — wrapper: `./shm.sh update` |
 | Only check for a manager update | `sh-manager self-update --check` (exit `2` = update available) |
+| Stop / start / reinstall the manager GUI | `./shm.sh down` · `./shm.sh up` · `./shm.sh reinstall` (instances keep running; state survives) |
 
 ## Back up / restore / clone
 
@@ -103,17 +115,19 @@ Services: `frontend`, `backend`, `worker`, `scheduler`, `mysql`, `redis`,
 | Remove containers, keep data | `sh-manager instance remove website1 --mode remove_containers_keep_data` |
 | Full delete (keeps volumes/backups) | `sh-manager instance remove website1 --mode full_delete --confirm "delete website1"` |
 | Full delete + wipe data | `sh-manager instance remove website1 --mode full_delete --delete-volumes --delete-backups --confirm "delete website1"` |
+| **Full server purge** (every instance + proxy + state; keeps backups) | `sh-manager server purge --confirm "purge selfhelp"` |
+| Full server purge incl. backups | `sh-manager server purge --confirm "purge selfhelp" --delete-backups` |
 
-## Operators (persistent web UI)
+## Operators (web UI)
 
-The persistent UI also manages the full instance lifecycle from the browser
+The web console manages the full instance lifecycle from the browser
 (list, health, backups, update dry-run + execute, restore, clone, change
-address, remove, live operation logs) — see
+address, outbound mail, remove, live operation logs) — see
 [GUI instance management](gui-instance-management.md).
 
 | Task | Command |
 | --- | --- |
-| Start the management UI | `sh-manager web` (auto-persistent once the server is initialized; reach it via SSH tunnel) |
+| Start the management UI | `sh-manager web` (reach it via SSH tunnel; first run offers in-browser operator creation) |
 | Create operator | `sh-manager admin create --email ops@example.ch --roles server_owner --name "Ops"` (no `--password` = generated + shown once) |
 | Grant a role | `sh-manager admin role grant ops@example.ch instance_operator` |
 | Allow OIDC email | `sh-manager admin allow-email ops@example.ch` |
@@ -129,7 +143,7 @@ address, remove, live operation logs) — see
 | `<root>/instances/<id>/manifest.json` · `lock.json` | What's installed · pinned digests. |
 | `<root>/instances/<id>/README.md` | Per-instance operator commands. |
 | `<root>/instances/<id>/backups/` | Checksummed backups. |
-| `<root>/manager/operators.json` | Operator store (persistent mode). |
+| `<root>/manager/operators.json` | Operator store (web UI sign-in). |
 
 | Env var | Purpose |
 | --- | --- |

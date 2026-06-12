@@ -46,7 +46,7 @@ The SPA and the BFF run as two processes (the BFF owns `/api`, Vite serves the
 SPA and proxies `/api` to it):
 
 ```bash
-# Terminal 1 — the BFF (localhost bootstrap mode by default, port 8765)
+# Terminal 1 — the BFF (localhost only, port 8765)
 npm -w @shm/web exec sh-manager-web -- --root ./.dev-root
 # or: npx tsx apps/web/src/bin.ts --root ./.dev-root
 
@@ -54,9 +54,10 @@ npm -w @shm/web exec sh-manager-web -- --root ./.dev-root
 npm -w @shm/web run dev
 ```
 
-Override the proxy target with `SHM_WEB_API`. For persistent (authenticated)
-mode, start the BFF with `--mode persistent` (it then needs an operator store —
-see [security hardening](operator/security-hardening.md)).
+Override the proxy target with `SHM_WEB_API`. The console is authenticated:
+on a fresh `--root` the UI offers the one-time first-operator setup screen;
+afterwards sign in with that account (see
+[security hardening](operator/security-hardening.md)).
 
 ## Testing strategy
 
@@ -70,9 +71,9 @@ The suite follows the canonical SelfHelp testing rules (see `AGENTS.md`):
 - **Web UI** tests (`apps/web/src/ui/**/*.test.tsx`) run under jsdom. They render
   components through the shared wrapper in `apps/web/src/ui/test/render.tsx`
   (which provides `MantineProvider`, `QueryClientProvider`, and `Notifications`)
-  and drive the wizard through the **real** server-side wizard state machine via
-  `apps/web/src/ui/test/fake-client.ts` — so flow tests exercise the same gating
-  and validation production uses.
+  against the in-memory `ApiClient` fake in `apps/web/src/ui/test/fake-client.ts`
+  — which reuses the **real** request validation (`instance-validation.ts`), so
+  flow tests exercise the same gating and validation production uses.
 
 Run everything with `npm test`; scope while iterating with
 `npx vitest run <path>` or `npx vitest run apps/web/src/ui`.
@@ -116,13 +117,17 @@ Run everything with `npm test`; scope while iterating with
 2. Add the source alias to `vitest.config.ts` and `apps/web/vite.config.ts`.
 3. Keep the logic pure; expose any side effect as an injected interface.
 
-### A new wizard step (web UI)
+### A new create-wizard step or field (web UI)
 
-1. Extend the wizard state machine in `apps/web/src/wizard.ts` (step order,
-   validation, gating). This is the single source of truth used by the BFF and
-   the UI test fake.
-2. Add the step component under `apps/web/src/ui/features/bootstrap/steps/`.
-3. Add a flow test to `apps/web/src/ui/features/bootstrap/BootstrapWizard.test.tsx`.
+1. Server first: extend the request validation in
+   `apps/web/src/instance-validation.ts` (shared by the BFF and the UI) and,
+   if the BFF action surface changes, `apps/web/src/instances.ts` +
+   `apps/web/src/server.ts`.
+2. Add the step/field to
+   `apps/web/src/ui/features/manager/CreateInstanceWizard.tsx`.
+3. Add a flow test to
+   `apps/web/src/ui/features/manager/InstanceManagement.test.tsx` (and a BFF
+   test in `apps/web/src/server.test.ts` for new endpoints).
 
 ## Boundaries you must not cross
 
