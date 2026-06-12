@@ -8,6 +8,7 @@
  * controls Docker directly; it records instance-scoped update requests that
  * this tool executes.
  */
+import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
@@ -185,21 +186,31 @@ program
 
 program
   .command('web')
-  .description('Start the manager web UI (install wizard / operations console)')
+  .description('Start the manager web UI (management console; install wizard on a fresh server)')
   .option('--host <host>', 'bind host (use 0.0.0.0 when running inside Docker with -p)', '127.0.0.1')
   .option('--port <port>', 'bind port', (v) => parseInt(v, 10), 8765)
-  .option('--mode <mode>', 'bootstrap|persistent', 'bootstrap')
+  .option(
+    '--mode <mode>',
+    'bootstrap|persistent (default: auto — persistent once the server is initialized, bootstrap on a fresh state folder)',
+  )
   .option('--persist', 'keep the UI running after a successful bootstrap', false)
   .option('--allow-non-local', 'allow binding to a non-loopback host (auth required; prefer an SSH tunnel)', false)
   .action(async (opts) => {
     try {
+      const rawMode = opts.mode as string | undefined;
+      if (rawMode !== undefined && rawMode !== 'bootstrap' && rawMode !== 'persistent') {
+        throw new Error(`Unknown --mode "${rawMode}" (use bootstrap or persistent, or omit it for auto-detection).`);
+      }
+      const mode = rawMode as 'bootstrap' | 'persistent' | undefined;
       // Lazy import: keeps every other CLI command free of the web app's deps.
       const { startWebUi } = await import('../../web/src/main.js');
       await startWebUi({
         root: program.opts().root as string,
         host: opts.host as string,
         port: opts.port as number,
-        mode: opts.mode as 'bootstrap' | 'persistent',
+        // Omitted --mode = auto: persistent when <root>/selfhelp.server.json
+        // exists, bootstrap otherwise (decided in startWebUi).
+        ...(mode !== undefined ? { mode } : {}),
         persistAfterBootstrap: opts.persist as boolean,
         allowNonLocal: opts.allowNonLocal as boolean,
         trustedKeysPath: DEFAULT_TRUSTED_KEYS,
@@ -576,15 +587,18 @@ const admin = program.command('admin').description('Manage manager operators (lo
 
 admin
   .command('create')
-  .description('Create a local operator')
+  .description('Create a local operator (web UI sign-in account)')
   .requiredOption('--email <email>', 'operator email')
   .requiredOption('--roles <roles>', 'comma-separated roles: server_owner,instance_operator,read_only')
   .option('--name <name>', 'display name')
-  .option('--password <password>', 'operator password (or env SELFHELP_MANAGER_ADMIN_PASSWORD)')
+  .option('--password <password>', 'operator password (or env SELFHELP_MANAGER_ADMIN_PASSWORD; a strong one is generated + shown once if omitted)')
   .action(async (opts) => {
     try {
-      const password = (opts.password as string | undefined) ?? process.env.SELFHELP_MANAGER_ADMIN_PASSWORD;
-      if (!password) throw new Error('A password is required (--password or SELFHELP_MANAGER_ADMIN_PASSWORD).');
+      const provided = (opts.password as string | undefined) ?? process.env.SELFHELP_MANAGER_ADMIN_PASSWORD;
+      // Same convention as `instance install --admin-password`: omitted =
+      // generate a strong one and print it exactly once (never stored in clear).
+      const generated = provided === undefined || provided === '' ? randomBytes(18).toString('base64url') : undefined;
+      const password = generated ?? (provided as string);
       const store = fileOperatorStore(program.opts().root as string);
       const op = await adminCreate(store, {
         email: opts.email,
@@ -593,6 +607,10 @@ admin
         roles: parseRoles(opts.roles as string),
       });
       console.log(`Created operator ${op.email} [${op.roles.join(', ')}].`);
+      if (generated) {
+        console.log(`Generated password (shown once, store it now): ${generated}`);
+      }
+      console.log('Sign in at the manager web UI (sh-manager web) with this email + password.');
     } catch (err) {
       fail(err);
     }
