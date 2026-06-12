@@ -369,6 +369,37 @@ describe('persistent mode authentication', () => {
     });
     expect(res.status).toBe(401);
   });
+
+  it('recovers the CSRF token from /api/state so reloads keep mutations working', async () => {
+    // Regression: the SPA held the CSRF token only in memory, so after a page
+    // reload every POST — including sign out and "run all checks" — failed
+    // with 403 even though the session cookie was still valid.
+    const { base } = await persistentBase();
+    const login = await fetch(base + '/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'owner@example.com', password: 'correct horse battery staple' }),
+    });
+    const cookie = (login.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
+
+    // Simulated reload: a fresh client knows only the cookie, not the token.
+    const state = (await (await fetch(base + '/api/state', { headers: { cookie } })).json()) as {
+      session?: { email: string; csrfToken: string };
+    };
+    expect(state.session?.email).toBe('owner@example.com');
+    expect(state.session?.csrfToken).toBeTruthy();
+
+    // The recovered token authorises mutations again — sign out works.
+    const logout = await fetch(base + '/api/logout', {
+      method: 'POST',
+      headers: { cookie, 'x-shm-csrf': state.session!.csrfToken },
+    });
+    expect(logout.status).toBe(200);
+
+    // The destroyed session no longer authenticates.
+    const after = await fetch(base + '/api/state', { headers: { cookie } });
+    expect(after.status).toBe(401);
+  });
 });
 
 describe('instance management APIs', () => {

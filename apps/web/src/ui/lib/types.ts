@@ -61,6 +61,12 @@ export interface Snapshot {
   canAdvance: AdvanceDecision;
   /** Manager version, shown in the UI header/footer. */
   managerVersion?: string;
+  /**
+   * Present when the caller is authenticated (persistent mode). Lets the SPA
+   * recover its CSRF token after a page reload — the session cookie survives
+   * the reload, the in-memory token does not.
+   */
+  session?: { email: string; roles: string[]; csrfToken: string };
   /** Present only on the `/api/install` response. */
   outcome?: InstallOutcome;
   health?: HealthOutcome;

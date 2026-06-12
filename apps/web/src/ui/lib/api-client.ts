@@ -4,8 +4,9 @@
  * Typed client for the manager BFF JSON API (see `apps/web/src/server.ts`).
  *
  * - One method per endpoint, all returning typed results.
- * - CSRF tokens (persistent mode) are captured on login and replayed on every
- *   state-changing request automatically.
+ * - CSRF tokens (persistent mode) are captured on login, recovered from
+ *   `/api/state` after a page reload, and replayed on every state-changing
+ *   request automatically.
  * - Failures throw {@link ApiError} carrying the HTTP status and the server's
  *   human message — never a stack trace. Callers turn these into friendly UI.
  * - `fetch` is injectable so the client is unit-testable without a network.
@@ -137,7 +138,14 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
   }
 
   return {
-    getState: () => request<Snapshot>('/api/state', 'GET'),
+    async getState() {
+      const snapshot = await request<Snapshot>('/api/state', 'GET');
+      // Recover the CSRF token after a page reload: the session cookie
+      // survives, the in-memory token does not. Without this every later
+      // POST (sign out, checks, installs) failed with 403.
+      if (snapshot.session?.csrfToken) csrfToken = snapshot.session.csrfToken;
+      return snapshot;
+    },
     setConfig: (patch) => request<Snapshot>('/api/config', 'POST', patch),
     advance: () => request<Snapshot>('/api/advance', 'POST'),
     back: () => request<Snapshot>('/api/back', 'POST'),

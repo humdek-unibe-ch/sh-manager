@@ -506,7 +506,18 @@ export function createBootstrapServer(options: BootstrapServerOptions): Bootstra
 
     if (await routeInstanceManagement(ctx, res)) return;
 
-    if (path === '/api/state' && ctx.method === 'GET') return sendJson(res, 200, snapshot());
+    if (path === '/api/state' && ctx.method === 'GET') {
+      // Authenticated sessions get their identity + CSRF token back so a page
+      // RELOAD can keep working: the session cookie survives the reload but
+      // the in-memory client token does not, and without re-reading it here
+      // every later POST (sign out, checks, installs) died with 403. Safe to
+      // return on a GET: the response is same-origin JSON behind the
+      // SameSite=Strict session cookie, so a cross-site page can never read it.
+      const session = ctx.session
+        ? { email: ctx.session.email, roles: ctx.session.roles, csrfToken: ctx.session.csrfToken }
+        : undefined;
+      return sendJson(res, 200, snapshot(session ? { session } : {}));
+    }
     if (path === '/api/manager/update-check' && ctx.method === 'GET') {
       if (!options.actions.checkManagerUpdate) throw new HttpError(404, 'Not found.');
       return sendJson(res, 200, await options.actions.checkManagerUpdate());
