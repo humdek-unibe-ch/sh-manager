@@ -72,6 +72,16 @@ A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instanc
 - **Environment checks stuck on "Pending"** — the dashboard runs all four
   checks (Docker, internet, registry, resources) automatically on load;
   every check remains re-runnable on demand.
+- **Manager crash while piping the database dump into a clone/restore** —
+  MySQL's first-boot temp-init server could answer the readiness probe and
+  then restart, breaking the import's stdin pipe with an unhandled
+  `write EOF` that killed the whole manager process. The pipe error is now
+  handled and the idempotent import retries (up to 3 attempts) after
+  re-confirming readiness.
+- **Stuck state after a manager crash** — operations orphaned in the
+  `running` state are marked failed at boot (no more endless spinner), and
+  a per-instance lock whose owning process is gone no longer keeps every
+  action button disabled.
 
 ## [1.1.2] - 2026-06-12
 
