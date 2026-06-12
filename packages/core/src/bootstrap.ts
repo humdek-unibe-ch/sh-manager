@@ -39,6 +39,7 @@ import {
   InventoryStore,
   LockStore,
   ManifestStore,
+  ensureManagerToken,
   generateInstanceReadme,
   generateInstanceSecrets,
   instanceDirectories,
@@ -284,7 +285,10 @@ export async function installInstance(
   // set instead: the MySQL/Redis volumes were already initialised with those
   // credentials, and a fresh set would lock the stack out of its own database.
   // Secrets never enter the manifest, lock, inventory, or README.
-  const secrets = deps.secrets ?? (await readInstanceSecrets(paths.secretsDir)) ?? generateInstanceSecrets();
+  // A reused pre-token set gets a manager token minted (safe: it protects no
+  // persisted data) so the CMS<->Manager update loop works after the install.
+  const existing = deps.secrets ?? (await readInstanceSecrets(paths.secretsDir));
+  const secrets = ensureManagerToken(existing ?? generateInstanceSecrets()).secrets;
   const writtenSecrets = await writeInstanceSecrets(paths.secretsDir, secrets, deps.secretIO);
 
   await writeFileAtomic(paths.composePath, artifacts.composeYaml);

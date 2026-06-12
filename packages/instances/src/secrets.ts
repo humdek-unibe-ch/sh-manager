@@ -59,6 +59,13 @@ export interface InstanceSecrets {
   jwtPassphrase: string;
   jwtPrivateKeyPem: string;
   jwtPublicKeyPem: string;
+  /**
+   * Per-instance bearer token for the CMS<->Manager update loop
+   * (`SELFHELP_MANAGER_TOKEN` in the backend container). Empty string on
+   * secret sets read back from a pre-token install — backfill with
+   * {@link ensureManagerToken} before writing.
+   */
+  managerToken: string;
 }
 
 export interface GenerateSecretsOptions {
@@ -95,7 +102,19 @@ export function generateInstanceSecrets(options: GenerateSecretsOptions = {}): I
     jwtPassphrase,
     jwtPrivateKeyPem: String(privateKey),
     jwtPublicKeyPem: String(publicKey),
+    managerToken: urlSafeToken(32),
   };
+}
+
+/**
+ * Fills an empty `managerToken` (secret set read back from a pre-token
+ * install). Minting a fresh token is always safe: unlike DB credentials it
+ * protects no persisted data — the backend simply starts accepting the
+ * manager loop once its container is recreated with the new env.
+ */
+export function ensureManagerToken(secrets: InstanceSecrets): { secrets: InstanceSecrets; minted: boolean } {
+  if (secrets.managerToken !== '') return { secrets, minted: false };
+  return { secrets: { ...secrets, managerToken: urlSafeToken(32) }, minted: true };
 }
 
 /** A clone always receives freshly generated secrets; the source's are never reused. */
@@ -142,6 +161,9 @@ export function secretEnvMap(secrets: InstanceSecrets): Record<string, string> {
     MERCURE_PUBLISHER_JWT_KEY: secrets.mercureJwtSecret,
     MERCURE_SUBSCRIBER_JWT_KEY: secrets.mercureJwtSecret,
     JWT_PASSPHRASE: secrets.jwtPassphrase,
+    // Enables the backend's token-gated CMS<->Manager update loop
+    // (SystemManagerController). Empty = loop disabled (backend default).
+    SELFHELP_MANAGER_TOKEN: secrets.managerToken,
   };
 }
 
@@ -235,6 +257,10 @@ export async function readInstanceSecrets(secretsDir: string): Promise<InstanceS
     jwtPassphrase,
     jwtPrivateKeyPem: privatePem,
     jwtPublicKeyPem: publicPem,
+    // Pre-token installs have no SELFHELP_MANAGER_TOKEN line; tolerate it
+    // (empty = loop disabled) so retries/updates can backfill instead of
+    // treating the whole set as incomplete.
+    managerToken: get('SELFHELP_MANAGER_TOKEN') ?? '',
   };
 }
 

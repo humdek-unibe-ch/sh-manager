@@ -9,6 +9,7 @@ import {
   JWT_KEY_FILE_MODE,
   SECRET_DIR_MODE,
   SECRET_FILE_MODE,
+  ensureManagerToken,
   generateCloneSecrets,
   generateInstanceSecrets,
   instanceSecretFiles,
@@ -32,6 +33,7 @@ const SECRET_FIELDS: (keyof InstanceSecrets)[] = [
   'mercureJwtSecret',
   'jwtPassphrase',
   'jwtPrivateKeyPem',
+  'managerToken',
 ];
 
 class RecordingSecretIO implements SecretIO {
@@ -145,6 +147,37 @@ describe('readInstanceSecrets', () => {
 
     expect(await readInstanceSecrets(secretsDir)).toBeNull();
   });
+
+  it('tolerates a pre-token secrets.env (manager token empty, set still readable)', async () => {
+    const secretsDir = await makeSecretsDir();
+    const written = generateInstanceSecrets(opts);
+    // Simulate an install from before the manager token existed.
+    const legacy = { ...written, managerToken: '' };
+    await writeInstanceSecrets(secretsDir, legacy);
+
+    const read = await readInstanceSecrets(secretsDir);
+    expect(read).not.toBeNull();
+    expect(read?.managerToken).toBe('');
+    expect(read?.appSecret).toBe(written.appSecret);
+  });
+});
+
+describe('ensureManagerToken', () => {
+  it('keeps an existing token unchanged', () => {
+    const secrets = generateInstanceSecrets(opts);
+    const result = ensureManagerToken(secrets);
+    expect(result.minted).toBe(false);
+    expect(result.secrets).toBe(secrets);
+  });
+
+  it('mints a token for a pre-token set without touching other secrets', () => {
+    const secrets = { ...generateInstanceSecrets(opts), managerToken: '' };
+    const result = ensureManagerToken(secrets);
+    expect(result.minted).toBe(true);
+    expect(result.secrets.managerToken.length).toBeGreaterThan(0);
+    expect(result.secrets.appSecret).toBe(secrets.appSecret);
+    expect(result.secrets.databasePassword).toBe(secrets.databasePassword);
+  });
 });
 
 describe('clone secret isolation', () => {
@@ -191,5 +224,12 @@ describe('secretEnvMap', () => {
     const text = renderSecretsEnv(generateInstanceSecrets(opts));
     expect(text).toContain('APP_SECRET=');
     expect(text).toContain('JWT_PASSPHRASE=');
+  });
+
+  it('injects the per-instance manager token so the backend update loop is enabled', () => {
+    const secrets = generateInstanceSecrets(opts);
+    const env = secretEnvMap(secrets);
+    expect(env.SELFHELP_MANAGER_TOKEN).toBe(secrets.managerToken);
+    expect(secrets.managerToken.length).toBeGreaterThan(0);
   });
 });

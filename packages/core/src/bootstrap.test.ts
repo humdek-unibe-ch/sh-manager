@@ -22,6 +22,7 @@ const fakeSecrets: InstanceSecrets = {
   jwtPassphrase: 'jwt-passphrase-value',
   jwtPrivateKeyPem: '-----BEGIN ENCRYPTED PRIVATE KEY-----\nMOCK\n-----END ENCRYPTED PRIVATE KEY-----\n',
   jwtPublicKeyPem: '-----BEGIN PUBLIC KEY-----\nMOCK\n-----END PUBLIC KEY-----\n',
+  managerToken: 'manager-token-value',
 };
 
 let root: string;
