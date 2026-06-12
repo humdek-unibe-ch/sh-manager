@@ -22,6 +22,7 @@ function persistentClient(): ApiClient {
   };
   const same = async (): Promise<Snapshot> => snap;
   return {
+    ...makeFakeClient(),
     getState: same,
     setConfig: same,
     advance: same,
@@ -43,18 +44,9 @@ function persistentClient(): ApiClient {
 
 function throwingClient(err: unknown): ApiClient {
   const fail = (): Promise<never> => Promise.reject(err);
-  return {
-    getState: fail,
-    setConfig: fail,
-    advance: fail,
-    back: fail,
-    runCheck: fail,
-    install: fail,
-    managerUpdateCheck: fail,
-    listVersions: fail,
-    login: fail,
-    logout: async () => {},
-  };
+  // Every ApiClient method rejects (kept exhaustive via the fake's key set).
+  const failing = Object.fromEntries(Object.keys(makeFakeClient()).map((key) => [key, fail]));
+  return { ...failing, logout: async () => {} } as unknown as ApiClient;
 }
 
 describe('App routing', () => {

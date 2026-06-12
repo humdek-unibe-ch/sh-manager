@@ -8,11 +8,30 @@
  */
 import type { InstanceMode, ReleaseChannel } from '@shm/schemas';
 import type { HealthOutcome, InstallOutcome, ManagerUpdateCheck, RegistryVersions } from '../../actions';
+import type {
+  BackupSummary,
+  CloneInstanceRequest,
+  CreateInstanceRequest,
+  InstanceDetail,
+  InstanceSummary,
+  RemoveInstanceRequest,
+  UpdateInstanceRequest,
+} from '../../instances';
+import type { OperationRecord, OperationStatus } from '../../jobs';
 import type { CheckResult, CheckSeverity, WizardConfig, WizardStepId } from '../../wizard';
 
 export type {
+  BackupSummary,
   CheckResult,
   CheckSeverity,
+  CloneInstanceRequest,
+  CreateInstanceRequest,
+  InstanceDetail,
+  InstanceSummary,
+  RemoveInstanceRequest,
+  UpdateInstanceRequest,
+  OperationRecord,
+  OperationStatus,
   WizardConfig,
   WizardStepId,
   HealthOutcome,

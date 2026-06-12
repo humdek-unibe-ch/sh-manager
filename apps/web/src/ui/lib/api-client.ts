@@ -10,7 +10,35 @@
  *   human message — never a stack trace. Callers turn these into friendly UI.
  * - `fetch` is injectable so the client is unit-testable without a network.
  */
-import type { LoginResult, ManagerUpdateCheck, RegistryVersions, Snapshot, WizardConfig, WizardStepId } from './types';
+import type {
+  BackupSummary,
+  CloneInstanceRequest,
+  CreateInstanceRequest,
+  InstanceDetail,
+  InstanceSummary,
+  LoginResult,
+  ManagerUpdateCheck,
+  OperationRecord,
+  RegistryVersions,
+  RemoveInstanceRequest,
+  Snapshot,
+  UpdateInstanceRequest,
+  WizardConfig,
+  WizardStepId,
+} from './types';
+
+/** Health report returned by POST /api/instances/:id/health (mirrors @shm/core). */
+export interface InstanceHealthReport {
+  instanceId: string;
+  overall: 'healthy' | 'degraded' | 'unhealthy' | 'unknown';
+  services: { service: string; state: string; required: boolean; detail?: string }[];
+  checkedAt: string;
+}
+
+/** 202 envelope returned by every mutating instance endpoint. */
+export interface StartedOperation {
+  operationId: string;
+}
 
 export class ApiError extends Error {
   constructor(
@@ -41,6 +69,21 @@ export interface ApiClient {
   listVersions(channel?: string): Promise<RegistryVersions>;
   login(email: string, password: string): Promise<LoginResult>;
   logout(): Promise<void>;
+
+  // Instance management (persistent mode only; 404 in bootstrap mode).
+  listInstances(): Promise<InstanceSummary[]>;
+  getInstance(instanceId: string): Promise<InstanceDetail>;
+  listBackups(instanceId: string): Promise<BackupSummary[]>;
+  runInstanceHealth(instanceId: string): Promise<InstanceHealthReport>;
+  updateDryRun(instanceId: string, req: UpdateInstanceRequest): Promise<{ plan: unknown }>;
+  listOperations(instanceId?: string): Promise<OperationRecord[]>;
+  getOperation(operationId: string): Promise<OperationRecord>;
+  createInstance(req: CreateInstanceRequest): Promise<StartedOperation>;
+  executeUpdate(instanceId: string, req: UpdateInstanceRequest): Promise<StartedOperation>;
+  createBackup(instanceId: string): Promise<StartedOperation>;
+  restoreBackup(instanceId: string, backupId: string): Promise<StartedOperation>;
+  cloneInstance(instanceId: string, req: CloneInstanceRequest): Promise<StartedOperation>;
+  removeInstance(instanceId: string, req: RemoveInstanceRequest): Promise<StartedOperation>;
 }
 
 function parseJson(text: string): unknown {
@@ -106,5 +149,38 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       await request<{ ok: boolean }>('/api/logout', 'POST');
       csrfToken = null;
     },
+
+    listInstances: async () =>
+      (await request<{ instances: InstanceSummary[] }>('/api/instances', 'GET')).instances,
+    getInstance: (instanceId) => request<InstanceDetail>(`/api/instances/${encodeURIComponent(instanceId)}`, 'GET'),
+    listBackups: async (instanceId) =>
+      (await request<{ backups: BackupSummary[] }>(`/api/instances/${encodeURIComponent(instanceId)}/backups`, 'GET'))
+        .backups,
+    runInstanceHealth: (instanceId) =>
+      request<InstanceHealthReport>(`/api/instances/${encodeURIComponent(instanceId)}/health`, 'POST'),
+    updateDryRun: (instanceId, req) =>
+      request<{ plan: unknown }>(`/api/instances/${encodeURIComponent(instanceId)}/update/dry-run`, 'POST', req),
+    listOperations: async (instanceId) =>
+      (
+        await request<{ operations: OperationRecord[] }>(
+          `/api/operations${instanceId ? `?instanceId=${encodeURIComponent(instanceId)}` : ''}`,
+          'GET',
+        )
+      ).operations,
+    getOperation: (operationId) => request<OperationRecord>(`/api/operations/${encodeURIComponent(operationId)}`, 'GET'),
+    createInstance: (req) => request<StartedOperation>('/api/instances', 'POST', req),
+    executeUpdate: (instanceId, req) =>
+      request<StartedOperation>(`/api/instances/${encodeURIComponent(instanceId)}/update`, 'POST', req),
+    createBackup: (instanceId) =>
+      request<StartedOperation>(`/api/instances/${encodeURIComponent(instanceId)}/backups`, 'POST'),
+    restoreBackup: (instanceId, backupId) =>
+      request<StartedOperation>(
+        `/api/instances/${encodeURIComponent(instanceId)}/backups/${encodeURIComponent(backupId)}/restore`,
+        'POST',
+      ),
+    cloneInstance: (instanceId, req) =>
+      request<StartedOperation>(`/api/instances/${encodeURIComponent(instanceId)}/clone`, 'POST', req),
+    removeInstance: (instanceId, req) =>
+      request<StartedOperation>(`/api/instances/${encodeURIComponent(instanceId)}/remove`, 'POST', req),
   };
 }

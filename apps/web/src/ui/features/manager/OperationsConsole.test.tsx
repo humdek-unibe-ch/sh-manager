@@ -7,13 +7,19 @@ import { OperationsConsole } from './OperationsConsole';
 import { makeFakeClient } from '../../test/fake-client';
 
 describe('OperationsConsole', () => {
-  it('shows live environment status and CLI-only instance management', async () => {
+  it('shows live environment status, the instances list and only real CLI commands', async () => {
     render(<OperationsConsole client={makeFakeClient()} />);
 
     expect(await screen.findByText('Server operations')).toBeInTheDocument();
     expect(screen.getByText('Environment status')).toBeInTheDocument();
-    expect(screen.getByText(/Instance management runs on the server/i)).toBeInTheDocument();
-    expect(screen.getByText(/sh-manager backup create/i)).toBeInTheDocument();
+    // The instances inventory is now a first-class GUI feature.
+    expect(await screen.findByText('Instances')).toBeInTheDocument();
+    expect(await screen.findByText('clinic-a')).toBeInTheDocument();
+    // The old, non-existent command spellings must never come back.
+    expect(screen.queryByText(/sh-manager backup create/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/sh-manager support bundle/i)).not.toBeInTheDocument();
+    // CLI-only diagnostics use the real command names.
+    expect(screen.getByText(/sh-manager instance support-bundle/i)).toBeInTheDocument();
   });
 
   it('runs a check and reflects the passed status', async () => {

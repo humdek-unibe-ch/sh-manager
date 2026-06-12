@@ -113,9 +113,10 @@ export function SuccessStep({ result, config, snapshot }: SuccessStepProps): JSX
               Operator commands
             </Text>
             <CommandPreview value={`sh-manager instance health ${config.instanceId}`} label="health command" />
-            <CommandPreview value={`sh-manager backup create ${config.instanceId}`} label="backup command" />
+            <CommandPreview value={`sh-manager instance backup ${config.instanceId}`} label="backup command" />
             <Text size="xs" c="dimmed">
-              Run these on the server. Full instructions are in the operator README above.
+              Run these on the server (wrapper users: replace sh-manager with ./shm.ps1 or ./shm.sh). Full
+              instructions are in the operator README above.
             </Text>
           </Stack>
         </Paper>

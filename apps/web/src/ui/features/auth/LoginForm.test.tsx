@@ -5,24 +5,16 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, waitFor, userEvent } from '../../test/render';
 import { LoginForm } from './LoginForm';
 import { ApiError, type ApiClient } from '../../lib/api-client';
+import { makeFakeClient } from '../../test/fake-client';
 
 // The login screen only ever calls `client.login`; the other methods must not be
 // reached, so they reject loudly if a test accidentally triggers them.
 const fail = (): Promise<never> => Promise.reject(new Error('not used in login tests'));
 
 function clientWithLogin(login: ApiClient['login']): ApiClient {
-  return {
-    getState: fail,
-    setConfig: fail,
-    advance: fail,
-    back: fail,
-    runCheck: fail,
-    install: fail,
-    managerUpdateCheck: fail,
-    listVersions: fail,
-    login,
-    logout: async () => {},
-  };
+  // Every other ApiClient method rejects (kept exhaustive via the fake's key set).
+  const failing = Object.fromEntries(Object.keys(makeFakeClient()).map((key) => [key, fail]));
+  return { ...failing, login, logout: async () => {} } as unknown as ApiClient;
 }
 
 // Mantine's PasswordInput renders a visibility toggle whose aria-label contains

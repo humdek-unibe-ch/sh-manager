@@ -3,16 +3,13 @@
 /**
  * Authenticated operations console (persistent mode).
  *
- * The current BFF exposes live environment checks + auth, but not yet a
- * read API for the server inventory. So this console surfaces real, live
- * server status (Docker, connectivity, registry, resources) and the exact
- * operator CLI commands for instance lifecycle actions — it never invents
- * instance data it cannot fetch.
- *
- * Reads go through react-query; the per-check "run" is a mutation that writes
- * the fresh snapshot back into the query cache.
+ * Two views, no client router: the overview (environment checks, manager
+ * version, instances list) and the per-instance detail page (health, backups,
+ * update with dry-run, clone, remove, live operation logs). All instance
+ * mutations run through the BFF job layer and are watched via the operation
+ * journal — the GUI shows real logs, never imagined state.
  */
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Anchor, Center, Group, SimpleGrid, Stack, Text, Title } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -21,7 +18,6 @@ import {
   Card,
   CheckRow,
   CommandPreview,
-  EmptyState,
   Spinner,
   StatusBadge,
   type BadgeTone,
@@ -30,18 +26,22 @@ import {
 import { ApiError, type ApiClient } from '../../lib/api-client';
 import { CHECK_META } from '../../lib/wizard-view';
 import type { CheckResult, Snapshot, WizardStepId } from '../../lib/types';
+import { CreateInstanceForm } from './CreateInstanceForm';
+import { InstanceDetail } from './InstanceDetail';
+import { InstancesList, INSTANCES_KEY } from './InstancesList';
+import { OperationLog } from './OperationLog';
 
 const CHECKS: WizardStepId[] = ['docker', 'internet', 'registry', 'resources'];
 const STATE_KEY = ['manager', 'console', 'state'] as const;
 const UPDATE_KEY = ['manager', 'console', 'update-check'] as const;
 
-const OPERATOR_COMMANDS: { label: string; command: string }[] = [
-  { label: 'Check instance health', command: 'sh-manager instance health <instance-id>' },
-  { label: 'Create a backup', command: 'sh-manager backup create <instance-id>' },
-  { label: 'Preview an update (dry run)', command: 'sh-manager instance update <instance-id> --dry-run' },
-  { label: 'Apply an update', command: 'sh-manager instance update <instance-id>' },
-  { label: 'Generate a support bundle', command: 'sh-manager support bundle <instance-id>' },
-  { label: 'Safe-mode guidance', command: 'sh-manager doctor' },
+/**
+ * CLI-only tools that have no GUI equivalent (everything lifecycle-related now
+ * lives on the instance pages). Command names match `sh-manager --help`.
+ */
+const CLI_TOOLS: { label: string; command: string }[] = [
+  { label: 'Generate a support bundle', command: 'sh-manager instance support-bundle <instance-id>' },
+  { label: 'Host resource preflight', command: 'sh-manager doctor' },
 ];
 
 function checkStatus(result: CheckResult | undefined, running: boolean): CheckStatus {
@@ -62,6 +62,11 @@ export interface OperationsConsoleProps {
 
 export function OperationsConsole({ client }: OperationsConsoleProps): JSX.Element {
   const queryClient = useQueryClient();
+  const [openInstanceId, setOpenInstanceId] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  /** Operation started from the overview (instance create) — watched inline. */
+  const [watchedOperationId, setWatchedOperationId] = useState<string | null>(null);
+
   const stateQuery = useQuery({ queryKey: STATE_KEY, queryFn: () => client.getState() });
   const snapshot = stateQuery.data ?? null;
   // Non-blocking: the console renders fully even when the release feed is slow
@@ -98,6 +103,10 @@ export function OperationsConsole({ client }: OperationsConsoleProps): JSX.Eleme
     );
   }
 
+  if (openInstanceId) {
+    return <InstanceDetail client={client} instanceId={openInstanceId} onBack={() => setOpenInstanceId(null)} />;
+  }
+
   return (
     <Stack gap="xl">
       <Group justify="space-between" align="flex-start" wrap="wrap">
@@ -125,6 +134,22 @@ export function OperationsConsole({ client }: OperationsConsoleProps): JSX.Eleme
         <Alert tone="error" title="Something went wrong">
           {error}
         </Alert>
+      ) : null}
+
+      <InstancesList client={client} onOpen={setOpenInstanceId} onCreate={() => setCreateOpen(true)} />
+
+      {watchedOperationId ? (
+        <Card
+          title="Instance creation in progress"
+          description="The new instance appears in the list above as soon as the install finishes."
+          aside={
+            <Button variant="ghost" onClick={() => setWatchedOperationId(null)}>
+              Hide
+            </Button>
+          }
+        >
+          <OperationLog client={client} operationId={watchedOperationId} />
+        </Card>
       ) : null}
 
       <Card title="Environment status" description="Re-run any check to refresh its status.">
@@ -212,13 +237,12 @@ export function OperationsConsole({ client }: OperationsConsoleProps): JSX.Eleme
         </Stack>
       </Card>
 
-      <Card title="Instances" aside={<StatusBadge tone="neutral">CLI-managed</StatusBadge>}>
-        <EmptyState icon="📦" title="Instance management runs on the server">
-          Listing and updating instances from the web is on the roadmap. For now, use these operator commands on the
-          server (replace <code>&lt;instance-id&gt;</code>).
-        </EmptyState>
-        <SimpleGrid cols={{ base: 1, sm: 2 }} mt="md">
-          {OPERATOR_COMMANDS.map((c) => (
+      <Card
+        title="Server CLI tools"
+        description="Diagnostics that stay on the command line. Wrapper users: replace sh-manager with ./shm.ps1 (Windows) or ./shm.sh (Linux/macOS)."
+      >
+        <SimpleGrid cols={{ base: 1, sm: 2 }}>
+          {CLI_TOOLS.map((c) => (
             <Stack key={c.label} gap={6}>
               <Text size="sm" fw={500}>
                 {c.label}
@@ -228,6 +252,20 @@ export function OperationsConsole({ client }: OperationsConsoleProps): JSX.Eleme
           ))}
         </SimpleGrid>
       </Card>
+
+      <CreateInstanceForm
+        client={client}
+        opened={createOpen}
+        onClose={() => setCreateOpen(false)}
+        defaultRegistryUrl={snapshot?.config.registryUrl ?? ''}
+        onStarted={(operationId) => {
+          setWatchedOperationId(operationId);
+          // The new instance shows up in the inventory as the install
+          // progresses; refresh the list immediately and let its regular
+          // polling pick up later state changes.
+          void queryClient.invalidateQueries({ queryKey: INSTANCES_KEY });
+        }}
+      />
     </Stack>
   );
 }
