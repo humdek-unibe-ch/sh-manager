@@ -8,13 +8,119 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `1.2.0`). Registry releases
+- **The manager tool** uses its own semver (currently `1.3.0`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
   **`0.x`** line (core, frontend, scheduler, worker — all `0.1.0`).
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
+
+## [1.3.0] - 2026-06-12
+
+### Changed
+- **One web UI: the operations console.** The separate unauthenticated
+  "bootstrap" wizard mode is gone — `sh-manager web` always starts the
+  authenticated multi-instance console, on a fresh state folder too. The
+  `--mode bootstrap|persistent`, `--persist` flags and `SHM_WEB_MODE`/
+  `SHM_WEB_PERSIST` variables were removed; the operator store is always on.
+- **First-run setup in the browser** — when no operator account exists yet,
+  the console shows a one-time "Create the operator account" screen
+  (`POST /api/setup/operator`: localhost-only, pre-auth, rejected with `409`
+  as soon as any operator exists, password-strength-checked, signs you in
+  immediately). `sh-manager admin create` keeps working as the CLI
+  alternative.
+- **Create-instance wizard is a guided full page** (not a modal): Welcome →
+  Preflight (auto-run environment checks) → Basics → Address → Release →
+  Review → live journaled install log. It opens automatically when the
+  server has no instances yet. The **first** install initializes the server
+  (shared proxy + inventory) in the same flow — `server init` is no longer a
+  separate GUI step — and production first-installs ask for the Let's
+  Encrypt e-mail.
+
+### Added
+- **In-CMS plugin installs complete end to end on managed servers.**
+  Production instances run the backend in `managed` plugin install mode: the
+  CMS verifies the plugin signature and stages the artifacts, then parks the
+  operation for an external operator — previously nothing played that role,
+  so installs sat in "running" forever. The manager is now that operator: the
+  CMS poller (and `sh-manager instance process-operations <id>`) detects
+  parked plugin install/update/uninstall operations, runs the runbook's
+  composer step inside the backend container, finalizes via
+  `selfhelp:plugin:run-operation` (self-healing half-finalized operations
+  with `selfhelp:plugin:repair`), enables new installs, snapshots the
+  composer state (vendor, composer files, plugin lock, generated bundles) to
+  the instance's plugin volume, syncs worker + scheduler from the snapshot
+  (byte-identical state, no per-container composer runs or GitHub rate
+  limits), and restarts the Symfony services.
+- **Plugins survive recreates and core updates.** Composer-installed plugin
+  state lives in each container's writable layer and was silently lost on
+  recreate. Core updates now re-require every installed plugin against the
+  new core after migrations (gated by the same health check + rollback as
+  the rest of the update), and address/mailer changes restore the plugin
+  snapshot when the recreate dropped it. Standalone-archive plugins (no
+  upstream repository in the manifest) are re-required from their verified
+  package copy on the plugin volume via a composer path repo.
+- **Instances receive the plugin trust environment.** Generated `.env` now
+  carries `SELFHELP_PLUGIN_TRUSTED_KEYS` (the manager's own active trusted
+  keys), `SELFHELP_PLUGIN_REQUIRE_SIGNATURE=true`, and
+  `SELFHELP_PLUGIN_DEFAULT_REGISTRY_URL` (the registry the instance was
+  installed from), so the CMS verifies plugin signatures against exactly the
+  keys the manager trusts and lists plugins from the same registry the
+  manager resolves releases against.
+- **Outbound mail (SMTP) configuration end to end** — new
+  `sh-manager instance install --mailer-dsn <dsn>` option, a
+  `sh-manager instance mailer <id> [--set <dsn> | --clear] [--no-restart]`
+  command, BFF routes (`GET/POST /api/instances/:id/mailer`), a mailer field
+  in the create wizard, and an **Email…** dialog on the instance workspace.
+  DSNs are validated everywhere, credentials are redacted in every display,
+  and clearing falls back to the bundled Mailpit.
+- **Full server purge** — `sh-manager server purge --confirm "purge selfhelp"`
+  removes every instance (containers, volumes, data, secrets), the shared
+  Traefik proxy, and all server state; backups are kept unless
+  `--delete-backups`. The repeated literal confirmation is required.
+- **`sh-manager server status`** — reports whether the state root is
+  initialized, the manager version, and the managed instances (used by the
+  GUI to drive the first-install flow).
+- **Stateless server endpoints for the console** — `GET /api/server/status`
+  and `POST /api/server/preflight` (Docker, internet, registry, resources in
+  one call) replace the wizard-session check routes.
+- **Manager lifecycle verbs in the wrapper script** — `shm up` (background
+  GUI), `shm down` (stop; instances keep running), `shm update`
+  (self-update), `shm reinstall` (down + fresh pull + up). All state lives
+  in the state folder, so a reinstalled manager reconnects to existing
+  instances automatically.
+
+### Fixed
+- **In-CMS plugin installs no longer die with `mkdir(): Permission denied`** —
+  the engine creates the per-instance data volumes (`uploads`,
+  `plugin_artifacts`, `plugin_artifacts_public`) root-owned, but the core
+  images run PHP as `www-data`. Generated compose now includes a one-shot
+  `volume-init` service (backend image run as root) that hands the mount
+  points to `www-data` before backend/worker/scheduler start, so plugin
+  installs and file uploads work on a fresh instance.
+- **Seamless self-update from pre-1.3 GUI containers** — `self-update`
+  recreates the `sh-manager-web` container with its old arguments, which
+  included the removed `--mode persistent`/`--persist` flags. The `web`
+  command now accepts (and ignores) them, so an updated manager comes back
+  up instead of crash-looping on an unknown option.
+- **Re-bootstrap after a purge** — folders holding only retained backups
+  (what `server purge` / `full_delete` keep on purpose) no longer block the
+  next `server init` / first install as a "partial or foreign install".
+
+### Removed
+- The bootstrap wizard UI (`features/bootstrap/`), the server-side wizard
+  state machine (`wizard.ts`), and the wizard session API
+  (`/api/config`, `/api/advance`, `/api/back`, `/api/check/:step`,
+  `/api/install`).
+
+### Documentation
+- Operator docs reworked for the single-console flow: install, Windows
+  quickstart (manager lifecycle: update/remove/reinstall + purge cleanup),
+  GUI instance management (first-run setup, new wizard, mailer, endpoint
+  table), quick reference (mailer + purge + lifecycle commands), security
+  hardening, post-install checklist, troubleshooting, operations runbook,
+  architecture and developer guide.
 
 ## [1.2.0] - 2026-06-12
 

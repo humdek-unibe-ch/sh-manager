@@ -17,7 +17,7 @@ import semver from 'semver';
  * Update here + root package.json + CHANGELOG.md when releasing (the CLI,
  * web UI, and inventory stamps all import this constant).
  */
-export const MANAGER_VERSION = '1.2.0';
+export const MANAGER_VERSION = '1.3.0';
 
 /** Document kinds that carry a `*Version`/`schemaVersion` field. */
 export type SchemaDocKind =

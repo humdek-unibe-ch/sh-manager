@@ -8,3 +8,5 @@ coverage/
 .env.local
 *.log
 .DS_Store
+# Windows shell redirect artifact (e.g. `2>nul` in the wrong shell)
+nul
