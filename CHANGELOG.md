@@ -8,13 +8,38 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `1.1.0`). Registry releases
+- **The manager tool** uses its own semver (currently `1.1.1`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
   **`0.x`** line (core, frontend, scheduler, worker — all `0.1.0`).
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
+
+## [Unreleased]
+
+## [1.1.1] - 2026-06-12
+
+### Changed
+- **`sh-manager web` auto-detects its mode** — persistent (management console
+  with operator sign-in) once the server is initialized
+  (`<root>/selfhelp.server.json` exists), bootstrap (install wizard) on a
+  fresh state folder. Previously the default was always `bootstrap`, so an
+  updated manager kept showing the wizard instead of the console. An explicit
+  `--mode` / `SHM_WEB_MODE` still overrides; startup logs say which mode was
+  auto-selected and why.
+- **`admin create` generates a password when `--password` is omitted** and
+  prints it exactly once (same convention as the install's generated CMS
+  admin password). Previously the command failed without `--password` /
+  `SELFHELP_MANAGER_ADMIN_PASSWORD`.
+
+### Added
+- **First-run operator guidance** — in persistent mode with no operator
+  accounts yet, the server logs the exact `admin create` command at startup,
+  and the sign-in screen shows the same hint (via the new pre-auth
+  `GET /api/auth/meta` endpoint, which returns only the mode and an
+  operators-configured boolean). The wizard success screen now ends with a
+  "Next: the management console" panel covering operator creation.
 
 ## [1.1.0] - 2026-06-12
 
