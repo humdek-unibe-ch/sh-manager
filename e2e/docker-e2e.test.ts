@@ -26,7 +26,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { composeProjectName } from '@shm/docker';
-import { ManifestStore, instancePaths } from '@shm/instances';
+import { ManifestStore, instancePaths, readInstanceSecrets } from '@shm/instances';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ActionDeps } from '../apps/cli/src/actions.js';
 import {
@@ -40,7 +40,7 @@ import {
   processInstanceOperations,
   serverInit,
 } from '../apps/cli/src/actions.js';
-import { HttpBackendOperationsClient } from '../apps/cli/src/operations-client.js';
+import { ComposeExecBackendOperationsClient } from '../apps/cli/src/operations-client.js';
 import { buildImages, defaultRepos } from './build-images.mjs';
 import { buildTestRegistry } from './build-test-registry.mjs';
 import {
@@ -51,7 +51,6 @@ import {
   loginAdmin,
   makeRoot,
   rmRoot,
-  setManagerToken,
   waitForBackendHealthy,
 } from './harness.js';
 import { serveRegistry } from './serve-registry.mjs';
@@ -60,7 +59,6 @@ const execFileAsync = promisify(execFile);
 
 const ADMIN_EMAIL = 'qa.admin@selfhelp.test';
 const ADMIN_NAME = 'QA Admin';
-const MANAGER_TOKEN_D = 'qa-e2e-manager-token-d-0123456789';
 const PROXY_NETWORK = 'selfhelp_proxy';
 
 // Disposable instances + their published ports (frontend = manager BFF probe,
@@ -218,7 +216,9 @@ describe.skipIf(!E2E_ENABLED)('manager docker e2e (SHM_E2E)', () => {
   }, 900_000);
 
   it('CMS-driven update runs through the manager loop to succeeded', async () => {
-    // A dedicated instance at the base version + the manager loop enabled.
+    // A dedicated instance at the base version. The manager loop is enabled by
+    // the SHIPPED wiring alone: install generates the per-instance manager
+    // token and injects it via secrets.env — nothing is hand-wired here.
     const res = await instanceInstall(deps, {
       instanceId: D,
       displayName: 'QA E2E D',
@@ -232,8 +232,12 @@ describe.skipIf(!E2E_ENABLED)('manager docker e2e (SHM_E2E)', () => {
       adminName: ADMIN_NAME,
     });
     const adminPwD = res.adminPassword ?? '';
+    const secrets = await readInstanceSecrets(instancePaths(D, deps.root).secretsDir);
+    expect(secrets?.managerToken?.length ?? 0).toBeGreaterThan(0);
+
+    // Direct backend port ONLY for the CMS-admin simulation (login, request,
+    // status reads) — the manager-loop transport below never uses it.
     const backendD = await exposeBackend(deps, D, PORTS.dBackend);
-    await setManagerToken(deps, D, MANAGER_TOKEN_D);
     await waitForBackendHealthy(backendD);
 
     // CMS: an admin requests the update (direct backend POST; CSRF is disabled).
@@ -248,20 +252,33 @@ describe.skipIf(!E2E_ENABLED)('manager docker e2e (SHM_E2E)', () => {
     expect(reqBody.data?.operation_id).toBeTruthy();
     expect(reqBody.data?.status).toBe('requested');
 
-    // Manager: claim + execute the pending operation, write status back.
-    const client = new HttpBackendOperationsClient({ backendBaseUrl: backendD, managerToken: MANAGER_TOKEN_D, instanceId: D });
+    // Manager: claim + execute the pending operation, write status back —
+    // through the production-default exec transport (docker compose exec into
+    // the backend container, authenticated with the container's own
+    // install-generated SELFHELP_MANAGER_TOKEN). No HTTP client, no host-side
+    // token handling.
+    const client = new ComposeExecBackendOperationsClient({
+      runner: deps.runner,
+      instanceDir: instancePaths(D, deps.root).dir,
+      instanceId: D,
+    });
     const outcome = await processInstanceOperations(deps, D, client);
     expect(outcome.result).toBe('completed');
     if (outcome.result !== 'completed') throw new Error(`unexpected outcome: ${JSON.stringify(outcome)}`);
     expect(outcome.status).toBe('succeeded');
     expect(outcome.report.ok).toBe(true);
 
-    // The CMS reflects the terminal status + the manifest is bumped.
+    // The CMS reflects the terminal status + the manifest is bumped, and the
+    // manager-loop visibility block proves the authenticated exec polls.
     const statusRes = await fetch(`${backendD}/cms-api/v1/admin/system/update/status`, {
       headers: { Authorization: `Bearer ${adminToken}`, Accept: 'application/json' },
     });
-    const statusBody = (await statusRes.json()) as { data?: { status?: string } };
+    const statusBody = (await statusRes.json()) as {
+      data?: { status?: string; manager?: { configured?: boolean; last_seen_at?: string | null } };
+    };
     expect(statusBody.data?.status).toBe('succeeded');
+    expect(statusBody.data?.manager?.configured).toBe(true);
+    expect(statusBody.data?.manager?.last_seen_at).toBeTruthy();
     expect(await manifestVersion(deps, D)).toBe(nextVersion);
   }, 1_200_000);
 

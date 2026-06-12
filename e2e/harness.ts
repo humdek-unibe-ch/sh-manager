@@ -10,7 +10,7 @@
  * runbook; this module is the part that needs the typed manager packages.
  */
 import { execFile } from 'node:child_process';
-import { appendFile, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -222,16 +222,4 @@ export async function exposeBackend(deps: ActionDeps, instanceId: string, hostPo
   await writeFile(path.join(paths.dir, 'compose.override.yaml'), override, 'utf8');
   await deps.runner.run(paths.dir, ['up', '-d']);
   return `http://127.0.0.1:${hostPort}`;
-}
-
-/**
- * Enable the CMS<->Manager update loop by appending the per-instance
- * `SELFHELP_MANAGER_TOKEN` to the 0600 secret env file and recreating the
- * backend so it reads it. Mirrors the operator step the `services.yaml` comment
- * describes; the token is never stored in the manifest/lock/inventory.
- */
-export async function setManagerToken(deps: ActionDeps, instanceId: string, token: string): Promise<void> {
-  const paths = instancePaths(instanceId, deps.root);
-  await appendFile(path.join(paths.secretsDir, 'secrets.env'), `SELFHELP_MANAGER_TOKEN=${token}\n`, 'utf8');
-  await deps.runner.run(paths.dir, ['up', '-d', '--force-recreate', 'backend']);
 }
