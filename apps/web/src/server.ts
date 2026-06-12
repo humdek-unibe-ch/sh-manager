@@ -380,21 +380,6 @@ export function createBootstrapServer(options: BootstrapServerOptions): Bootstra
       return true;
     }
 
-    if (path === '/api/operations' && ctx.method === 'GET') {
-      const instanceId = ctx.url.searchParams.get('instanceId') ?? undefined;
-      sendJson(res, 200, {
-        operations: await im.journal.list(instanceId !== undefined ? { instanceId } : {}),
-      });
-      return true;
-    }
-    const opMatch = path.match(/^\/api\/operations\/([a-z0-9-]+)$/i);
-    if (opMatch && ctx.method === 'GET') {
-      const record = await im.journal.get(opMatch[1]!);
-      if (!record) throw new HttpError(404, 'Operation not found.');
-      sendJson(res, 200, record);
-      return true;
-    }
-
     const m = path.match(/^\/api\/instances\/([^/]+)(\/.*)?$/);
     if (!m) return false;
     const instanceId = requireInstanceId(m[1]);
@@ -517,6 +502,24 @@ export function createBootstrapServer(options: BootstrapServerOptions): Bootstra
       if (ctx.session) sessions = destroySession(sessions, ctx.session.id);
       res.setHeader('Set-Cookie', `${SESSION_COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0`);
       return sendJson(res, 200, { ok: true });
+    }
+
+    // Operations endpoints (available in persistent mode when instanceManagement is configured)
+    if (mode === 'persistent' && options.instanceManagement) {
+      if (path === '/api/operations' && ctx.method === 'GET') {
+        const instanceId = ctx.url.searchParams.get('instanceId') ?? undefined;
+        sendJson(res, 200, {
+          operations: await options.instanceManagement.journal.list(instanceId !== undefined ? { instanceId } : {}),
+        });
+        return;
+      }
+      const opMatch = path.match(/^\/api\/operations\/([a-z0-9-]+)$/i);
+      if (opMatch && ctx.method === 'GET') {
+        const record = await options.instanceManagement.journal.get(opMatch[1]!);
+        if (!record) throw new HttpError(404, 'Operation not found.');
+        sendJson(res, 200, record);
+        return;
+      }
     }
 
     // Bootstrap self-lock: once complete (and not persistent), the installer can
