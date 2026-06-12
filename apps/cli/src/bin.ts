@@ -11,7 +11,7 @@
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import type { InstanceMode, ReleaseChannel } from '@shm/schemas';
 import { CrossInstanceError } from '@shm/core';
 import { discoverEngineRoot } from '@shm/docker';
@@ -23,6 +23,7 @@ import {
   instanceBackup,
   instanceClone,
   instanceSetAddress,
+  instanceGetMailer,
   instanceHealth,
   instanceInstall,
   instanceList,
@@ -30,10 +31,13 @@ import {
   instanceRepair,
   instanceRestore,
   instanceSafeMode,
+  instanceSetMailer,
   instanceSupportBundle,
   instanceUpdate,
   drainInstanceOperations,
+  drainInstancePluginOperations,
   serverInit,
+  serverPurge,
 } from './actions.js';
 import { stripRedundantManagerToken } from './argv.js';
 import { ComposeExecBackendOperationsClient, HttpBackendOperationsClient } from './operations-client.js';
@@ -187,32 +191,23 @@ program
 
 program
   .command('web')
-  .description('Start the manager web UI (management console; install wizard on a fresh server)')
+  .description('Start the manager web console (first-run setup + instance management)')
   .option('--host <host>', 'bind host (use 0.0.0.0 when running inside Docker with -p)', '127.0.0.1')
   .option('--port <port>', 'bind port', (v) => parseInt(v, 10), 8765)
-  .option(
-    '--mode <mode>',
-    'bootstrap|persistent (default: auto — persistent once the server is initialized, bootstrap on a fresh state folder)',
-  )
-  .option('--persist', 'keep the UI running after a successful bootstrap', false)
   .option('--allow-non-local', 'allow binding to a non-loopback host (auth required; prefer an SSH tunnel)', false)
+  // Legacy no-ops: pre-1.3 GUI containers were started with `--mode
+  // persistent [--persist]`, and self-update recreates the container with its
+  // OLD arguments. Accepting (and ignoring) them keeps that update seamless.
+  .addOption(new Option('--mode <mode>').hideHelp())
+  .addOption(new Option('--persist').hideHelp())
   .action(async (opts) => {
     try {
-      const rawMode = opts.mode as string | undefined;
-      if (rawMode !== undefined && rawMode !== 'bootstrap' && rawMode !== 'persistent') {
-        throw new Error(`Unknown --mode "${rawMode}" (use bootstrap or persistent, or omit it for auto-detection).`);
-      }
-      const mode = rawMode as 'bootstrap' | 'persistent' | undefined;
       // Lazy import: keeps every other CLI command free of the web app's deps.
       const { startWebUi } = await import('../../web/src/main.js');
       await startWebUi({
         root: program.opts().root as string,
         host: opts.host as string,
         port: opts.port as number,
-        // Omitted --mode = auto: persistent when <root>/selfhelp.server.json
-        // exists, bootstrap otherwise (decided in startWebUi).
-        ...(mode !== undefined ? { mode } : {}),
-        persistAfterBootstrap: opts.persist as boolean,
         allowNonLocal: opts.allowNonLocal as boolean,
         trustedKeysPath: DEFAULT_TRUSTED_KEYS,
       });
@@ -236,6 +231,61 @@ server
       const res = await serverInit(d, { serverId: opts.serverId, mode: opts.mode as InstanceMode, letsencryptEmail: opts.email, allowImport: opts.import as boolean });
       console.log(`Proxy compose: ${res.proxyComposePath}`);
       console.log(`Inventory:     ${res.inventoryPath}`);
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+server
+  .command('status')
+  .description('Show whether this server is initialized and which instances it manages')
+  .action(async () => {
+    try {
+      const root = program.opts().root as string;
+      const d = await deps(root);
+      const rows = await instanceList(d).catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        if (message.includes('selfhelp.server.json')) return null;
+        throw err;
+      });
+      if (rows === null) {
+        console.log(`Server NOT initialized (no inventory under ${root}).`);
+        console.log('Run: sh-manager server init --server-id <id> --mode local|production');
+        return;
+      }
+      console.log(`Server initialized. Root: ${root}. Manager: ${MANAGER_VERSION}. Instances: ${rows.length}.`);
+      if (rows.length > 0) {
+        console.log(formatTable(['INSTANCE', 'DOMAIN', 'STATUS', 'PROJECT'], rows.map((r) => [r.instanceId, r.domain, r.status, r.composeProject])));
+      }
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+server
+  .command('purge')
+  .description('DANGER: remove EVERYTHING this manager created — all instances (containers, volumes, data), the shared proxy, and server state. Backups are kept unless --delete-backups.')
+  .option('--confirm <text>', 'required: "purge selfhelp"')
+  .option('--delete-backups', 'also delete every instance backup', false)
+  .action(async (opts) => {
+    try {
+      const d = await deps(program.opts().root as string);
+      const res = await serverPurge(d, {
+        confirm: opts.confirm as string | undefined,
+        deleteBackups: opts.deleteBackups as boolean,
+      });
+      if (!res.ok && res.instancesRemoved.length === 0 && !res.proxyRemoved) {
+        console.error(formatSteps('Purge blocked:', res.errors));
+        process.exit(1);
+      }
+      for (const id of res.instancesRemoved) console.log(`  removed instance ${id}`);
+      if (res.proxyRemoved) console.log('  removed shared proxy (Traefik)');
+      if (res.networkRemoved) console.log('  removed proxy network');
+      for (const p of res.removedPaths) console.log(`  removed ${p}`);
+      for (const p of res.keptPaths) console.log(`  kept    ${p}`);
+      for (const e of res.errors) console.log(`  warning ${e}`);
+      console.log(res.ok ? '\nServer purged. Run `sh-manager server init` to start fresh.' : '\nServer purged with warnings (see above).');
+      if (!res.ok) process.exitCode = 1;
     } catch (err) {
       fail(err);
     }
@@ -273,6 +323,7 @@ instance
   .option('--admin-name <name>', 'admin display name', 'Admin')
   .option('--admin-password <password>', 'admin password (a strong one is generated + shown once if omitted)')
   .option('--plugin-manifest <path...>', 'plugin.json path(s) inside the backend container to install during provisioning')
+  .option('--mailer-dsn <dsn>', 'outbound SMTP DSN, e.g. smtp://user:pass@mail.example.org:587 (default: bundled Mailpit)')
   .action(async (opts) => {
     try {
       const d = await deps(program.opts().root as string);
@@ -292,6 +343,7 @@ instance
         adminName: opts.adminName,
         adminPassword: opts.adminPassword,
         pluginManifests: opts.pluginManifest as string[] | undefined,
+        mailerDsn: opts.mailerDsn as string | undefined,
       });
       console.log(`Installed ${opts.id} (SelfHelp ${res.version}) at ${res.instanceDir}${res.broughtUp ? ' [started]' : ''}`);
       for (const w of res.domainWarnings) console.log(`  warning: ${w}`);
@@ -385,16 +437,25 @@ instance
       }
       const drainOnce = async () => {
         const outcomes = await drainInstanceOperations(d, id, client);
-        if (outcomes.length === 0) {
-          console.log(`No pending operations for ${id}.`);
-          return;
-        }
         for (const outcome of outcomes) {
           if (outcome.result === 'rejected') {
             console.log(`Operation ${outcome.operationId} rejected (${outcome.status}): ${outcome.reason}`);
           } else if (outcome.result === 'completed') {
             console.log(`Operation ${outcome.operationId} finished: ${outcome.status}.`);
           }
+        }
+        // Managed-mode plugin operations parked by the CMS (install/update/
+        // uninstall): the manager runs the composer step + finalize.
+        const pluginReport = await drainInstancePluginOperations(d, id, { log: (l) => console.log(l) });
+        for (const outcome of pluginReport.outcomes) {
+          console.log(
+            outcome.status === 'done'
+              ? `Plugin ${outcome.type} ${outcome.pluginId} (operation #${outcome.operationId}) finished.`
+              : `Plugin ${outcome.type} ${outcome.pluginId} (operation #${outcome.operationId}) failed: ${outcome.detail ?? 'unknown error'}`,
+          );
+        }
+        if (outcomes.length === 0 && pluginReport.outcomes.length === 0) {
+          console.log(`No pending operations for ${id}.`);
         }
       };
 
@@ -530,6 +591,36 @@ instance
       for (const w of res.warnings) console.log(`  warning: ${w}`);
       console.log(res.restarted ? `Instance restarted; reachable at ${res.publicUrl}` : 'Config written. Restart pending (run docker compose up -d in the instance directory).');
       if (res.health) console.log(formatHealth(res.health));
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+instance
+  .command('mailer <id>')
+  .description('Show or change the instance outbound-mail (SMTP) configuration')
+  .option('--set <dsn>', 'set the SMTP DSN, e.g. smtp://user:pass@mail.example.org:587')
+  .option('--clear', 'remove the override and fall back to the bundled Mailpit/default', false)
+  .option('--no-restart', 'write the config only; apply later with docker compose up -d')
+  .action(async (id: string, opts) => {
+    try {
+      const d = await deps(program.opts().root as string);
+      if (!opts.set && !opts.clear) {
+        const status = await instanceGetMailer(d, id);
+        console.log(
+          status.configured
+            ? `Mailer DSN: ${status.redactedDsn} (custom, credentials redacted)`
+            : 'Mailer DSN: default (bundled Mailpit on local instances; configure one with --set <dsn>)',
+        );
+        return;
+      }
+      const res = await instanceSetMailer(d, id, {
+        ...(opts.set ? { dsn: opts.set as string } : {}),
+        clear: opts.clear as boolean,
+        restart: opts.restart as boolean,
+      });
+      console.log(res.configured ? `Mailer DSN set to ${res.redactedDsn}.` : 'Mailer override cleared (back to default).');
+      console.log(res.restarted ? 'Instance restarted with the new mail configuration.' : 'Config written. Restart pending (docker compose up -d).');
     } catch (err) {
       fail(err);
     }

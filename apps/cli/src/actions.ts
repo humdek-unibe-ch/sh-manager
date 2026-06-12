@@ -10,7 +10,7 @@ import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path';
 import semver from 'semver';
 import { parse as parseYaml } from 'yaml';
-import { validateInstanceManifest } from '@shm/schemas';
+import { formatTrustedKeysEnv, validateInstanceManifest } from '@shm/schemas';
 import type {
   BackupManifest,
   CoreRelease,
@@ -36,9 +36,12 @@ import {
   evaluateHealth,
   evaluateMysqlMajorUpgrade,
   executeUpdate,
+  finalizePluginOperations,
   installInstance,
   planUpdate,
+  reinstallPluginsForCore,
   resolveTargetRuntimeImages,
+  restorePluginStateIfNeeded,
   processNextOperation,
   drainOperations,
   provisionInstance,
@@ -47,6 +50,8 @@ import {
   type BootstrapTargetFacts,
   type HealthReport,
   type OperationExecutor,
+  type PluginDrainReport,
+  type PluginExecDeps,
   type PreflightResourceFacts,
   type ProcessOutcome,
   type ProvisionReport,
@@ -68,9 +73,11 @@ import {
   planRemove,
   proxyDir,
   readInstanceSecrets,
+  redactMailerDsn,
   secretsForRestore,
   serverInventoryPath,
   validateDomainForInstall,
+  withMailerDsn,
   writeFileAtomic,
   writeInstanceSecrets,
   type GenerateSecretsOptions,
@@ -94,6 +101,7 @@ import {
   type RestoreRequest,
 } from '@shm/backup';
 import { assembleSupportBundle, redactEnv } from '@shm/support';
+import { ComposeExecPluginStateClient, composePluginExecDeps, type PluginStateClient } from './plugin-state-client.js';
 
 export interface ActionDeps {
   root: string;
@@ -118,6 +126,8 @@ export interface ActionDeps {
   resourceFacts: (requiredPorts: number[]) => Promise<PreflightResourceFacts>;
   /** Idempotently create a Docker network (real impl uses `docker network create`). */
   ensureNetwork?: (name: string) => Promise<void>;
+  /** Remove a Docker network; tolerate "not found" (server purge only). */
+  removeNetwork?: (name: string) => Promise<void>;
   /** Archive a named Docker volume into `outFile` (real impl uses `docker run … tar`). */
   archiveVolume?: (volumeName: string, outFile: string) => Promise<void>;
   /** Delete named Docker volumes (full-delete only; real impl uses `docker volume rm`). */
@@ -310,9 +320,17 @@ async function pathExists(p: string): Promise<boolean> {
 }
 
 async function listInstanceDirs(root: string): Promise<string[]> {
-  return readdir(instancesDir(root), { withFileTypes: true })
+  const names = await readdir(instancesDir(root), { withFileTypes: true })
     .then((entries) => entries.filter((e) => e.isDirectory()).map((e) => e.name))
     .catch(() => [] as string[]);
+  // Folders holding ONLY retained backups (what full_delete / server purge
+  // leave behind on purpose) are not instances and must not block a fresh
+  // bootstrap — same rule instanceList applies before reporting `broken`.
+  const real: string[] = [];
+  for (const name of names) {
+    if (await looksLikeInstanceState(instancePaths(name, root))) real.push(name);
+  }
+  return real;
 }
 
 /** Filesystem-level bootstrap target discovery (Docker-label scan is optional). */
@@ -471,6 +489,11 @@ export interface InstanceInstallOptions {
    */
   pluginManifests?: string[];
   /**
+   * Operator SMTP DSN (e.g. `smtp://user:pass@mail.example.org:587`). Stored
+   * in the instance's secrets.env (0600); overrides the local Mailpit default.
+   */
+  mailerDsn?: string;
+  /**
    * Live progress callback, fired when the install enters a stage: `registry`,
    * `compose`, `start`, then the provisioning steps (`wait_db`, `migrations`,
    * `seed`, `admin`, `plugins`, `cache_warm`, `health`). The manager GUI
@@ -546,6 +569,7 @@ export async function instanceInstall(
     core,
     frontend,
     services,
+    pluginTrustedKeys: formatTrustedKeysEnv(deps.trustedKeys),
   });
 
   // Provisioning requires a running stack, so it implies bringUp.
@@ -560,7 +584,12 @@ export async function instanceInstall(
       .catch(() => DEFAULT_PROXY_NETWORK);
     await deps.ensureNetwork(network);
   }
-  const res = await installInstance(artifacts, { root: deps.root, runner: deps.runner, bringUp });
+  const res = await installInstance(artifacts, {
+    root: deps.root,
+    runner: deps.runner,
+    bringUp,
+    ...(opts.mailerDsn !== undefined ? { mailerDsn: opts.mailerDsn } : {}),
+  });
 
   if (!opts.provision) {
     return { instanceDir: res.instanceDir, version: core.version, broughtUp: res.broughtUp, domainWarnings };
@@ -965,6 +994,7 @@ export async function instanceUpdate(deps: ActionDeps, instanceId: string, opts:
           frontend,
           services,
           installedPlugins: manifest.installedPlugins,
+          pluginTrustedKeys: formatTrustedKeysEnv(deps.trustedKeys),
         });
         await writeFileAtomic(paths.composePath, artifacts.composeYaml);
         await writeFileAtomic(paths.envPath, artifacts.envText);
@@ -974,6 +1004,16 @@ export async function instanceUpdate(deps: ActionDeps, instanceId: string, opts:
       },
       runMigrations: async () => {
         await deps.runner.run(paths.dir, ['exec', '-T', 'backend', 'php', 'bin/console', 'doctrine:migrations:migrate', '--no-interaction', '--allow-no-migration']);
+      },
+      // The update recreated every container from fresh images, which resets
+      // vendor/ to the baked state while the database still records the
+      // installed plugins. Re-require each one against the NEW core, repair
+      // the plugin layer, and propagate the state to worker + scheduler.
+      restorePlugins: async () => {
+        const { client, execDeps } = pluginSeams(deps, instanceId);
+        const plugins = await client.listInstalledPlugins();
+        if (plugins.length === 0) return;
+        await reinstallPluginsForCore({ plugins, coreVersion: plan.targetVersion! }, execDeps);
       },
       checkHealth: async () => evaluateHealth(instanceId, await deps.probeHealth(manifest.routing.publicFrontendUrl, manifest.routing.browserApiPrefix), deps.now),
       // Effective rollback: restore the pre-update compose/env/readme + manifest
@@ -1089,6 +1129,80 @@ export async function drainInstanceOperations(
     execute: buildOperationExecutor(deps),
     ...(deps.now ? { now: deps.now } : {}),
   });
+}
+
+// ---------------------------------------------------------------------------
+// CMS plugin operations (managed install mode: the manager is the operator)
+// ---------------------------------------------------------------------------
+
+export interface PluginDrainOverrides {
+  /** Injectable transport (tests); default: compose-exec into the backend. */
+  client?: PluginStateClient;
+  /** Injectable exec seam (tests); default: compose exec/restart. */
+  execDeps?: PluginExecDeps;
+  log?: (line: string) => void | Promise<void>;
+}
+
+function pluginSeams(
+  deps: ActionDeps,
+  instanceId: string,
+  overrides?: PluginDrainOverrides,
+): { client: PluginStateClient; execDeps: PluginExecDeps } {
+  const instanceDir = instancePaths(instanceId, deps.root).dir;
+  return {
+    client: overrides?.client ?? new ComposeExecPluginStateClient({ runner: deps.runner, instanceDir }),
+    execDeps: overrides?.execDeps ?? composePluginExecDeps(deps.runner, instanceDir, overrides?.log),
+  };
+}
+
+/** Cheap peek used by pollers: is any managed plugin operation parked for us? */
+export async function hasPendingPluginOperations(
+  deps: ActionDeps,
+  instanceId: string,
+  overrides?: PluginDrainOverrides,
+): Promise<boolean> {
+  const { client } = pluginSeams(deps, instanceId, overrides);
+  return (await client.listPendingOperations()).length > 0;
+}
+
+/**
+ * Drains parked managed-mode plugin operations (install/update/uninstall):
+ * runs the runbook's composer step in the backend, finalizes via
+ * `selfhelp:plugin:run-operation`, enables new installs, then snapshots the
+ * composer state to the shared plugin volume, syncs worker + scheduler from
+ * it, and restarts the Symfony services so the new bundles load everywhere.
+ */
+export async function drainInstancePluginOperations(
+  deps: ActionDeps,
+  instanceId: string,
+  overrides?: PluginDrainOverrides,
+): Promise<PluginDrainReport> {
+  const manifest = await readManifestFriendly(deps, instanceId);
+  const { client, execDeps } = pluginSeams(deps, instanceId, overrides);
+  const operations = await client.listPendingOperations();
+  if (operations.length === 0) return { outcomes: [], restarted: false };
+  return finalizePluginOperations({ operations, coreVersion: manifest.versions.selfhelp }, execDeps);
+}
+
+/**
+ * Best-effort plugin-state restore after containers were recreated WITHOUT a
+ * version change (address/mailer change, manual recreate): if the marker file
+ * is gone but a composer-state snapshot exists on the plugin volume, extract
+ * it into backend/worker/scheduler and restart them. Never throws — the
+ * primary action (address/mailer/start) must not fail because of this.
+ */
+async function restorePluginStateAfterRecreate(
+  deps: ActionDeps,
+  instanceId: string,
+  coreVersion: string,
+): Promise<boolean> {
+  try {
+    const { execDeps } = pluginSeams(deps, instanceId);
+    const res = await restorePluginStateIfNeeded(execDeps, coreVersion);
+    return res.restored;
+  } catch {
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1553,6 +1667,7 @@ export async function instanceClone(
     installedPlugins: sourceManifest.installedPlugins,
     pluginLock: sourceLock.plugins,
     ...(sourceManifest.resources ? { resources: sourceManifest.resources } : {}),
+    pluginTrustedKeys: formatTrustedKeysEnv(deps.trustedKeys),
   });
 
   // A clone is a distinct security boundary: generate fresh secrets that share
@@ -1690,6 +1805,7 @@ export async function instanceSetAddress(
     installedPlugins: manifest.installedPlugins,
     pluginLock: lock.plugins,
     ...(manifest.resources ? { resources: manifest.resources } : {}),
+    pluginTrustedKeys: formatTrustedKeysEnv(deps.trustedKeys),
   });
   await writeFileAtomic(paths.composePath, artifacts.composeYaml);
   await writeFileAtomic(paths.envPath, artifacts.envText);
@@ -1721,6 +1837,9 @@ export async function instanceSetAddress(
       await deps.ensureNetwork(network);
     }
     await deps.runner.run(paths.dir, composeCommands.upDetached());
+    // Recreated Symfony containers lose their composer-installed plugins;
+    // restore them from the snapshot on the plugin volume (no-op when intact).
+    await restorePluginStateAfterRecreate(deps, instanceId, manifest.versions.selfhelp);
     health = evaluateHealth(
       instanceId,
       await deps.probeHealth(artifacts.manifest.routing.publicFrontendUrl, artifacts.manifest.routing.browserApiPrefix),
@@ -1806,6 +1925,205 @@ export async function instanceRemove(
   }
 
   return { ...plan, executed: true };
+}
+
+// ---------------------------------------------------------------------------
+// instance set-mailer (operator SMTP DSN, stored in secrets.env)
+// ---------------------------------------------------------------------------
+
+export interface SetMailerOptions {
+  /** SMTP DSN, e.g. `smtp://user:pass@mail.example.org:587`. */
+  dsn?: string;
+  /** Remove the override; the instance falls back to Mailpit/image default. */
+  clear?: boolean;
+  /** Recreate containers so the new DSN takes effect (default true). */
+  restart?: boolean;
+}
+
+export interface MailerStatus {
+  /** True when an operator DSN override is configured. */
+  configured: boolean;
+  /** Credential-redacted DSN for display; never the raw value. */
+  redactedDsn?: string;
+}
+
+/** Reads the instance's mailer configuration (redacted, never raw). */
+export async function instanceGetMailer(deps: ActionDeps, instanceId: string): Promise<MailerStatus> {
+  await readManifestFriendly(deps, instanceId);
+  const paths = instancePaths(instanceId, deps.root);
+  const secrets = await readInstanceSecrets(paths.secretsDir);
+  if (!secrets?.mailerDsn) return { configured: false };
+  return { configured: true, redactedDsn: redactMailerDsn(secrets.mailerDsn) };
+}
+
+/**
+ * Sets or clears the instance's outbound-mail DSN. The DSN lives in the 0600
+ * `secrets.env` (it may carry SMTP credentials) and overrides the non-secret
+ * Mailpit default. By default the stack is recreated so backend/worker/
+ * scheduler pick the new value up immediately.
+ */
+export async function instanceSetMailer(
+  deps: ActionDeps,
+  instanceId: string,
+  opts: SetMailerOptions,
+): Promise<MailerStatus & { restarted: boolean }> {
+  const manifest = await readManifestFriendly(deps, instanceId);
+  if (!opts.clear && (!opts.dsn || opts.dsn.trim() === '')) {
+    throw new Error('Provide a mailer DSN (e.g. smtp://user:pass@mail.example.org:587) or --clear.');
+  }
+  const dsn = opts.clear ? '' : opts.dsn!.trim();
+  if (dsn !== '' && !/^[a-z][a-z0-9+.-]*:\/\//i.test(dsn)) {
+    throw new Error(`"${dsn}" is not a valid mailer DSN (expected scheme://…, e.g. smtp://host:587).`);
+  }
+
+  const paths = instancePaths(instanceId, deps.root);
+  const existing = await readInstanceSecrets(paths.secretsDir);
+  if (!existing) {
+    throw new Error(`Instance "${instanceId}" has no secrets directory; was it installed by this manager?`);
+  }
+  const updated = withMailerDsn(existing, dsn);
+  await writeInstanceSecrets(paths.secretsDir, updated, deps.secretIO);
+
+  const restart = opts.restart ?? true;
+  if (restart) {
+    // `up -d` recreates only the services whose env_file content changed.
+    await deps.runner.run(paths.dir, composeCommands.upDetached());
+    // Recreated Symfony containers lose their composer-installed plugins;
+    // restore them from the snapshot on the plugin volume (no-op when intact).
+    await restorePluginStateAfterRecreate(deps, instanceId, manifest.versions.selfhelp);
+  }
+  return {
+    configured: dsn !== '',
+    ...(dsn !== '' ? { redactedDsn: redactMailerDsn(dsn) } : {}),
+    restarted: restart,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// server purge (remove EVERYTHING this manager created)
+// ---------------------------------------------------------------------------
+
+export interface ServerPurgeOptions {
+  /** Must equal `purge selfhelp`. */
+  confirm?: string;
+  /** Also delete every instance's backups (default: keep them). */
+  deleteBackups?: boolean;
+}
+
+export interface ServerPurgeReport {
+  ok: boolean;
+  errors: string[];
+  instancesRemoved: string[];
+  proxyRemoved: boolean;
+  networkRemoved: boolean;
+  /** State files/dirs deleted under the root. */
+  removedPaths: string[];
+  /** Paths intentionally preserved (backups unless --delete-backups). */
+  keptPaths: string[];
+}
+
+/**
+ * Full teardown of a SelfHelp server: every instance (containers + volumes +
+ * folders), the shared Traefik proxy, the proxy network, and the manager's
+ * server state files. The ONE deliberately destructive command — it demands
+ * the typed confirmation `purge selfhelp` and still keeps per-instance
+ * backups unless `--delete-backups` is passed. After a purge, `server init`
+ * starts from a clean slate.
+ */
+export async function serverPurge(deps: ActionDeps, opts: ServerPurgeOptions): Promise<ServerPurgeReport> {
+  const report: ServerPurgeReport = {
+    ok: false,
+    errors: [],
+    instancesRemoved: [],
+    proxyRemoved: false,
+    networkRemoved: false,
+    removedPaths: [],
+    keptPaths: [],
+  };
+  if (opts.confirm !== 'purge selfhelp') {
+    report.errors.push('Confirmation mismatch: pass --confirm "purge selfhelp" to proceed.');
+    return report;
+  }
+
+  const inventoryStore = new InventoryStore(deps.root);
+  const inventory = await inventoryStore.read().catch(() => null);
+
+  // 1. Every registered instance: full delete (containers, volumes, folder).
+  for (const entry of inventory?.instances ?? []) {
+    try {
+      const res = await instanceRemove(deps, entry.instanceId, {
+        mode: 'full_delete',
+        deleteVolumes: true,
+        deleteBackups: opts.deleteBackups ?? false,
+        confirm: `delete ${entry.instanceId}`,
+      });
+      if (!res.executed) {
+        report.errors.push(`${entry.instanceId}: ${res.errors.join('; ')}`);
+        continue;
+      }
+      report.instancesRemoved.push(entry.instanceId);
+      if (!(opts.deleteBackups ?? false)) {
+        report.keptPaths.push(instancePaths(entry.instanceId, deps.root).backupsDir);
+      }
+    } catch (err) {
+      report.errors.push(`${entry.instanceId}: ${errMessage(err)}`);
+    }
+  }
+
+  // 2. Shared proxy: compose down (Traefik holds no instance data), then the
+  //    proxy folder and network.
+  const proxy = proxyDir(deps.root);
+  try {
+    if (await pathExists(path.join(proxy, 'compose.yaml'))) {
+      await deps.runner.run(proxy, composeCommands.down());
+      report.proxyRemoved = true;
+    }
+    await rm(proxy, { recursive: true, force: true });
+    report.removedPaths.push(proxy);
+  } catch (err) {
+    report.errors.push(`proxy: ${errMessage(err)}`);
+  }
+  const network = inventory?.proxy.network ?? DEFAULT_PROXY_NETWORK;
+  if (deps.removeNetwork) {
+    try {
+      await deps.removeNetwork(network);
+      report.networkRemoved = true;
+    } catch (err) {
+      report.errors.push(`network ${network}: ${errMessage(err)}`);
+    }
+  }
+
+  // 3. Server state files. The instances/ tree stays when backups are kept.
+  for (const rel of ['selfhelp.server.json', 'selfhelp.server.json.bak']) {
+    const file = path.join(deps.root, rel);
+    if (await pathExists(file)) {
+      await rm(file, { force: true });
+      report.removedPaths.push(file);
+    }
+  }
+  if (opts.deleteBackups ?? false) {
+    const instancesDir = path.join(deps.root, 'instances');
+    await rm(instancesDir, { recursive: true, force: true });
+    report.removedPaths.push(instancesDir);
+  }
+
+  // 4. Manager state: operators, operation journal, locks, poller state — a
+  //    purged server starts over at the first-run setup. The audit log is the
+  //    one record deliberately kept (the purge itself should stay traceable).
+  const managerDir = path.join(deps.root, 'manager');
+  if (await pathExists(managerDir)) {
+    const auditFile = path.join(managerDir, 'audit.jsonl');
+    const keepAudit = await pathExists(auditFile);
+    for (const entry of await readdir(managerDir).catch(() => [] as string[])) {
+      if (keepAudit && entry === 'audit.jsonl') continue;
+      await rm(path.join(managerDir, entry), { recursive: true, force: true });
+      report.removedPaths.push(path.join(managerDir, entry));
+    }
+    if (keepAudit) report.keptPaths.push(auditFile);
+  }
+
+  report.ok = report.errors.length === 0;
+  return report;
 }
 
 // ---------------------------------------------------------------------------

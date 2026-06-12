@@ -8,7 +8,6 @@
  * `main.ts`, also used by the CLI's `sh-manager web` subcommand).
  */
 import { startWebUi } from './main.js';
-import type { ServerMode } from './server.js';
 
 function arg(name: string): string | undefined {
   const idx = process.argv.indexOf(`--${name}`);
@@ -20,15 +19,12 @@ function flag(name: string): boolean {
 }
 
 const port = arg('port');
-const mode = arg('mode');
 
 startWebUi({
   ...(arg('root') !== undefined ? { root: arg('root') } : {}),
   ...(arg('host') !== undefined ? { host: arg('host') } : {}),
   ...(port !== undefined ? { port: Number(port) } : {}),
-  ...(mode !== undefined ? { mode: mode as ServerMode } : {}),
   ...(flag('allow-non-local') ? { allowNonLocal: true } : {}),
-  ...(flag('persist') ? { persistAfterBootstrap: true } : {}),
   ...(arg('client-dir') !== undefined ? { clientDir: arg('client-dir') } : {}),
   ...(arg('trusted-keys') !== undefined ? { trustedKeysPath: arg('trusted-keys') } : {}),
 }).catch((err) => {

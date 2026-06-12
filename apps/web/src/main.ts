@@ -5,13 +5,14 @@
  * `sh-manager-web` (apps/web/src/bin.ts) and `sh-manager web` (the CLI
  * subcommand — the route used when the manager runs from its Docker image).
  *
- * Wires the real {@link BootstrapActions} to the existing, tested CLI actions
- * (`doctor`, `serverInit`, `instanceInstall`) and the registry client
- * (signature verification), then serves the localhost-only wizard/console.
- * The testable logic lives in `wizard.ts` + `server.ts`.
+ * There is ONE web UI: the authenticated operations console. A fresh state
+ * root offers the first-run operator setup, and the create-instance wizard
+ * bootstraps the server (proxy + inventory) with the first install. Wires the
+ * real check/instance actions to the existing, tested CLI actions and the
+ * registry client (signature verification), then serves the localhost-only
+ * console. The testable logic lives in `server.ts` + `instances.ts`.
  */
 import { execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -19,12 +20,12 @@ import { MANAGER_VERSION } from '@shm/schemas';
 import { RegistryClient, RegistryError } from '@shm/registry';
 import { discoverEngineRoot } from '@shm/docker';
 import { FileOperatorStore, isBootstrapRequired } from '@shm/auth';
-import { provisionFailureDetail, type BootstrapActions } from './actions.js';
-import { browseUrl, createBootstrapServer, type ServerMode } from './server.js';
+import type { BootstrapActions } from './actions.js';
+import { browseUrl, createManagerServer, DEFAULT_REGISTRY_URL } from './server.js';
 import { AuditLog, InstanceLocks, OperationJournal, OperationRunner } from './jobs.js';
 import { buildInstanceActions } from './instances.js';
 import { CmsOperationsPoller } from './poller.js';
-import { doctor, instanceInstall, serverInit } from '../../cli/src/actions.js';
+import { doctor } from '../../cli/src/actions.js';
 import { loadTrustedKeys, realDeps } from '../../cli/src/env.js';
 import { checkSelfUpdate } from '../../cli/src/self-update.js';
 
@@ -51,9 +52,7 @@ export interface WebUiOptions {
   root?: string;
   host?: string;
   port?: number;
-  mode?: ServerMode;
   allowNonLocal?: boolean;
-  persistAfterBootstrap?: boolean;
   clientDir?: string;
   trustedKeysPath?: string;
   managerVersion?: string;
@@ -65,17 +64,7 @@ export async function startWebUi(opts: WebUiOptions = {}): Promise<{ host: strin
   const root = opts.root ?? process.env.SELFHELP_ROOT ?? '/opt/selfhelp';
   const host = opts.host ?? process.env.SHM_WEB_HOST ?? '127.0.0.1';
   const port = opts.port ?? Number(process.env.SHM_WEB_PORT ?? '8765');
-  // Mode default is AUTO: once the server inventory exists, the web UI is the
-  // authenticated operations console (persistent); a fresh state folder gets
-  // the one-shot install wizard (bootstrap). An explicit --mode / SHM_WEB_MODE
-  // always wins.
-  const envMode = process.env.SHM_WEB_MODE;
-  const requestedMode: ServerMode | undefined =
-    opts.mode ?? (envMode === 'bootstrap' || envMode === 'persistent' ? envMode : undefined);
-  const serverInitialized = existsSync(path.join(root, 'selfhelp.server.json'));
-  const mode: ServerMode = requestedMode ?? (serverInitialized ? 'persistent' : 'bootstrap');
   const allowNonLocal = opts.allowNonLocal ?? process.env.SHM_WEB_ALLOW_NONLOCAL === 'true';
-  const persistAfterBootstrap = opts.persistAfterBootstrap ?? process.env.SHM_WEB_PERSIST === 'true';
   const clientDir = opts.clientDir ?? process.env.SHM_WEB_CLIENT_DIR ?? path.join(here, '..', 'dist-web');
   // Same default trust anchor as the CLI: the pinned official production key,
   // never the dev fixture (its seed is public).
@@ -84,15 +73,14 @@ export async function startWebUi(opts: WebUiOptions = {}): Promise<{ host: strin
     process.env.SELFHELP_TRUSTED_KEYS ??
     path.join(here, '..', '..', '..', 'packages', 'schemas', 'keys', 'official-trusted-keys.json');
   const managerVersion = opts.managerVersion ?? process.env.SHM_MANAGER_VERSION ?? MANAGER_VERSION;
+  const defaultRegistryUrl = process.env.SELFHELP_REGISTRY ?? DEFAULT_REGISTRY_URL;
 
   const trustedKeys = await loadTrustedKeys(trustedKeysPath);
-  // Same engine-path discovery as the CLI: the wizard's install must emit
-  // engine-side bind sources when the manager runs containerized with the
-  // state root mounted at a different path (Docker Desktop / Windows).
+  // Same engine-path discovery as the CLI: installs must emit engine-side bind
+  // sources when the manager runs containerized with the state root mounted at
+  // a different path (Docker Desktop / Windows).
   const mapping = await discoverEngineRoot({ root });
   const deps = realDeps(root, trustedKeys, mapping ? { engineRoot: mapping.engineRoot } : {});
-
-  let lastHealthOk = false;
 
   const actions: BootstrapActions = {
     async checkDocker() {
@@ -129,66 +117,6 @@ export async function startWebUi(opts: WebUiOptions = {}): Promise<{ host: strin
       const result = await doctor(deps, requiredPorts);
       return { status: result.status === 'blocked' ? 'blocked' : result.status === 'warning' ? 'warning' : 'ok', detail: result.checks.map((c) => c.message).join(' ') };
     },
-    async runInstall(plan) {
-      const publicUrl =
-        plan.instanceInstall.mode === 'production'
-          ? `https://${plan.instanceInstall.domain}`
-          : `http://localhost:${plan.instanceInstall.localPort}`;
-      // Failures come back as a structured outcome (never a thrown 500): the
-      // wizard records them, shows the failing phase, and can offer a retry.
-      try {
-        // resumeInstanceId: a failed attempt leaves the server half-bootstrapped,
-        // and the wizard's in-memory retry acknowledgement does not survive a
-        // manager restart (operator updates the image, then reinstalls). When
-        // the on-disk state holds no OTHER instance, re-running the bootstrap
-        // for the same install is a safe continuation, not a conflict.
-        await serverInit(deps, { ...plan.serverInit, resumeInstanceId: plan.instanceInstall.instanceId });
-      } catch (err) {
-        lastHealthOk = false;
-        return { ok: false, publicUrl, failedStep: 'server_init', detail: err instanceof Error ? err.message : String(err) };
-      }
-      let res;
-      try {
-        res = await instanceInstall(deps, { ...plan.instanceInstall });
-      } catch (err) {
-        lastHealthOk = false;
-        return { ok: false, publicUrl, failedStep: 'install', detail: err instanceof Error ? err.message : String(err) };
-      }
-      lastHealthOk = res.provision ? res.provision.ok : res.broughtUp;
-      // The generated admin password rides ONLY on this one-shot outcome (and
-      // is persisted server-side to the instance's secrets/admin_password):
-      // it never enters the wizard state or any /api/state snapshot. It is
-      // included on failure outcomes too — provisioning may have created the
-      // admin before a later step (e.g. health) stopped the install.
-      const adminSecret = {
-        ...(res.adminPassword ? { adminPassword: res.adminPassword } : {}),
-        ...(res.adminPasswordFile ? { adminPasswordFile: res.adminPasswordFile } : {}),
-      };
-      if (res.provision && !res.provision.ok) {
-        const failed = res.provision.steps.find((s) => s.status === 'failed');
-        return {
-          ok: false,
-          instanceDir: res.instanceDir,
-          version: res.version,
-          publicUrl,
-          detail: provisionFailureDetail(res.provision.steps),
-          ...(failed ? { failedStep: failed.name } : {}),
-          ...adminSecret,
-        };
-      }
-      return {
-        ok: true,
-        instanceDir: res.instanceDir,
-        version: res.version,
-        publicUrl,
-        detail: res.provision ? 'Provisioning succeeded.' : 'Installed.',
-        ...adminSecret,
-      };
-    },
-    async checkHealth() {
-      // Health was executed as the final provisioning step during runInstall.
-      return { healthy: lastHealthOk, degraded: false, detail: lastHealthOk ? 'All services healthy.' : 'Health check failed during provisioning.' };
-    },
     async checkManagerUpdate() {
       return checkSelfUpdate({ currentVersion: managerVersion });
     },
@@ -205,61 +133,51 @@ export async function startWebUi(opts: WebUiOptions = {}): Promise<{ host: strin
     },
   };
 
-  const operatorStore = mode === 'persistent' ? new FileOperatorStore(path.join(root, 'manager', 'operators.json')) : undefined;
+  const operatorStore = new FileOperatorStore(path.join(root, 'manager', 'operators.json'));
 
-  // Instance lifecycle management + the background CMS-operations poller exist
-  // ONLY in persistent mode (authenticated, CSRF-protected). Bootstrap mode
-  // never exposes them and never drains CMS operations.
-  let instanceManagement: Parameters<typeof createBootstrapServer>[0]['instanceManagement'];
+  const journal = new OperationJournal(root);
+  const interrupted = await journal.recoverInterrupted();
+  if (interrupted > 0) {
+    console.warn(`Marked ${interrupted} operation(s) left running by a previous process as failed.`);
+  }
+  const audit = new AuditLog(root);
+  const locks = new InstanceLocks(root);
+  const runner = new OperationRunner(journal, audit, locks);
+  const instances = buildInstanceActions({ deps, locks });
+
   let poller: CmsOperationsPoller | undefined;
-  if (mode === 'persistent') {
-    const journal = new OperationJournal(root);
-    const interrupted = await journal.recoverInterrupted();
-    if (interrupted > 0) {
-      console.warn(`Marked ${interrupted} operation(s) left running by a previous process as failed.`);
-    }
-    const audit = new AuditLog(root);
-    const locks = new InstanceLocks(root);
-    const runner = new OperationRunner(journal, audit, locks);
-    const instances = buildInstanceActions({ deps, locks });
-    instanceManagement = { instances, runner, journal };
-
-    const pollSeconds = Number(process.env.SHM_CMS_POLL_SECONDS ?? '15');
-    if (Number.isFinite(pollSeconds) && pollSeconds > 0) {
-      poller = new CmsOperationsPoller({ instances, runner, intervalMs: pollSeconds * 1000 });
-    }
+  const pollSeconds = Number(process.env.SHM_CMS_POLL_SECONDS ?? '15');
+  if (Number.isFinite(pollSeconds) && pollSeconds > 0) {
+    poller = new CmsOperationsPoller({ instances, runner, intervalMs: pollSeconds * 1000 });
   }
 
-  const handle = createBootstrapServer({
+  const handle = createManagerServer({
     actions,
-    mode,
     host,
     port,
     allowNonLocal,
-    persistAfterBootstrap,
     clientDir,
     managerVersion,
-    ...(operatorStore ? { operatorStore } : {}),
-    ...(instanceManagement ? { instanceManagement } : {}),
+    defaultRegistryUrl,
+    operatorStore,
+    instanceManagement: { instances, runner, journal },
   });
 
   const bound = await handle.listen();
   poller?.start();
   // Always print the URL an operator can actually open: a wildcard bind
   // (in-container) is reachable via the published localhost port, not 0.0.0.0.
-  console.log(`SelfHelp Manager ${mode} UI (v${managerVersion}): ${browseUrl(bound.host, bound.port)}`);
-  if (requestedMode === undefined) {
-    console.log(
-      serverInitialized
-        ? 'Mode auto-selected: persistent (server inventory found) — sign in to manage instances. Force the installer with --mode bootstrap.'
-        : 'Mode auto-selected: bootstrap (fresh state folder) — the install wizard will run. After the first install, the web UI starts as the management console.',
-    );
+  console.log(`SelfHelp Manager console (v${managerVersion}): ${browseUrl(bound.host, bound.port)}`);
+  const serverStatus = await instances.serverStatus();
+  if (!serverStatus.initialized) {
+    console.log('Fresh state folder: the console will guide you through creating the first instance.');
+  } else {
+    console.log(`Managing ${serverStatus.instanceCount} instance(s) on server ${serverStatus.serverId}.`);
   }
-  if (mode === 'persistent' && operatorStore && isBootstrapRequired(await operatorStore.load())) {
+  if (isBootstrapRequired(await operatorStore.load())) {
     console.log(
-      'No operator accounts exist yet, so sign-in is not possible. Create the first operator:\n' +
-        '  sh-manager admin create --email you@example.org --roles server_owner\n' +
-        '  (wrapper: ./shm.sh admin create ...  |  .\\shm.ps1 admin create ...)',
+      'No operator accounts exist yet. Open the console to create the first operator account\n' +
+        '(or use the CLI: sh-manager admin create --email you@example.org --roles server_owner).',
     );
   }
   if (bound.host === '0.0.0.0' || bound.host === '::') {

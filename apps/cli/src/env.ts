@@ -188,6 +188,15 @@ export function realDeps(root: string, trustedKeys: TrustedKeysFile, opts: RealD
         if (!msg.includes('already exists')) throw err;
       }
     },
+    removeNetwork: async (name): Promise<void> => {
+      try {
+        await execFileAsync('docker', ['network', 'rm', name]);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        // Idempotent: an already-absent network is success.
+        if (!/not found|no such network/i.test(msg)) throw err;
+      }
+    },
     archiveVolume: async (volumeName, outFile): Promise<void> => {
       const dir = engineDir(path.dirname(outFile));
       const base = path.basename(outFile);

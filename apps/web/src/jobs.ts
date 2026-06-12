@@ -31,6 +31,7 @@ export type OperationKind =
   | 'instance_restore'
   | 'instance_clone'
   | 'instance_set_address'
+  | 'instance_set_mailer'
   | 'instance_remove'
   | 'cms_operations_drain';
 

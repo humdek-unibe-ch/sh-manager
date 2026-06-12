@@ -15,6 +15,8 @@ export const HOSTNAME_RE = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)
 export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 /** Exact release version (1.2.3 with optional pre-release tag) or "latest". */
 export const VERSION_RE = /^(latest|\d+\.\d+\.\d+(-[0-9a-z.-]+)?)$/i;
+/** `scheme://…` mailer DSN (smtp/smtps/sendmail/native, anything Symfony Mailer accepts). */
+export const MAILER_DSN_RE = /^[a-z][a-z0-9+.-]*:\/\/.+$/i;
 
 export function isValidLocalPort(port: unknown): port is number {
   return typeof port === 'number' && Number.isInteger(port) && port >= 1 && port <= 65535;
@@ -28,6 +30,8 @@ export interface CreateInstanceShape {
   localPort?: number;
   version?: string;
   adminEmail?: string;
+  mailerDsn?: string;
+  letsencryptEmail?: string;
 }
 
 /** Blocking problems for a create-instance request (empty = valid). */
@@ -51,6 +55,12 @@ export function validateCreateInstance(req: CreateInstanceShape): string[] {
   }
   if (!req.adminEmail || !EMAIL_RE.test(req.adminEmail)) {
     errors.push('A valid admin email is required.');
+  }
+  if (req.mailerDsn !== undefined && req.mailerDsn !== '' && !MAILER_DSN_RE.test(req.mailerDsn)) {
+    errors.push('Mailer DSN must look like scheme://… (e.g. smtp://user:pass@mail.example.org:587).');
+  }
+  if (req.letsencryptEmail !== undefined && req.letsencryptEmail !== '' && !EMAIL_RE.test(req.letsencryptEmail)) {
+    errors.push("Let's Encrypt contact email must be a valid email address.");
   }
   return errors;
 }

@@ -13,25 +13,32 @@
  * {@link OperationContext} for phase/log reporting and their results land in
  * the redacted operation journal.
  */
+import { randomBytes } from 'node:crypto';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import type { HealthReport } from '@shm/core';
-import type { BackupManifest, InstanceManifest } from '@shm/schemas';
-import { ManifestStore, instancePaths, type RemoveMode } from '@shm/instances';
+import type { BackupManifest, InstanceManifest, ServerInventory } from '@shm/schemas';
+import { InventoryStore, ManifestStore, instancePaths, type RemoveMode } from '@shm/instances';
 import {
   drainInstanceOperations,
+  drainInstancePluginOperations,
+  hasPendingPluginOperations,
   instanceBackup,
   instanceClone,
+  instanceGetMailer,
   instanceHealth,
   instanceInstall,
   instanceList,
   instanceRemove,
   instanceRestore,
   instanceSetAddress,
+  instanceSetMailer,
   instanceUpdate,
+  serverInit,
   type ActionDeps,
   type InstanceInstallOptions,
   type InstanceUpdateOptions,
+  type MailerStatus,
 } from '../../cli/src/actions.js';
 import { ComposeExecBackendOperationsClient } from '../../cli/src/operations-client.js';
 import type { InstanceLocks, OperationContext } from './jobs.js';
@@ -80,6 +87,13 @@ export interface CreateInstanceRequest {
   version?: string;
   adminEmail: string;
   adminName?: string;
+  /** Optional SMTP DSN; stored in the instance's 0600 secrets.env. */
+  mailerDsn?: string;
+  /**
+   * Let's Encrypt contact email, used ONLY when this install also initializes
+   * a fresh server in production mode (first instance creates the proxy).
+   */
+  letsencryptEmail?: string;
 }
 
 export interface UpdateInstanceRequest {
@@ -115,11 +129,29 @@ export interface RemoveInstanceRequest {
   confirm?: string;
 }
 
+export interface SetMailerRequest {
+  /** New SMTP DSN; empty string or `clear: true` removes the override. */
+  dsn?: string;
+  clear?: boolean;
+}
+
+/** Whether this state root is an initialized SelfHelp server. */
+export interface ServerStatus {
+  initialized: boolean;
+  serverId: string | null;
+  proxyNetwork: string | null;
+  instanceCount: number;
+}
+
 export interface ManagerInstanceActions {
   list(): Promise<InstanceSummary[]>;
   detail(instanceId: string): Promise<InstanceDetail | null>;
   backups(instanceId: string): Promise<BackupSummary[]>;
   health(instanceId: string): Promise<HealthReport>;
+  /** Is this state root an initialized server (inventory exists)? */
+  serverStatus(): Promise<ServerStatus>;
+  /** Redacted outbound-mail configuration of an instance. */
+  mailer(instanceId: string): Promise<MailerStatus>;
   /** Plan-only update preview (never mutates). */
   updateDryRun(instanceId: string, req: UpdateInstanceRequest): Promise<unknown>;
 
@@ -131,6 +163,8 @@ export interface ManagerInstanceActions {
   clone(sourceInstanceId: string, req: CloneInstanceRequest, ctx: OperationContext): Promise<unknown>;
   /** Changes the routed domain / local port and restarts the instance. */
   setAddress(instanceId: string, req: SetAddressRequest, ctx: OperationContext): Promise<unknown>;
+  /** Sets or clears the instance's SMTP DSN and restarts it. */
+  setMailer(instanceId: string, req: SetMailerRequest, ctx: OperationContext): Promise<unknown>;
   remove(instanceId: string, req: RemoveInstanceRequest, ctx: OperationContext): Promise<unknown>;
   /**
    * Cheap read-only peek: is a CMS-requested operation waiting? Lets the
@@ -250,6 +284,21 @@ export function buildInstanceActions(opts: BuildInstanceActionsOptions): Manager
       return instanceHealth(deps, instanceId);
     },
 
+    async serverStatus() {
+      const inventory: ServerInventory | null = await new InventoryStore(deps.root).read().catch(() => null);
+      if (!inventory) return { initialized: false, serverId: null, proxyNetwork: null, instanceCount: 0 };
+      return {
+        initialized: true,
+        serverId: inventory.serverId,
+        proxyNetwork: inventory.proxy.network,
+        instanceCount: inventory.instances.length,
+      };
+    },
+
+    async mailer(instanceId) {
+      return instanceGetMailer(deps, instanceId);
+    },
+
     async updateDryRun(instanceId, req) {
       const res = await instanceUpdate(deps, instanceId, {
         dryRun: true,
@@ -260,6 +309,22 @@ export function buildInstanceActions(opts: BuildInstanceActionsOptions): Manager
     },
 
     async create(req, ctx) {
+      // First instance on a fresh state root: initialize the server (proxy +
+      // inventory) inline so the GUI needs no separate "server init" step. The
+      // serverId is generated once and persisted in the inventory; reruns of a
+      // half-finished first install resume via resumeInstanceId.
+      const status = await this.serverStatus();
+      if (!status.initialized) {
+        await ctx.setPhase('server init');
+        const init = await serverInit(deps, {
+          serverId: `srv-${randomBytes(4).toString('hex')}`,
+          mode: req.mode,
+          ...(req.letsencryptEmail ? { letsencryptEmail: req.letsencryptEmail } : {}),
+          resumeInstanceId: req.instanceId,
+        });
+        await ctx.log(`Server initialized (proxy + inventory at ${init.inventoryPath}).`);
+      }
+
       await ctx.setPhase('install');
       const installOpts: InstanceInstallOptions = {
         instanceId: req.instanceId,
@@ -273,6 +338,7 @@ export function buildInstanceActions(opts: BuildInstanceActionsOptions): Manager
         provision: true,
         adminEmail: req.adminEmail,
         ...(req.adminName ? { adminName: req.adminName } : {}),
+        ...(req.mailerDsn ? { mailerDsn: req.mailerDsn } : {}),
         // Journal each install stage as the operation phase: the create wizard
         // renders these as a live step checklist (registry → compose → start →
         // wait_db → migrations → … → health).
@@ -393,6 +459,18 @@ export function buildInstanceActions(opts: BuildInstanceActionsOptions): Manager
       };
     },
 
+    async setMailer(instanceId, req, ctx) {
+      await ctx.setPhase('apply mailer');
+      const clear = req.clear === true || req.dsn === '' || req.dsn === undefined;
+      const res = await instanceSetMailer(deps, instanceId, clear ? { clear: true } : { dsn: req.dsn!, restart: true });
+      await ctx.log(
+        res.configured
+          ? `Mailer DSN set (${res.redactedDsn}); containers restarted.`
+          : 'Mailer DSN cleared; instance falls back to the bundled Mailpit.',
+      );
+      return { configured: res.configured, redactedDsn: res.redactedDsn ?? null, restarted: res.restarted };
+    },
+
     async remove(instanceId, req, ctx) {
       await ctx.setPhase(`remove (${req.mode})`);
       const res = await instanceRemove(deps, instanceId, {
@@ -412,7 +490,10 @@ export function buildInstanceActions(opts: BuildInstanceActionsOptions): Manager
         instanceDir: instancePaths(instanceId, deps.root).dir,
         instanceId,
       });
-      return (await client.fetchPending(instanceId)) !== null;
+      if ((await client.fetchPending(instanceId)) !== null) return true;
+      // Managed-mode plugin installs/updates/uninstalls parked by the CMS for
+      // the operator (the manager) count as pending work for the poller too.
+      return hasPendingPluginOperations(deps, instanceId);
     },
 
     async drainCmsOperations(instanceId, ctx) {
@@ -431,6 +512,21 @@ export function buildInstanceActions(opts: BuildInstanceActionsOptions): Manager
             : `Operation ${outcome.operationId} finished: ${outcome.status}.`;
         lines.push(line);
         await ctx.log(line);
+      }
+
+      // Plugin operations second: a system update drained above may already
+      // have reinstalled plugins as part of its own execution.
+      const pluginReport = await drainInstancePluginOperations(deps, instanceId, { log: (l) => ctx.log(l) });
+      for (const outcome of pluginReport.outcomes) {
+        const line =
+          outcome.status === 'done'
+            ? `Plugin ${outcome.type} ${outcome.pluginId} (operation #${outcome.operationId}) finished.`
+            : `Plugin ${outcome.type} ${outcome.pluginId} (operation #${outcome.operationId}) failed: ${outcome.detail ?? 'unknown error'}`;
+        lines.push(line);
+        await ctx.log(line);
+      }
+      if (pluginReport.restarted) {
+        await ctx.log('Symfony services restarted with the updated plugin state.');
       }
       return { processed: lines.length, outcomes: lines };
     },

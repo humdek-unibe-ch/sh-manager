@@ -1,20 +1,24 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
 /**
- * Bootstrap / persistent manager HTTP server (Node built-ins only).
+ * Manager HTTP server (Node built-ins only) — the single, always-authenticated
+ * operations console. There is no separate "bootstrap mode" anymore: a fresh
+ * server starts with the same console, offers a one-time "create the first
+ * operator" setup (localhost-guarded), and the create-instance wizard performs
+ * the server bootstrap (proxy + inventory) as part of the first install.
  *
  * Security posture (must-not-break rules 12-13 + HIGH 1 acceptance):
  *   - Binds to 127.0.0.1 by default. A non-loopback bind is refused unless the
  *     operator explicitly opts in (`allowNonLocal`).
- *   - A Host-header allowlist defends the unauthenticated localhost bootstrap
- *     flow against DNS-rebinding.
- *   - The bootstrap wizard is unauthenticated BUT localhost-only and self-locks
- *     after a successful install (returns 410) unless persistent mode is on.
- *   - Persistent mode requires an authenticated operator session for every API
- *     route, with CSRF on state-changing requests.
+ *   - A Host-header allowlist defends the localhost UI against DNS-rebinding
+ *     (skipped only when the operator explicitly exposed the UI non-locally).
+ *   - Every API route requires an authenticated operator session, with CSRF on
+ *     state-changing requests. The only pre-auth routes are the sign-in
+ *     metadata, login, and the first-run operator setup — and setup hard-locks
+ *     itself as soon as one enabled local operator exists.
  *
- * The server holds one in-memory wizard state and one session table; all
- * side effects go through the injected {@link BootstrapActions}.
+ * All side effects go through the injected {@link BootstrapActions} and
+ * {@link ManagerInstanceActions}.
  */
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
@@ -23,25 +27,27 @@ import { extname, normalize, resolve } from 'node:path';
 import type { OperatorStore } from '@shm/auth';
 import {
   authenticateLocal,
+  createOperator,
   createSession,
   destroySession,
   emptySessionTable,
   getSession,
   isBootstrapRequired,
+  validatePasswordStrength,
   verifyCsrf,
   type ManagerSession,
   type SessionTable,
 } from '@shm/auth';
 import {
   dockerToCheck,
-  healthToCheck,
-  installToCheck,
   registryToCheck,
   resourceToCheck,
   type BootstrapActions,
+  type CheckResult,
 } from './actions.js';
 import { InstanceLockedError, type OperationJournal, type OperationRunner } from './jobs.js';
 import {
+  MAILER_DSN_RE,
   validateAddressChange,
   validateCloneInstance,
   validateCreateInstance,
@@ -52,47 +58,31 @@ import type {
   ManagerInstanceActions,
   RemoveInstanceRequest,
   SetAddressRequest,
+  SetMailerRequest,
   UpdateInstanceRequest,
 } from './instances.js';
-import {
-  advance,
-  back,
-  buildBootstrapPlan,
-  canAdvance,
-  currentStep,
-  initWizard,
-  isBootstrapComplete,
-  recordCheck,
-  setConfig,
-  WizardError,
-  type WizardConfig,
-  type WizardState,
-} from './wizard.js';
-import { renderWizardHtml } from './ui.js';
 
-export type ServerMode = 'bootstrap' | 'persistent';
+/** Default official registry, used when a preflight/version request names none. */
+export const DEFAULT_REGISTRY_URL = 'https://humdek-unibe-ch.github.io/sh2-plugin-registry/';
 
-export interface BootstrapServerOptions {
+export interface ManagerServerOptions {
   actions: BootstrapActions;
-  mode?: ServerMode;
   host?: string;
   port?: number;
   allowNonLocal?: boolean;
-  requiredPorts?: number[];
-  operatorStore?: OperatorStore;
+  /** Operator accounts (required — every API route is authenticated). */
+  operatorStore: OperatorStore;
   sessionLifetimeSeconds?: number;
-  /** Keep serving after a successful bootstrap (otherwise routes self-lock). */
-  persistAfterBootstrap?: boolean;
-  initialConfig?: Partial<WizardConfig>;
-  /** Directory of the built React SPA (Vite `dist-web`). Falls back to the inline shell. */
+  /** Directory of the built React SPA (Vite `dist-web`). Falls back to an inline notice. */
   clientDir?: string;
   /** Manager version surfaced in every state snapshot (UI header/footer). */
   managerVersion?: string;
+  /** Registry consulted by preflight/version lookups when the client names none. */
+  defaultRegistryUrl?: string;
   /**
-   * Instance lifecycle management (Workstream 2). Persistent mode only: the
-   * unauthenticated bootstrap wizard NEVER exposes these APIs. All mutating
-   * actions run through the operation journal + audit log + per-instance lock
-   * and return `202 { operationId }`.
+   * Instance lifecycle management. All mutating actions run through the
+   * operation journal + audit log + per-instance lock and return
+   * `202 { operationId }`.
    */
   instanceManagement?: {
     instances: ManagerInstanceActions;
@@ -182,7 +172,15 @@ function parseCookies(header: string | undefined): Record<string, string> {
 
 const SESSION_COOKIE = 'shm_session';
 
-export interface BootstrapServerHandle {
+/** Minimal page served when the built SPA is missing (dev / broken image). */
+const FALLBACK_SHELL = `<!doctype html><html><head><meta charset="utf-8"><title>SelfHelp Manager</title></head>
+<body style="font-family: system-ui; max-width: 40rem; margin: 4rem auto;">
+<h1>SelfHelp Manager</h1>
+<p>The web console assets are not built. Run <code>npm run build</code> (or use the official
+<code>sh-manager</code> Docker image) and reload this page.</p>
+</body></html>`;
+
+export interface ManagerServerHandle {
   /** Raw request handler (used directly in tests). */
   handler: (req: IncomingMessage, res: ServerResponse) => void;
   /** Underlying http.Server. */
@@ -190,16 +188,14 @@ export interface BootstrapServerHandle {
   /** Start listening; resolves with the bound address. */
   listen(): Promise<{ host: string; port: number }>;
   close(): Promise<void>;
-  /** Current wizard state (read-only snapshot for tests). */
-  getState(): WizardState;
 }
 
-export function createBootstrapServer(options: BootstrapServerOptions): BootstrapServerHandle {
-  const mode: ServerMode = options.mode ?? 'bootstrap';
+export function createManagerServer(options: ManagerServerOptions): ManagerServerHandle {
   const host = options.host ?? '127.0.0.1';
   const port = options.port ?? 8765;
   const allowNonLocal = options.allowNonLocal ?? false;
   const clientDir = options.clientDir ? resolve(options.clientDir) : undefined;
+  const defaultRegistryUrl = options.defaultRegistryUrl ?? DEFAULT_REGISTRY_URL;
   const now = options.now ?? (() => new Date());
 
   if (!isLoopbackHost(host) && !allowNonLocal) {
@@ -207,11 +203,7 @@ export function createBootstrapServer(options: BootstrapServerOptions): Bootstra
       `Refusing to bind the manager UI to non-loopback host "${host}". Set allowNonLocal explicitly to expose it (auth required).`,
     );
   }
-  if (mode === 'persistent' && !options.operatorStore) {
-    throw new Error('Persistent mode requires an operator store for authentication.');
-  }
 
-  let state = initWizard(options.initialConfig);
   let sessions: SessionTable = emptySessionTable();
 
   async function readBody(req: IncomingMessage): Promise<unknown> {
@@ -234,97 +226,89 @@ export function createBootstrapServer(options: BootstrapServerOptions): Bootstra
     return getSession(sessions, id, now());
   }
 
-  async function handleLogin(ctx: RequestContext, res: ServerResponse): Promise<void> {
-    const store = options.operatorStore;
-    if (!store) throw new HttpError(500, 'No operator store configured.');
-    const body = (ctx.body ?? {}) as { email?: string; password?: string };
-    if (!body.email || !body.password) throw new HttpError(400, 'Email and password are required.');
-    const table = await store.load();
-    const result = authenticateLocal(table, body.email, body.password);
-    if (!result.ok || !result.operator) throw new HttpError(401, result.reason ?? 'Invalid credentials.');
+  function startSession(res: ServerResponse, operator: { id: string; email: string; roles: ManagerSession['roles'] }): void {
     const created = createSession(
       sessions,
       {
-        operatorId: result.operator.id,
-        email: result.operator.email,
-        roles: result.operator.roles,
+        operatorId: operator.id,
+        email: operator.email,
+        roles: operator.roles,
         ...(options.sessionLifetimeSeconds ? { lifetimeSeconds: options.sessionLifetimeSeconds } : {}),
       },
       now(),
     );
     sessions = created.table;
     res.setHeader('Set-Cookie', `${SESSION_COOKIE}=${created.session.id}; HttpOnly; SameSite=Strict; Path=/`);
-    sendJson(res, 200, { ok: true, email: created.session.email, roles: created.session.roles, csrfToken: created.session.csrfToken });
+    sendJson(res, 200, {
+      ok: true,
+      email: created.session.email,
+      roles: created.session.roles,
+      csrfToken: created.session.csrfToken,
+    });
   }
 
-  function snapshot(extra?: Record<string, unknown>): Record<string, unknown> {
-    return {
-      mode,
-      step: currentStep(state),
-      stepIndex: state.stepIndex,
-      steps: state.steps,
-      config: state.config,
-      checks: state.checks,
-      completed: state.completed,
-      canAdvance: canAdvance(state),
-      ...(options.managerVersion ? { managerVersion: options.managerVersion } : {}),
-      ...extra,
-    };
+  async function handleLogin(ctx: RequestContext, res: ServerResponse): Promise<void> {
+    const body = (ctx.body ?? {}) as { email?: string; password?: string };
+    if (!body.email || !body.password) throw new HttpError(400, 'Email and password are required.');
+    const table = await options.operatorStore.load();
+    const result = authenticateLocal(table, body.email, body.password);
+    if (!result.ok || !result.operator) throw new HttpError(401, result.reason ?? 'Invalid credentials.');
+    startSession(res, result.operator);
   }
 
-  async function runCheck(step: string, res: ServerResponse): Promise<void> {
-    switch (step) {
-      case 'docker':
-        state = recordCheck(state, 'docker', dockerToCheck(await options.actions.checkDocker()));
-        break;
-      case 'internet':
-        state = recordCheck(state, 'internet', await options.actions.checkInternet());
-        break;
-      case 'registry':
-        state = recordCheck(state, 'registry', registryToCheck(await options.actions.checkRegistry(state.config.registryUrl)));
-        break;
-      case 'resources': {
-        const ports = options.requiredPorts ?? (state.config.mode === 'production' ? [80, 443] : []);
-        state = recordCheck(state, 'resources', resourceToCheck(await options.actions.checkResources(ports)));
-        break;
-      }
-      default:
-        throw new HttpError(400, `Unknown check step "${step}".`);
+  /**
+   * First-run setup: create the FIRST operator account from the (localhost)
+   * sign-in screen, then sign them in. Hard requirement: available only while
+   * NO enabled local operator exists — afterwards it permanently answers 409,
+   * so it can never be used to add accounts to a configured manager.
+   */
+  async function handleSetupOperator(ctx: RequestContext, res: ServerResponse): Promise<void> {
+    const body = (ctx.body ?? {}) as { email?: string; displayName?: string; password?: string };
+    const table = await options.operatorStore.load();
+    if (!isBootstrapRequired(table)) {
+      throw new HttpError(409, 'Operators already exist. Sign in instead (or use `sh-manager admin create`).');
     }
-    sendJson(res, 200, snapshot());
-  }
-
-  async function handleInstall(res: ServerResponse): Promise<void> {
-    let plan;
+    if (!body.email || !body.password) throw new HttpError(400, 'Email and password are required.');
+    const strength = validatePasswordStrength(body.password);
+    if (!strength.ok) throw new HttpError(400, strength.reason ?? 'Password too weak.');
+    let created;
     try {
-      plan = buildBootstrapPlan(state.config);
+      created = createOperator(table, {
+        email: body.email,
+        displayName: body.displayName ?? body.email,
+        password: body.password,
+        roles: ['server_owner'],
+      });
     } catch (err) {
-      throw new HttpError(400, err instanceof WizardError ? err.message : 'Invalid configuration.');
+      throw new HttpError(400, err instanceof Error ? err.message : 'Could not create operator.');
     }
-    // Retry after a failed attempt: the first run may already have written the
-    // inventory/proxy/instance dir, so the re-run must acknowledge import/repair
-    // instead of failing with "this server is already bootstrapped".
-    const priorInstall = state.checks.install;
-    if (priorInstall && !priorInstall.ok) {
-      plan = { ...plan, serverInit: { ...plan.serverInit, allowImport: true } };
-    }
-    const outcome = await options.actions.runInstall(plan);
-    state = recordCheck(state, 'install', installToCheck(outcome));
-    if (!outcome.ok) {
-      sendJson(res, 200, snapshot({ outcome }));
-      return;
-    }
-    const health = await options.actions.checkHealth(plan);
-    state = recordCheck(state, 'health', healthToCheck(health));
-    sendJson(res, 200, snapshot({ outcome, health, publicUrl: outcome.publicUrl }));
+    await options.operatorStore.save(created.table);
+    startSession(res, created.operator);
   }
 
   async function serveAppShell(res: ServerResponse): Promise<void> {
     if (clientDir && (await serveStatic(clientDir, 'index.html', res))) return;
-    // Dev / no-build fallback: the minimal inline shell.
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.statusCode = 200;
-    res.end(renderWizardHtml({ mode }));
+    res.end(FALLBACK_SHELL);
+  }
+
+  /**
+   * Stateless preflight: the same checks the old bootstrap wizard ran, but
+   * executed on demand for the create-instance wizard. Production mode also
+   * verifies ports 80/443 are usable (the proxy needs them).
+   */
+  async function handlePreflight(ctx: RequestContext, res: ServerResponse): Promise<void> {
+    const body = (ctx.body ?? {}) as { mode?: string; registryUrl?: string };
+    const registryUrl = body.registryUrl && /^https?:\/\//.test(body.registryUrl) ? body.registryUrl : defaultRegistryUrl;
+    const ports = body.mode === 'production' ? [80, 443] : [];
+    const [docker, internet, registry, resources] = await Promise.all([
+      options.actions.checkDocker().then(dockerToCheck, toErrorCheck),
+      options.actions.checkInternet().catch(toErrorCheck),
+      options.actions.checkRegistry(registryUrl).then(registryToCheck, toErrorCheck),
+      options.actions.checkResources(ports).then(resourceToCheck, toErrorCheck),
+    ]);
+    sendJson(res, 200, { docker, internet, registry, resources, registryUrl });
   }
 
   // Lowercase only — matches the create-form/wizard validation and the CLI's
@@ -337,13 +321,12 @@ export function createBootstrapServer(options: BootstrapServerOptions): Bootstra
   }
 
   /**
-   * Instance lifecycle APIs (persistent mode only; never in bootstrap mode).
-   * Reads answer directly; mutations run through the operation journal +
-   * audit + per-instance lock and answer `202 { operationId }`.
+   * Instance lifecycle APIs. Reads answer directly; mutations run through the
+   * operation journal + audit + per-instance lock and answer `202 { operationId }`.
    */
   async function routeInstanceManagement(ctx: RequestContext, res: ServerResponse): Promise<boolean> {
     const im = options.instanceManagement;
-    if (!im || mode !== 'persistent') return false;
+    if (!im) return false;
     const path = ctx.url.pathname;
     const operator = ctx.session?.email ?? 'unknown';
 
@@ -364,13 +347,24 @@ export function createBootstrapServer(options: BootstrapServerOptions): Bootstra
       }
     }
 
+    if (path === '/api/server/status' && ctx.method === 'GET') {
+      sendJson(res, 200, await im.instances.serverStatus());
+      return true;
+    }
+    if (path === '/api/server/preflight' && ctx.method === 'POST') {
+      await handlePreflight(ctx, res);
+      return true;
+    }
+
     if (path === '/api/instances' && ctx.method === 'GET') {
       sendJson(res, 200, { instances: await im.instances.list() });
       return true;
     }
     if (path === '/api/instances' && ctx.method === 'POST') {
-      const body = (ctx.body ?? {}) as Partial<CreateInstanceRequest>;
-      if (!body.registryUrl) throw new HttpError(400, 'registryUrl is required.');
+      // Server-authoritative registry: the official registry is the default;
+      // a custom URL must at least be http(s).
+      const body = { registryUrl: defaultRegistryUrl, ...((ctx.body ?? {}) as Partial<CreateInstanceRequest>) };
+      if (!/^https?:\/\//.test(body.registryUrl)) throw new HttpError(400, 'registryUrl must be http(s).');
       // Same rules the create wizard enforces field-by-field (shared module),
       // re-checked server-side so the API cannot be driven past them.
       const problems = validateCreateInstance(body);
@@ -397,6 +391,20 @@ export function createBootstrapServer(options: BootstrapServerOptions): Bootstra
     }
     if (rest === '/health' && ctx.method === 'POST') {
       sendJson(res, 200, await im.instances.health(instanceId));
+      return true;
+    }
+    if (rest === '/mailer' && ctx.method === 'GET') {
+      sendJson(res, 200, await im.instances.mailer(instanceId));
+      return true;
+    }
+    if (rest === '/mailer' && ctx.method === 'POST') {
+      const body = (ctx.body ?? {}) as Partial<SetMailerRequest>;
+      const clearing = body.clear === true || body.dsn === undefined || body.dsn === '';
+      if (!clearing && !MAILER_DSN_RE.test(body.dsn!)) {
+        throw new HttpError(400, 'Mailer DSN must look like scheme://… (e.g. smtp://user:pass@mail.example.org:587).');
+      }
+      const req = body as SetMailerRequest;
+      await start('instance_set_mailer', instanceId, (opCtx) => im.instances.setMailer(instanceId, req, opCtx));
       return true;
     }
     if (rest === '/update/dry-run' && ctx.method === 'POST') {
@@ -468,44 +476,50 @@ export function createBootstrapServer(options: BootstrapServerOptions): Bootstra
     return false;
   }
 
+  /** Routes that work without a session (the sign-in / first-run screens). */
+  const PRE_AUTH_ROUTES = new Set(['/api/auth/meta', '/api/login', '/api/setup/operator']);
+
   async function route(ctx: RequestContext, res: ServerResponse): Promise<void> {
     const path = ctx.url.pathname;
     const isApi = path.startsWith('/api/');
 
-    // Persistent-mode authentication gate. Only the JSON API is gated; the static
-    // SPA shell + assets are always served (they contain no secrets) so the
-    // sign-in screen can load before authentication. `/api/auth/meta` is the
-    // one pre-auth JSON route (a boolean for the sign-in screen, see below).
-    if (mode === 'persistent') {
-      if (isApi && path !== '/api/login' && path !== '/api/auth/meta' && !ctx.session) {
-        throw new HttpError(401, 'Authentication required.');
-      }
-      // CSRF for state-changing requests on authenticated routes.
-      if (ctx.session && ctx.method !== 'GET' && path !== '/api/login') {
-        if (!ctx.csrf || !verifyCsrf(sessions, ctx.session.id, ctx.csrf, now())) {
-          throw new HttpError(403, 'Invalid or missing CSRF token.');
-        }
+    // Authentication gate. Only the JSON API is gated; the static SPA shell +
+    // assets are always served (they contain no secrets) so the sign-in screen
+    // can load before authentication.
+    if (isApi && !PRE_AUTH_ROUTES.has(path) && !ctx.session) {
+      throw new HttpError(401, 'Authentication required.');
+    }
+    // CSRF for state-changing requests on authenticated routes. Login/setup
+    // create the session (no token exists yet) — they are guarded by the
+    // loopback bind + Host allowlist + credential checks instead.
+    if (ctx.session && ctx.method !== 'GET' && !PRE_AUTH_ROUTES.has(path)) {
+      if (!ctx.csrf || !verifyCsrf(sessions, ctx.session.id, ctx.csrf, now())) {
+        throw new HttpError(403, 'Invalid or missing CSRF token.');
       }
     }
 
     if (path === '/api/auth/meta' && ctx.method === 'GET') {
       // Pre-auth sign-in metadata: whether any enabled local operator exists.
-      // Boolean only — no emails, roles, or counts — so the (localhost-bound)
-      // sign-in screen can tell a first-run operator how to create an account
-      // instead of presenting a login form that can never succeed.
-      const store = options.operatorStore;
-      const operatorsConfigured = store ? !isBootstrapRequired(await store.load()) : true;
-      return sendJson(res, 200, { mode, operatorsConfigured });
+      // Boolean only — no emails, roles, or counts — so the sign-in screen can
+      // offer "create the first operator" instead of a login form that can
+      // never succeed.
+      const operatorsConfigured = !isBootstrapRequired(await options.operatorStore.load());
+      return sendJson(res, 200, {
+        mode: 'persistent',
+        operatorsConfigured,
+        ...(options.managerVersion ? { managerVersion: options.managerVersion } : {}),
+      });
     }
     if (path === '/api/login' && ctx.method === 'POST') return handleLogin(ctx, res);
+    if (path === '/api/setup/operator' && ctx.method === 'POST') return handleSetupOperator(ctx, res);
     if (path === '/api/logout' && ctx.method === 'POST') {
       if (ctx.session) sessions = destroySession(sessions, ctx.session.id);
       res.setHeader('Set-Cookie', `${SESSION_COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0`);
       return sendJson(res, 200, { ok: true });
     }
 
-    // Operations endpoints (available in persistent mode when instanceManagement is configured)
-    if (mode === 'persistent' && options.instanceManagement) {
+    // Operations endpoints (journal reads).
+    if (options.instanceManagement) {
       if (path === '/api/operations' && ctx.method === 'GET') {
         const instanceId = ctx.url.searchParams.get('instanceId') ?? undefined;
         sendJson(res, 200, {
@@ -522,14 +536,6 @@ export function createBootstrapServer(options: BootstrapServerOptions): Bootstra
       }
     }
 
-    // Bootstrap self-lock: once complete (and not persistent), the installer can
-    // no longer change anything. The SPA shell, its assets and a read-only
-    // `/api/state` stay available so the browser can show the success screen.
-    const bootstrapLocked = isBootstrapComplete(state) && !options.persistAfterBootstrap && mode === 'bootstrap';
-    if (bootstrapLocked && ctx.method !== 'GET') {
-      throw new HttpError(410, 'Bootstrap complete. The installer is disabled. Enable persistent mode to manage the server.');
-    }
-
     // Static SPA: shell at "/", hashed assets under any other non-API GET path.
     if (ctx.method === 'GET' && !isApi) {
       if (path === '/') return serveAppShell(res);
@@ -543,14 +549,17 @@ export function createBootstrapServer(options: BootstrapServerOptions): Bootstra
     if (path === '/api/state' && ctx.method === 'GET') {
       // Authenticated sessions get their identity + CSRF token back so a page
       // RELOAD can keep working: the session cookie survives the reload but
-      // the in-memory client token does not, and without re-reading it here
-      // every later POST (sign out, checks, installs) died with 403. Safe to
-      // return on a GET: the response is same-origin JSON behind the
-      // SameSite=Strict session cookie, so a cross-site page can never read it.
+      // the in-memory client token does not. Safe to return on a GET: the
+      // response is same-origin JSON behind the SameSite=Strict session
+      // cookie, so a cross-site page can never read it.
       const session = ctx.session
         ? { email: ctx.session.email, roles: ctx.session.roles, csrfToken: ctx.session.csrfToken }
         : undefined;
-      return sendJson(res, 200, snapshot(session ? { session } : {}));
+      return sendJson(res, 200, {
+        mode: 'persistent',
+        ...(options.managerVersion ? { managerVersion: options.managerVersion } : {}),
+        ...(session ? { session } : {}),
+      });
     }
     if (path === '/api/manager/update-check' && ctx.method === 'GET') {
       if (!options.actions.checkManagerUpdate) throw new HttpError(404, 'Not found.');
@@ -558,32 +567,11 @@ export function createBootstrapServer(options: BootstrapServerOptions): Bootstra
     }
     if (path === '/api/registry/versions' && ctx.method === 'GET') {
       if (!options.actions.listVersions) throw new HttpError(404, 'Not found.');
-      // Server-authoritative: the registry URL always comes from the wizard
-      // state, never from the browser. Only the channel may be previewed (a
-      // display concern; the install itself re-validates against the state).
-      const channel = ctx.url.searchParams.get('channel') ?? state.config.channel;
-      return sendJson(res, 200, await options.actions.listVersions(state.config.registryUrl, channel));
+      const raw = ctx.url.searchParams.get('registryUrl');
+      const registryUrl = raw && /^https?:\/\//.test(raw) ? raw : defaultRegistryUrl;
+      const channel = ctx.url.searchParams.get('channel') ?? 'stable';
+      return sendJson(res, 200, await options.actions.listVersions(registryUrl, channel));
     }
-    if (path === '/api/config' && ctx.method === 'POST') {
-      state = setConfig(state, (ctx.body ?? {}) as Partial<WizardConfig>);
-      return sendJson(res, 200, snapshot());
-    }
-    if (path === '/api/advance' && ctx.method === 'POST') {
-      try {
-        state = advance(state);
-      } catch (err) {
-        throw new HttpError(409, err instanceof WizardError ? err.message : 'Cannot advance.');
-      }
-      return sendJson(res, 200, snapshot());
-    }
-    if (path === '/api/back' && ctx.method === 'POST') {
-      state = back(state);
-      return sendJson(res, 200, snapshot());
-    }
-    if (path.startsWith('/api/check/') && ctx.method === 'POST') {
-      return runCheck(path.slice('/api/check/'.length), res);
-    }
-    if (path === '/api/install' && ctx.method === 'POST') return handleInstall(res);
 
     throw new HttpError(404, 'Not found.');
   }
@@ -594,14 +582,18 @@ export function createBootstrapServer(options: BootstrapServerOptions): Bootstra
       // kept alive (also keeps clients from pooling stale sockets across runs).
       res.setHeader('Connection', 'close');
       try {
-        if (mode === 'bootstrap' && !hostHeaderIsLocal(req)) {
-          throw new HttpError(421, 'Bootstrap UI only serves localhost (DNS-rebinding guard).');
+        // DNS-rebinding guard for the localhost UI. Skipped only when the
+        // operator explicitly exposed the UI beyond loopback (reverse proxy /
+        // LAN), where foreign Host headers are expected and auth still gates
+        // every route.
+        if (!allowNonLocal && !hostHeaderIsLocal(req)) {
+          throw new HttpError(421, 'The manager UI only serves localhost (DNS-rebinding guard).');
         }
         const url = new URL(req.url ?? '/', `http://localhost:${port}`);
         const method = req.method ?? 'GET';
         const needsBody = method === 'POST' || method === 'PUT' || method === 'PATCH';
         const body = needsBody ? await readBody(req) : undefined;
-        const session = mode === 'persistent' ? await loadSession(req) : null;
+        const session = await loadSession(req);
         const csrf = (req.headers['x-shm-csrf'] as string | undefined) ?? null;
         const sourceIp = req.socket?.remoteAddress ?? null;
         await route({ url, method, body, session, csrf, sourceIp }, res);
@@ -620,7 +612,6 @@ export function createBootstrapServer(options: BootstrapServerOptions): Bootstra
   return {
     handler,
     server,
-    getState: () => state,
     listen(): Promise<{ host: string; port: number }> {
       return new Promise((resolve, reject) => {
         server.once('error', reject);
@@ -637,6 +628,10 @@ export function createBootstrapServer(options: BootstrapServerOptions): Bootstra
       });
     },
   };
+}
+
+function toErrorCheck(err: unknown): CheckResult {
+  return { ok: false, severity: 'error', detail: err instanceof Error ? err.message : String(err) };
 }
 
 class HttpError extends Error {

@@ -30,6 +30,7 @@ import {
   instanceSetAddress,
   instanceSupportBundle,
   serverInit,
+  serverPurge,
 } from './actions.js';
 import { formatHealth, formatPreflight, formatSteps, formatTable } from './output.js';
 
@@ -681,6 +682,41 @@ describe('instance lifecycle (offline)', () => {
     expect(list.find((i) => i.instanceId === 'website1')).toBeUndefined();
   });
 
+  it('server purge tears down every instance, the proxy, and the manager state — keeping backups and the audit log', async () => {
+    const { d, removedVolumes } = await lifecycleDeps();
+    await installWebsite1(d);
+    await instanceBackup(d, 'website1');
+    // Manager state a purge must reset (so the next start is a true first run).
+    const managerDir = path.join(root, 'manager');
+    await mkdir(path.join(managerDir, 'operations'), { recursive: true });
+    await writeFile(path.join(managerDir, 'operators.json'), '{"version":1,"operators":[]}');
+    await writeFile(path.join(managerDir, 'audit.jsonl'), '{"action":"instance_create"}\n');
+
+    // Without the typed confirmation nothing happens.
+    const blocked = await serverPurge(d, {});
+    expect(blocked.ok).toBe(false);
+    expect(blocked.instancesRemoved).toEqual([]);
+    expect(await instanceList(d)).toHaveLength(1);
+
+    const res = await serverPurge(d, { confirm: 'purge selfhelp' });
+    expect(res.ok).toBe(true);
+    expect(res.instancesRemoved).toEqual(['website1']);
+    expect(removedVolumes).toContain('selfhelp_website1_mysql_data');
+    // Inventory is gone: the server reports "not initialized" again.
+    await expect(instanceList(d)).rejects.toThrow(/selfhelp\.server\.json/);
+    // Backups and the audit log survive; operators + journal are reset.
+    await expect(readFile(path.join(managerDir, 'audit.jsonl'), 'utf8')).resolves.toContain('instance_create');
+    await expect(readFile(path.join(managerDir, 'operators.json'), 'utf8')).rejects.toThrow();
+    expect(res.keptPaths.some((p) => p.includes('backups'))).toBe(true);
+    expect(res.keptPaths).toContain(path.join(managerDir, 'audit.jsonl'));
+
+    // Regression: the retained backup folders must NOT block the next
+    // bootstrap as "partial or foreign install" — a purged server can be
+    // re-initialized immediately.
+    await expect(serverInit(d, { serverId: 's2', mode: 'production', letsencryptEmail: 'ops@example.ch' })).resolves.toBeTruthy();
+    expect(await instanceList(d)).toHaveLength(0);
+  });
+
   it('clone produces an isolated plan that pins the source versions', async () => {
     const { d } = await lifecycleDeps();
     await installWebsite1(d);
@@ -809,9 +845,14 @@ describe('instance lifecycle (offline)', () => {
       instances: { instanceId: string; domain: string }[];
     };
     expect(inv.instances.find((i) => i.instanceId === 'website1')?.domain).toBe('renamed.example.ch');
-    // The containers were recreated to pick up the new routing.
-    const lastCall = lifecycleRunner.calls.at(-1);
-    expect(lastCall?.args).toEqual(['up', '-d']);
+    // The containers were recreated to pick up the new routing; the calls
+    // after the `up` are the best-effort plugin-state probe on the fresh
+    // containers (recreates drop composer-installed plugins).
+    const upIdx = lifecycleRunner.calls.findLastIndex((c) => c.args[0] === 'up');
+    expect(lifecycleRunner.calls[upIdx]?.args).toEqual(['up', '-d']);
+    for (const call of lifecycleRunner.calls.slice(upIdx + 1)) {
+      expect(call.args.slice(0, 3)).toEqual(['exec', '-T', 'backend']);
+    }
 
     // The version lock is untouched — an address change never bumps code.
     const lock = await new LockStore('website1', root).read();

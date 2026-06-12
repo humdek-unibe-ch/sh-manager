@@ -1,14 +1,23 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
 /**
- * Side-effect seam for the bootstrap server.
+ * Side-effect seam for the manager web server.
  *
  * The HTTP layer never touches Docker, the network, or the filesystem
  * directly: it depends on this interface so it stays unit-testable with fakes.
- * The composition root (`bin.ts`) supplies a real implementation that runs the
- * `sh-manager` CLI (the single Docker-access surface) and lightweight probes.
+ * The composition root (`main.ts`) supplies a real implementation backed by
+ * the `sh-manager` CLI actions (the single Docker-access surface) and
+ * lightweight probes.
  */
-import type { BootstrapPlan, CheckResult } from './wizard.js';
+
+export type CheckSeverity = 'ok' | 'warning' | 'error';
+
+/** Outcome of one environment check (docker / internet / registry / resources). */
+export interface CheckResult {
+  ok: boolean;
+  severity: CheckSeverity;
+  detail?: string;
+}
 
 export interface DockerCheck {
   dockerAvailable: boolean;
@@ -27,35 +36,6 @@ export interface ResourceCheck {
   detail?: string;
 }
 
-export interface InstallOutcome {
-  ok: boolean;
-  instanceDir?: string;
-  version?: string;
-  /** Public URL the operator visits once the stack is up. */
-  publicUrl?: string;
-  detail?: string;
-  /**
-   * Where the install stopped: a provisioning step name (`wait_db`,
-   * `migrations`, `admin`, `plugins`, `cache_warm`, `health`) or the coarse
-   * phases `server_init` / `install`. Lets the UI mark the right checklist row.
-   */
-  failedStep?: string;
-  /**
-   * The GENERATED admin password, present only on this one-shot install
-   * response ("retrieved from the server, shown once"). It is never part of
-   * the wizard state, any check detail, or `/api/state` snapshots.
-   */
-  adminPassword?: string;
-  /** Restricted (0600) server-side file holding the generated admin password. */
-  adminPasswordFile?: string;
-}
-
-export interface HealthOutcome {
-  healthy: boolean;
-  degraded: boolean;
-  detail?: string;
-}
-
 /** Result of the manager self-update check (mirrors the CLI's SelfUpdateCheck). */
 export interface ManagerUpdateCheck {
   currentVersion: string;
@@ -67,7 +47,7 @@ export interface ManagerUpdateCheck {
   error?: string;
 }
 
-/** Available release versions for the wizard's version dropdown. */
+/** Available release versions for the create wizard's version dropdown. */
 export interface RegistryVersions {
   /** Versions on the requested channel, newest first. */
   versions: string[];
@@ -75,20 +55,19 @@ export interface RegistryVersions {
   detail?: string;
 }
 
+/** Environment probes used by the create-instance wizard's preflight step. */
 export interface BootstrapActions {
   checkDocker(): Promise<DockerCheck>;
   checkInternet(): Promise<CheckResult>;
   checkRegistry(registryUrl: string): Promise<RegistryCheck>;
   checkResources(requiredPorts: number[]): Promise<ResourceCheck>;
-  runInstall(plan: BootstrapPlan): Promise<InstallOutcome>;
-  checkHealth(plan: BootstrapPlan): Promise<HealthOutcome>;
   /** Optional: "is a newer manager released?" surfaced in the UI header. */
   checkManagerUpdate?(): Promise<ManagerUpdateCheck>;
-  /** Optional: list installable versions for the wizard's version dropdown. */
+  /** Optional: list installable versions for the create wizard's version dropdown. */
   listVersions?(registryUrl: string, channel: string): Promise<RegistryVersions>;
 }
 
-/** Map the typed sub-results onto the wizard's generic {@link CheckResult}. */
+/** Map the typed sub-results onto the generic {@link CheckResult}. */
 export function dockerToCheck(d: DockerCheck): CheckResult {
   if (d.dockerAvailable && d.dockerComposeAvailable) {
     return { ok: true, severity: 'ok', detail: 'Docker engine + Compose v2 available.' };
@@ -115,18 +94,6 @@ export function resourceToCheck(r: ResourceCheck): CheckResult {
   if (r.status === 'blocked') return { ok: false, severity: 'error', detail: r.detail ?? 'Resource preflight blocked.' };
   if (r.status === 'warning') return { ok: true, severity: 'warning', detail: r.detail ?? 'Resource preflight warnings.' };
   return { ok: true, severity: 'ok', detail: r.detail ?? 'Resources sufficient.' };
-}
-
-export function installToCheck(o: InstallOutcome): CheckResult {
-  return o.ok
-    ? { ok: true, severity: 'ok', detail: o.detail ?? `Installed at ${o.instanceDir ?? 'instance dir'}.` }
-    : { ok: false, severity: 'error', detail: o.detail ?? 'Install failed.' };
-}
-
-export function healthToCheck(o: HealthOutcome): CheckResult {
-  if (o.healthy && !o.degraded) return { ok: true, severity: 'ok', detail: o.detail ?? 'All services healthy.' };
-  if (o.degraded) return { ok: true, severity: 'warning', detail: o.detail ?? 'Some services degraded.' };
-  return { ok: false, severity: 'error', detail: o.detail ?? 'Health check failed.' };
 }
 
 /** Minimal shape of a provisioning step result (mirrors @shm/core's report). */

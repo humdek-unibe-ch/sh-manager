@@ -66,4 +66,12 @@ describe('sh-manager argv parsing', () => {
     expect(res.code).toBe(0);
     expect(res.stdout.trim()).toBe(MANAGER_VERSION);
   }, 60_000);
+
+  it('still accepts the legacy `web --mode persistent --persist` flags (self-update recreates old containers with their old args)', async () => {
+    // --help short-circuits before the server starts; the point is that the
+    // legacy flags must parse instead of failing with "unknown option".
+    const res = await runCli(['web', '--mode', 'persistent', '--persist', '--help']);
+    expect(res.stderr).not.toContain('unknown option');
+    expect(res.code).toBe(0);
+  }, 60_000);
 });
