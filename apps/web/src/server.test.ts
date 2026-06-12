@@ -506,6 +506,9 @@ describe('instance management APIs', () => {
       const detail = await fetch(base + '/api/instances/clinic-a', { headers: authed });
       expect(detail.status).toBe(200);
       expect((await fetch(base + '/api/instances/nope', { headers: authed })).status).toBe(404);
+      // Uppercase ids are rejected outright — the CLI only ever creates
+      // lowercase ids, so this is a malformed request, not a lookup miss.
+      expect((await fetch(base + '/api/instances/Clinic-A', { headers: authed })).status).toBe(400);
 
       // CSRF applies to instance mutations too.
       const noCsrf = await fetch(base + '/api/instances/clinic-a/backups', { method: 'POST', headers: { cookie } });

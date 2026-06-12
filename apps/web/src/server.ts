@@ -320,7 +320,9 @@ export function createBootstrapServer(options: BootstrapServerOptions): Bootstra
     res.end(renderWizardHtml({ mode }));
   }
 
-  const INSTANCE_ID_RE = /^[a-z0-9][a-z0-9-]*$/i;
+  // Lowercase only — matches the create-form/wizard validation and the CLI's
+  // on-disk layout (compose project names + paths are lowercase).
+  const INSTANCE_ID_RE = /^[a-z0-9][a-z0-9-]*$/;
 
   function requireInstanceId(raw: string | undefined): string {
     if (!raw || !INSTANCE_ID_RE.test(raw)) throw new HttpError(400, 'Invalid instance id.');

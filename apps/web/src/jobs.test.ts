@@ -138,6 +138,9 @@ describe('InstanceLocks', () => {
   it('refuses invalid instance ids', async () => {
     const locks = new InstanceLocks(root);
     await expect(locks.acquire('../etc', 'op-1')).rejects.toThrow(/Invalid instance id/);
+    // Uppercase is refused too: the CLI never produces it, and on a
+    // case-insensitive filesystem "Clinic-A" would alias the "clinic-a" lock.
+    await expect(locks.acquire('Clinic-A', 'op-1')).rejects.toThrow(/Invalid instance id/);
   });
 });
 

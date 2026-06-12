@@ -261,7 +261,10 @@ export class InstanceLocks {
   }
 
   private file(instanceId: string): string {
-    if (!/^[a-z0-9][a-z0-9-]*$/i.test(instanceId)) throw new Error(`Invalid instance id "${instanceId}".`);
+    // Lowercase only (mirrors the BFF route guard): uppercase ids are never
+    // produced by the CLI and on case-insensitive filesystems "A" and "a"
+    // would collide into the same lockfile.
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(instanceId)) throw new Error(`Invalid instance id "${instanceId}".`);
     return path.join(this.dir, `${instanceId}.lock`);
   }
 
