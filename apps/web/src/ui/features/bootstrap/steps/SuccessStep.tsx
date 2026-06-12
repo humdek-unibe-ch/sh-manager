@@ -121,6 +121,26 @@ export function SuccessStep({ result, config, snapshot }: SuccessStepProps): JSX
           </Stack>
         </Paper>
       </SimpleGrid>
+
+      <Paper withBorder radius="md" p="lg">
+        <Stack gap="sm">
+          <Text size="xs" tt="uppercase" fw={700} c="dimmed">
+            Next: the management console
+          </Text>
+          <Text size="sm">
+            From now on, starting the web UI opens the sign-in page of the management console (create more
+            instances, view logs, run backups, clone or remove instances). Create your operator account first:
+          </Text>
+          <CommandPreview
+            value="sh-manager admin create --email you@example.org --roles server_owner"
+            label="create operator account"
+          />
+          <Text size="xs" c="dimmed">
+            The command prints a one-time password — store it, then restart the web UI (<Code>sh-manager web</Code>)
+            and sign in with that email and password.
+          </Text>
+        </Stack>
+      </Paper>
     </Stack>
   );
 }

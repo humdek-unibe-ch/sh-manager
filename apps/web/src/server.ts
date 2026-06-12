@@ -27,6 +27,7 @@ import {
   destroySession,
   emptySessionTable,
   getSession,
+  isBootstrapRequired,
   verifyCsrf,
   type ManagerSession,
   type SessionTable,
@@ -457,9 +458,12 @@ export function createBootstrapServer(options: BootstrapServerOptions): Bootstra
 
     // Persistent-mode authentication gate. Only the JSON API is gated; the static
     // SPA shell + assets are always served (they contain no secrets) so the
-    // sign-in screen can load before authentication.
+    // sign-in screen can load before authentication. `/api/auth/meta` is the
+    // one pre-auth JSON route (a boolean for the sign-in screen, see below).
     if (mode === 'persistent') {
-      if (isApi && path !== '/api/login' && !ctx.session) throw new HttpError(401, 'Authentication required.');
+      if (isApi && path !== '/api/login' && path !== '/api/auth/meta' && !ctx.session) {
+        throw new HttpError(401, 'Authentication required.');
+      }
       // CSRF for state-changing requests on authenticated routes.
       if (ctx.session && ctx.method !== 'GET' && path !== '/api/login') {
         if (!ctx.csrf || !verifyCsrf(sessions, ctx.session.id, ctx.csrf, now())) {
@@ -468,6 +472,15 @@ export function createBootstrapServer(options: BootstrapServerOptions): Bootstra
       }
     }
 
+    if (path === '/api/auth/meta' && ctx.method === 'GET') {
+      // Pre-auth sign-in metadata: whether any enabled local operator exists.
+      // Boolean only — no emails, roles, or counts — so the (localhost-bound)
+      // sign-in screen can tell a first-run operator how to create an account
+      // instead of presenting a login form that can never succeed.
+      const store = options.operatorStore;
+      const operatorsConfigured = store ? !isBootstrapRequired(await store.load()) : true;
+      return sendJson(res, 200, { mode, operatorsConfigured });
+    }
     if (path === '/api/login' && ctx.method === 'POST') return handleLogin(ctx, res);
     if (path === '/api/logout' && ctx.method === 'POST') {
       if (ctx.session) sessions = destroySession(sessions, ctx.session.id);

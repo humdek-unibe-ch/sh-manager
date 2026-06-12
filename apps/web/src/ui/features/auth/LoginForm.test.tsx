@@ -7,14 +7,20 @@ import { LoginForm } from './LoginForm';
 import { ApiError, type ApiClient } from '../../lib/api-client';
 import { makeFakeClient } from '../../test/fake-client';
 
-// The login screen only ever calls `client.login`; the other methods must not be
-// reached, so they reject loudly if a test accidentally triggers them.
+// The login screen calls `client.login` plus the pre-auth `getAuthMeta`; every
+// other method must not be reached, so they reject loudly if a test
+// accidentally triggers them.
 const fail = (): Promise<never> => Promise.reject(new Error('not used in login tests'));
 
 function clientWithLogin(login: ApiClient['login']): ApiClient {
   // Every other ApiClient method rejects (kept exhaustive via the fake's key set).
   const failing = Object.fromEntries(Object.keys(makeFakeClient()).map((key) => [key, fail]));
-  return { ...failing, login, logout: async () => {} } as unknown as ApiClient;
+  return {
+    ...failing,
+    login,
+    logout: async () => {},
+    getAuthMeta: async () => ({ mode: 'persistent' as const, operatorsConfigured: true }),
+  } as unknown as ApiClient;
 }
 
 // Mantine's PasswordInput renders a visibility toggle whose aria-label contains

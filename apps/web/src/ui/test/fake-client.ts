@@ -76,6 +76,8 @@ export interface FakeClientOptions {
   dryRunPlan?: unknown;
   /** When set, every mutating instance call rejects with this ApiError. */
   failMutations?: ApiError;
+  /** getAuthMeta().operatorsConfigured (default true; false = first-run hint). */
+  operatorsConfigured?: boolean;
 }
 
 export function fakeInstance(overrides: Partial<InstanceSummary> = {}): InstanceSummary {
@@ -233,6 +235,9 @@ export function makeFakeClient(opts: FakeClientOptions = {}): ApiClient {
             instructions: ['docker pull ghcr.io/humdek-unibe-ch/sh-manager:v0.2.0'],
           }
         : { currentVersion: '0.1.4', latestVersion: '0.1.4', updateAvailable: false, runtime: 'docker' as const, instructions: [] };
+    },
+    async getAuthMeta() {
+      return { mode: 'persistent' as const, operatorsConfigured: opts.operatorsConfigured ?? true };
     },
     async login() {
       return { ok: true, email: 'owner@example.com', roles: ['server_owner'], csrfToken: 'csrf-token' };

@@ -40,6 +40,13 @@ export interface StartedOperation {
   operationId: string;
 }
 
+/** Pre-auth sign-in metadata (GET /api/auth/meta, persistent mode). */
+export interface AuthMeta {
+  mode: 'bootstrap' | 'persistent';
+  /** False while no enabled local operator exists (first-run). */
+  operatorsConfigured: boolean;
+}
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
@@ -67,6 +74,8 @@ export interface ApiClient {
   managerUpdateCheck(): Promise<ManagerUpdateCheck>;
   /** Installable release versions for the wizard's version dropdown. */
   listVersions(channel?: string): Promise<RegistryVersions>;
+  /** Pre-auth sign-in metadata (works without a session). */
+  getAuthMeta(): Promise<AuthMeta>;
   login(email: string, password: string): Promise<LoginResult>;
   logout(): Promise<void>;
 
@@ -140,6 +149,7 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
         `/api/registry/versions${channel ? `?channel=${encodeURIComponent(channel)}` : ''}`,
         'GET',
       ),
+    getAuthMeta: () => request<AuthMeta>('/api/auth/meta', 'GET'),
     async login(email, password) {
       const result = await request<LoginResult>('/api/login', 'POST', { email, password });
       csrfToken = result.csrfToken;

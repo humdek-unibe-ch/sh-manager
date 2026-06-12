@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
 import { useState } from 'react';
-import { Center, Paper, PasswordInput, Stack, Text, TextInput, Title } from '@mantine/core';
-import { useMutation } from '@tanstack/react-query';
+import { Center, Code, Paper, PasswordInput, Stack, Text, TextInput, Title } from '@mantine/core';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { Alert, Button } from '../../components';
 import { ApiError, type ApiClient } from '../../lib/api-client';
 
@@ -14,6 +14,11 @@ export interface LoginFormProps {
 export function LoginForm({ client, onSuccess }: LoginFormProps): JSX.Element {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+
+  // Pre-auth metadata: on a first run no operator account exists yet, so the
+  // form alone is a dead end — show how to create the first account instead.
+  const meta = useQuery({ queryKey: ['auth', 'meta'], queryFn: () => client.getAuthMeta() });
+  const needsFirstOperator = meta.data?.operatorsConfigured === false;
 
   const login = useMutation({
     mutationFn: () => client.login(email, password),
@@ -48,6 +53,21 @@ export function LoginForm({ client, onSuccess }: LoginFormProps): JSX.Element {
               Operator access for this server.
             </Text>
           </div>
+
+          {needsFirstOperator ? (
+            <Alert tone="info" title="No operator accounts yet">
+              <Stack gap="xs">
+                <Text size="sm">
+                  Sign-in is not possible until the first operator account is created. On the server, run:
+                </Text>
+                <Code block>sh-manager admin create --email you@example.org --roles server_owner</Code>
+                <Text size="sm" c="dimmed">
+                  Using the wrapper script: <Code>./shm.sh admin create ...</Code> (Linux/macOS) or{' '}
+                  <Code>.\shm.ps1 admin create ...</Code> (Windows). Then reload this page and sign in.
+                </Text>
+              </Stack>
+            </Alert>
+          ) : null}
 
           {error ? (
             <Alert tone="error" title="Sign-in failed">
