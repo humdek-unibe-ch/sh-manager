@@ -10,7 +10,7 @@
  */
 import { useEffect, useMemo, useRef } from 'react';
 import { Anchor, Group, SimpleGrid, Stack, Text, Title } from '@mantine/core';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import {
   Alert,
   Button,
@@ -24,11 +24,11 @@ import {
 } from '../../components';
 import { ApiError, type ApiClient } from '../../lib/api-client';
 import { CHECK_META } from '../../lib/wizard-view';
-import type { CheckResult, InstanceSummary, Snapshot, WizardStepId } from '../../lib/types';
+import type { CheckResult, InstanceSummary, PreflightResult } from '../../lib/types';
 import { InstancesList } from './InstancesList';
 import { OperationLog } from './OperationLog';
 
-const CHECKS: WizardStepId[] = ['docker', 'internet', 'registry', 'resources'];
+const CHECKS = ['docker', 'internet', 'registry', 'resources'] as const;
 export const CONSOLE_STATE_KEY = ['manager', 'console', 'state'] as const;
 const UPDATE_KEY = ['manager', 'console', 'update-check'] as const;
 
@@ -71,48 +71,34 @@ export function ConsoleDashboard({
   watchedOperationId,
   onHideWatched,
 }: ConsoleDashboardProps): JSX.Element {
-  const queryClient = useQueryClient();
-
-  const stateQuery = useQuery({ queryKey: CONSOLE_STATE_KEY, queryFn: () => client.getState() });
-  const snapshot = stateQuery.data ?? null;
   // Non-blocking: the dashboard renders fully even when the release feed is
   // slow or unreachable (the card then shows the error detail).
   const updateQuery = useQuery({ queryKey: UPDATE_KEY, queryFn: () => client.managerUpdateCheck(), retry: false });
   const update = updateQuery.data ?? null;
 
-  const runCheck = useMutation({
-    mutationFn: (step: WizardStepId) => client.runCheck(step),
-    onSuccess: (snap: Snapshot) => queryClient.setQueryData(CONSOLE_STATE_KEY, snap),
-  });
-  const runningStep = runCheck.isPending ? (runCheck.variables ?? null) : null;
-  const runCheckAsync = runCheck.mutateAsync;
+  // Stateless preflight: one POST runs docker/internet/registry/resources.
+  const preflight = useMutation({ mutationFn: () => client.runPreflight({}) });
+  const checks: PreflightResult | null = preflight.data ?? null;
+  const preflightMutate = preflight.mutate;
 
-  // Auto-run any check that has no recorded result yet — once per mount.
+  // Auto-run once per mount so the operator sees real statuses, not "Pending".
   const autoRan = useRef(false);
   useEffect(() => {
-    if (autoRan.current || !snapshot) return;
+    if (autoRan.current) return;
     autoRan.current = true;
-    const missing = CHECKS.filter((c) => !snapshot.checks[c]);
-    if (missing.length === 0) return;
-    void (async () => {
-      for (const c of missing) await runCheckAsync(c).catch(() => undefined);
-    })();
-  }, [snapshot, runCheckAsync]);
+    preflightMutate();
+  }, [preflightMutate]);
 
-  const error = stateQuery.isError
-    ? friendly(stateQuery.error, 'Could not load server status.')
-    : runCheck.isError
-      ? friendly(runCheck.error, 'That check could not run.')
-      : null;
+  const error = preflight.isError ? friendly(preflight.error, 'The environment checks could not run.') : null;
 
   const overall = useMemo<{ tone: BadgeTone; label: string }>(() => {
-    if (!snapshot) return { tone: 'pending', label: 'Unknown' };
-    const results = CHECKS.map((c) => snapshot.checks[c]).filter(Boolean) as CheckResult[];
-    if (results.length === 0) return { tone: 'pending', label: 'Checking…' };
+    if (preflight.isPending || !checks) return { tone: 'pending', label: 'Checking…' };
+    const results = CHECKS.map((c) => checks[c]).filter(Boolean) as CheckResult[];
+    if (results.length === 0) return { tone: 'pending', label: 'Unknown' };
     if (results.some((r) => r.severity === 'error' || !r.ok)) return { tone: 'error', label: 'Needs attention' };
     if (results.some((r) => r.severity === 'warning')) return { tone: 'warning', label: 'Degraded' };
     return { tone: 'ok', label: 'Healthy' };
-  }, [snapshot]);
+  }, [checks, preflight.isPending]);
 
   const activeCount = instances.filter((i) => i.status === 'active').length;
   const brokenCount = instances.filter((i) => i.status === 'broken').length;
@@ -126,15 +112,7 @@ export function ConsoleDashboard({
         </div>
         <Group gap="sm">
           <StatusBadge tone={overall.tone}>{overall.label}</StatusBadge>
-          <Button
-            variant="secondary"
-            loading={runCheck.isPending}
-            onClick={() => {
-              void (async () => {
-                for (const c of CHECKS) await runCheckAsync(c).catch(() => undefined);
-              })();
-            }}
-          >
+          <Button variant="secondary" loading={preflight.isPending} onClick={() => preflight.mutate()}>
             Run all checks
           </Button>
         </Group>
@@ -189,32 +167,20 @@ export function ConsoleDashboard({
         </Card>
       ) : null}
 
-      <Card title="Environment status" description="Checks run automatically when the dashboard loads — re-run any of them on demand.">
+      <Card title="Environment status" description="Checks run automatically when the dashboard loads — re-run them on demand.">
         <Stack gap="md">
           {CHECKS.map((c) => {
             const meta = CHECK_META[c];
-            const result = snapshot?.checks[c];
-            const status = checkStatus(result, runningStep === c);
+            const result = checks?.[c];
             return (
-              <Group key={c} gap="sm" align="stretch" wrap="nowrap">
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <CheckRow
-                    status={status}
-                    title={meta?.title ?? c}
-                    description={meta?.description ?? ''}
-                    detail={result?.detail}
-                    fix={meta?.fix}
-                  />
-                </div>
-                <Button
-                  variant="ghost"
-                  loading={runningStep === c}
-                  onClick={() => void runCheck.mutate(c)}
-                  aria-label={`Run ${meta?.title ?? c} check`}
-                >
-                  Run
-                </Button>
-              </Group>
+              <CheckRow
+                key={c}
+                status={checkStatus(result, preflight.isPending)}
+                title={meta?.title ?? c}
+                description={meta?.description ?? ''}
+                detail={result?.detail}
+                fix={meta?.fix}
+              />
             );
           })}
         </Stack>

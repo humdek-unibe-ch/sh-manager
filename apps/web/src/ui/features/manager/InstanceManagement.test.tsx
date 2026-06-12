@@ -10,7 +10,7 @@
  * (202 + operation journal) and runs the SAME shared validation as the server.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, within, userEvent } from '../../test/render';
+import { render, screen, waitFor, within, userEvent } from '../../test/render';
 import { OperationsConsole } from './OperationsConsole';
 import { InstanceDetail } from './InstanceDetail';
 import { InstancesList } from './InstancesList';
@@ -340,51 +340,67 @@ describe('OperationsConsole instance flows', () => {
     expect(await screen.findByText('Server operations')).toBeInTheDocument();
   });
 
-  it('creates an instance through the step wizard and watches the live install log', async () => {
+  /** Drive the full-page wizard past Welcome + Preflight (auto-run, all green). */
+  async function passWelcomeAndPreflight(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+    // Welcome step.
+    expect(await screen.findByText(/checks the environment/i)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /continue/i }));
+    // Preflight runs automatically; all four checks come back green.
+    expect(await screen.findByText('Docker engine & Compose')).toBeInTheDocument();
+    const cont = screen.getByRole('button', { name: /continue/i });
+    await waitFor(() => expect(cont).toBeEnabled());
+    await user.click(cont);
+  }
+
+  it('creates an instance through the full-page wizard and watches the live install log', async () => {
     const user = userEvent.setup();
     render(<OperationsConsole client={makeFakeClient()} />);
 
     await screen.findByText('Server operations');
     await user.click(screen.getAllByRole('button', { name: /new instance/i })[0]!);
-    const dialog = await screen.findByRole('dialog');
 
-    // Step 1 — Basics. The admin password is explicitly NOT shown in the
-    // browser; the operator reads the restricted server-side file.
-    expect(within(dialog).getByText(/never shown in the browser/i)).toBeInTheDocument();
-    await user.type(within(dialog).getByLabelText(/display name/i), 'Website One');
-    const idInput = within(dialog).getByLabelText(/instance id/i);
+    expect(await screen.findByText('Create a new instance')).toBeInTheDocument();
+    await passWelcomeAndPreflight(user);
+
+    // Basics. The admin password is explicitly NOT shown in the browser; the
+    // operator reads the restricted server-side file. The optional mailer DSN
+    // lives here too.
+    expect(await screen.findByText(/never shown in the browser/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/outbound email/i)).toBeInTheDocument();
+    await user.type(screen.getByLabelText(/display name/i), 'Website One');
+    const idInput = screen.getByLabelText(/instance id/i);
     expect(idInput).toHaveValue('website-one'); // auto-suggested from the name
     await user.clear(idInput);
     await user.type(idInput, 'website1');
-    await user.type(within(dialog).getByLabelText(/admin email/i), 'admin@example.org');
-    await user.click(within(dialog).getByRole('button', { name: /continue/i }));
+    await user.type(screen.getByLabelText(/admin email/i), 'admin@example.org');
+    await user.click(screen.getByRole('button', { name: /continue/i }));
 
-    // Step 2 — Address (production is preselected, needs a domain).
-    await user.type(await within(dialog).findByLabelText(/domain/i), 'site.example.org');
-    await user.click(within(dialog).getByRole('button', { name: /continue/i }));
+    // Address (production is preselected, needs a domain).
+    await user.type(await screen.findByLabelText(/^domain/i), 'site.example.org');
+    await user.click(screen.getByRole('button', { name: /continue/i }));
 
-    // Step 3 — Release: version comes from the registry dropdown ("latest" default).
-    const versionInput = await within(dialog).findByLabelText(/selfhelp version/i, { selector: 'input' });
+    // Release: version comes from the registry dropdown ("latest" default).
+    const versionInput = await screen.findByLabelText(/selfhelp version/i, { selector: 'input' });
     expect(versionInput).toHaveValue('latest — newest verified release');
-    await user.click(within(dialog).getByRole('button', { name: /continue/i }));
+    await user.click(screen.getByRole('button', { name: /continue/i }));
 
-    // Step 4 — Review shows the collected plan, then installs.
-    expect(await within(dialog).findByText('site.example.org', { exact: false })).toBeInTheDocument();
-    await user.click(within(dialog).getByRole('button', { name: /install instance/i }));
+    // Review shows the collected plan, then installs.
+    expect(await screen.findByText('site.example.org', { exact: false })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /install instance/i }));
 
-    // The install screen shows the bootstrap-style phase checklist (driven by
-    // the journaled operation phase) plus the raw log. The fake's operation
+    // The install screen shows the guided phase checklist (driven by the
+    // journaled operation phase) plus the raw log. The fake's operation
     // completes instantly, so every row is already ticked.
-    expect(await within(dialog).findByText('Resolve & verify release')).toBeInTheDocument();
-    expect(within(dialog).getByText('Run database migrations')).toBeInTheDocument();
-    expect(within(dialog).getByText('Run health checks')).toBeInTheDocument();
+    expect(await screen.findByText('Resolve & verify release')).toBeInTheDocument();
+    expect(screen.getByText('Run database migrations')).toBeInTheDocument();
+    expect(screen.getByText('Run health checks')).toBeInTheDocument();
 
-    // The journaled install log streams INSIDE the wizard.
-    expect(await within(dialog).findByText(/instance_create finished/)).toBeInTheDocument();
-    expect(await within(dialog).findByText(/is installed/i)).toBeInTheDocument();
+    // The journaled install log streams inside the wizard.
+    expect(await screen.findByText(/instance_create finished/)).toBeInTheDocument();
+    expect(await screen.findByText(/is installed/i)).toBeInTheDocument();
 
     // Open the new instance straight from the wizard.
-    await user.click(within(dialog).getByRole('button', { name: /open instance/i }));
+    await user.click(screen.getByRole('button', { name: /open instance/i }));
     expect(await screen.findByText('Operation history')).toBeInTheDocument();
     // The sidebar now lists the new instance too.
     expect(screen.getByRole('button', { name: 'Instance website1' })).toBeInTheDocument();
@@ -396,18 +412,23 @@ describe('OperationsConsole instance flows', () => {
 
     await screen.findByText('Server operations');
     await user.click(screen.getAllByRole('button', { name: /new instance/i })[0]!);
-    const dialog = await screen.findByRole('dialog');
+    await passWelcomeAndPreflight(user);
 
-    await user.type(within(dialog).getByLabelText(/display name/i), 'Bad Instance');
-    const idInput = within(dialog).getByLabelText(/instance id/i);
+    await screen.findByText(/never shown in the browser/i);
+    await user.type(screen.getByLabelText(/display name/i), 'Bad Instance');
+    const idInput = screen.getByLabelText(/instance id/i);
     await user.clear(idInput);
     await user.type(idInput, '-bad-id');
-    expect(await within(dialog).findByText(/lowercase letters, digits and dashes/i)).toBeInTheDocument();
+    expect(await screen.findByText(/lowercase letters, digits and dashes/i)).toBeInTheDocument();
 
-    await user.type(within(dialog).getByLabelText(/admin email/i), 'not-an-email');
-    expect(await within(dialog).findByText(/valid email/i)).toBeInTheDocument();
+    await user.type(screen.getByLabelText(/admin email/i), 'not-an-email');
+    expect(await screen.findByText(/valid email/i)).toBeInTheDocument();
+
+    // A malformed mailer DSN locks the step too (same shared rule as the BFF).
+    await user.type(screen.getByLabelText(/outbound email/i), 'mail.example.org');
+    expect(await screen.findByText(/smtp:\/\/user:pass@mail\.example\.org/i)).toBeInTheDocument();
 
     // Continue stays locked while the basics are invalid.
-    expect(within(dialog).getByRole('button', { name: /continue/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /continue/i })).toBeDisabled();
   });
 });

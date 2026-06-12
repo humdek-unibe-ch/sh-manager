@@ -26,23 +26,31 @@ describe('OperationsConsole', () => {
     render(<OperationsConsole client={makeFakeClient()} />);
 
     await screen.findByText('Server operations');
-    // All four checks complete without any operator click.
-    await waitFor(() => expect(screen.getAllByText(/check passed/i)).toHaveLength(4));
+    // All four checks complete without any operator click (one preflight call).
+    await waitFor(() => expect(screen.getAllByText('OK.')).toHaveLength(4));
     expect(screen.queryByText('Pending')).not.toBeInTheDocument();
   });
 
-  it('re-runs a single check on demand', async () => {
+  it('re-runs the checks on demand', async () => {
     const user = userEvent.setup();
     const client = makeFakeClient();
-    const spy = vi.spyOn(client, 'runCheck');
+    const spy = vi.spyOn(client, 'runPreflight');
     render(<OperationsConsole client={client} />);
 
     await screen.findByText('Server operations');
-    await waitFor(() => expect(screen.getAllByText(/check passed/i)).toHaveLength(4));
+    await waitFor(() => expect(screen.getAllByText('OK.')).toHaveLength(4));
     spy.mockClear();
 
-    await user.click(screen.getByRole('button', { name: /Run Docker engine & Compose check/i }));
-    await waitFor(() => expect(spy).toHaveBeenCalledWith('docker'));
+    await user.click(screen.getByRole('button', { name: /run all checks/i }));
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+  });
+
+  it('opens the full-page create wizard automatically when the server has no instances yet', async () => {
+    render(<OperationsConsole client={makeFakeClient({ instances: [], serverInitialized: false })} />);
+
+    // Straight into the guided setup (welcome step), not an empty dashboard.
+    expect(await screen.findByText('Set up SelfHelp on this server')).toBeInTheDocument();
+    expect((await screen.findAllByText(/first instance/i)).length).toBeGreaterThan(0);
   });
 
   it('shows the installed manager version and "up to date" when no newer release exists', async () => {

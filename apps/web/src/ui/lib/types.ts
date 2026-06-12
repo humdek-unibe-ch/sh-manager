@@ -1,13 +1,13 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
 /**
- * Client-facing types. These mirror the JSON the Node BFF returns from
- * `snapshot()` (see `apps/web/src/server.ts`). We reuse the server's own
- * domain types so there is a single source of truth for steps, config and
- * check shapes — the UI never redefines validation or step contracts.
+ * Client-facing types. These mirror the JSON the Node BFF returns (see
+ * `apps/web/src/server.ts`). We reuse the server's own domain types so there
+ * is a single source of truth — the UI never redefines validation or wire
+ * contracts.
  */
 import type { InstanceMode, ReleaseChannel } from '@shm/schemas';
-import type { HealthOutcome, InstallOutcome, ManagerUpdateCheck, RegistryVersions } from '../../actions';
+import type { CheckResult, CheckSeverity, ManagerUpdateCheck, RegistryVersions } from '../../actions';
 import type {
   BackupSummary,
   CloneInstanceRequest,
@@ -15,11 +15,12 @@ import type {
   InstanceDetail,
   InstanceSummary,
   RemoveInstanceRequest,
+  ServerStatus,
   SetAddressRequest,
+  SetMailerRequest,
   UpdateInstanceRequest,
 } from '../../instances';
 import type { OperationRecord, OperationStatus } from '../../jobs';
-import type { CheckResult, CheckSeverity, WizardConfig, WizardStepId } from '../../wizard';
 
 export type {
   BackupSummary,
@@ -30,56 +31,29 @@ export type {
   InstanceDetail,
   InstanceSummary,
   RemoveInstanceRequest,
+  ServerStatus,
   SetAddressRequest,
+  SetMailerRequest,
   UpdateInstanceRequest,
   OperationRecord,
   OperationStatus,
-  WizardConfig,
-  WizardStepId,
-  HealthOutcome,
-  InstallOutcome,
   InstanceMode,
   ManagerUpdateCheck,
   RegistryVersions,
   ReleaseChannel,
 };
 
-export type ServerMode = 'bootstrap' | 'persistent';
-
-export interface AdvanceDecision {
-  ok: boolean;
-  reason?: string;
-}
-
-/** The state envelope returned by every wizard API endpoint. */
+/** The state envelope returned by GET /api/state (authenticated). */
 export interface Snapshot {
-  mode: ServerMode;
-  step: WizardStepId;
-  stepIndex: number;
-  steps: WizardStepId[];
-  config: WizardConfig;
-  checks: Partial<Record<WizardStepId, CheckResult>>;
-  completed: boolean;
-  canAdvance: AdvanceDecision;
+  mode: 'persistent';
   /** Manager version, shown in the UI header/footer. */
   managerVersion?: string;
   /**
-   * Present when the caller is authenticated (persistent mode). Lets the SPA
-   * recover its CSRF token after a page reload — the session cookie survives
-   * the reload, the in-memory token does not.
+   * Present when the caller is authenticated. Lets the SPA recover its CSRF
+   * token after a page reload — the session cookie survives the reload, the
+   * in-memory token does not.
    */
   session?: { email: string; roles: string[]; csrfToken: string };
-  /** Present only on the `/api/install` response. */
-  outcome?: InstallOutcome;
-  health?: HealthOutcome;
-  publicUrl?: string;
-}
-
-/** The result we keep client-side after a successful in-session install. */
-export interface InstallResult {
-  outcome: InstallOutcome;
-  health?: HealthOutcome;
-  publicUrl?: string;
 }
 
 export interface LoginResult {
@@ -87,4 +61,20 @@ export interface LoginResult {
   email: string;
   roles: string[];
   csrfToken: string;
+}
+
+/** Result of POST /api/server/preflight (stateless environment checks). */
+export interface PreflightResult {
+  docker: CheckResult;
+  internet: CheckResult;
+  registry: CheckResult;
+  resources: CheckResult;
+  /** The registry URL that was actually checked. */
+  registryUrl: string;
+}
+
+/** Redacted outbound-mail configuration (GET /api/instances/:id/mailer). */
+export interface MailerStatus {
+  configured: boolean;
+  redactedDsn?: string;
 }

@@ -3,8 +3,6 @@
 /**
  * Pure presentation helpers. No DOM, no network — easy to unit test.
  */
-import type { WizardConfig } from './types';
-
 /** Turn a display name into a safe instance id suggestion. */
 export function slugify(input: string): string {
   const base = input
@@ -20,7 +18,7 @@ export function slugify(input: string): string {
 }
 
 /** Build the public URL the operator will visit, from the collected config. */
-export function publicUrlPreview(config: Pick<WizardConfig, 'mode' | 'domain' | 'localPort'>): string {
+export function publicUrlPreview(config: { mode: string; domain?: string; localPort?: number }): string {
   if (config.mode === 'production') {
     return config.domain ? `https://${config.domain}` : 'https://your-domain.example';
   }

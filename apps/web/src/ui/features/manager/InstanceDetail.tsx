@@ -19,12 +19,13 @@ import type { OperationRecord } from '../../lib/types';
 import { BackupManager } from './BackupManager';
 import { CloneInstanceDialog } from './CloneInstanceDialog';
 import { InstanceUpdateDialog } from './InstanceUpdateDialog';
+import { MailerDialog } from './MailerDialog';
 import { OperationLog, operationTone } from './OperationLog';
 import { RemoveInstanceDialog } from './RemoveInstanceDialog';
 import { SetAddressDialog } from './SetAddressDialog';
 import { instanceStatusTone } from './InstancesList';
 
-type DialogKind = 'update' | 'clone' | 'address' | 'remove' | null;
+type DialogKind = 'update' | 'clone' | 'address' | 'mailer' | 'remove' | null;
 
 function healthTone(overall: InstanceHealthReport['overall']): 'ok' | 'warning' | 'error' | 'neutral' {
   switch (overall) {
@@ -112,6 +113,9 @@ export function InstanceDetail({ client, instanceId }: InstanceDetailProps): JSX
           </Button>
           <Button variant="secondary" disabled={busy} onClick={() => setDialog('address')}>
             Change address…
+          </Button>
+          <Button variant="secondary" disabled={busy} onClick={() => setDialog('mailer')}>
+            Email…
           </Button>
           <Button variant="danger" disabled={busy} onClick={() => setDialog('remove')}>
             Remove…
@@ -259,6 +263,13 @@ export function InstanceDetail({ client, instanceId }: InstanceDetailProps): JSX
         mode={summary.mode === 'local' ? 'local' : summary.mode === 'production' ? 'production' : null}
         currentAddress={summary.domain ?? ''}
         opened={dialog === 'address'}
+        onClose={() => setDialog(null)}
+        onStarted={onStarted}
+      />
+      <MailerDialog
+        client={client}
+        instanceId={instanceId}
+        opened={dialog === 'mailer'}
         onClose={() => setDialog(null)}
         onStarted={onStarted}
       />

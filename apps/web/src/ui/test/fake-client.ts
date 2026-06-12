@@ -1,68 +1,26 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
 /**
- * In-memory ApiClient for UI tests, backed by the REAL server wizard state
- * machine (`src/wizard.ts`). This means component/flow tests exercise the same
- * gating + validation the production BFF uses — no hand-rolled snapshots.
+ * In-memory ApiClient for UI tests. Mutating instance calls run the REAL
+ * shared validation (`src/instance-validation.ts`) — the same rules the
+ * production BFF enforces — so component/flow tests can never pass a request
+ * the server would reject.
  */
-import {
-  advance,
-  back,
-  canAdvance,
-  currentStep,
-  initWizard,
-  recordCheck,
-  setConfig,
-  type WizardConfig,
-  type WizardState,
-  type WizardStepId,
-} from '../../wizard';
 import { validateAddressChange, validateCloneInstance, validateCreateInstance } from '../../instance-validation';
 import { ApiError, type ApiClient, type InstanceHealthReport } from '../lib/api-client';
 import type {
   BackupSummary,
+  CheckResult,
   InstanceDetail,
   InstanceSummary,
+  MailerStatus,
   OperationRecord,
+  PreflightResult,
+  ServerStatus,
   Snapshot,
 } from '../lib/types';
 
-export const FULL_CONFIG: WizardConfig = {
-  root: '/opt/selfhelp',
-  serverId: 'research-vm-1',
-  mode: 'production',
-  domain: 'clinic-a.example',
-  letsencryptEmail: 'ops@example.com',
-  registryUrl: 'https://registry.example.com/',
-  channel: 'stable',
-  version: 'latest',
-  instanceId: 'clinic-a',
-  instanceName: 'Clinic A',
-  adminEmail: 'admin@example.com',
-  adminName: 'Admin',
-};
-
-const CHECK_STEPS = new Set<WizardStepId>(['docker', 'internet', 'registry', 'resources', 'install', 'health']);
-
-function driveTo(target: WizardStepId, config: WizardConfig): WizardState {
-  let state = initWizard(config);
-  const ok = { ok: true, severity: 'ok' as const };
-  let guard = 0;
-  while (currentStep(state) !== target) {
-    if (guard++ > 50) throw new Error(`could not drive wizard to ${target}`);
-    const step = currentStep(state);
-    if (CHECK_STEPS.has(step)) state = recordCheck(state, step, ok);
-    const decision = canAdvance(state);
-    if (!decision.ok) throw new Error(`stuck at ${step}: ${decision.reason ?? ''}`);
-    state = advance(state);
-  }
-  return state;
-}
-
 export interface FakeClientOptions {
-  config?: Partial<WizardConfig>;
-  startAt?: WizardStepId;
-  failInstall?: boolean;
   /** Simulate a newer published manager release. */
   managerUpdateAvailable?: boolean;
   /** Versions returned by listVersions (default: a small fixed set). */
@@ -77,8 +35,14 @@ export interface FakeClientOptions {
   dryRunPlan?: unknown;
   /** When set, every mutating instance call rejects with this ApiError. */
   failMutations?: ApiError;
-  /** getAuthMeta().operatorsConfigured (default true; false = first-run hint). */
+  /** getAuthMeta().operatorsConfigured (default true; false = first-run setup). */
   operatorsConfigured?: boolean;
+  /** getServerStatus().initialized (default true; false = first install bootstraps the server). */
+  serverInitialized?: boolean;
+  /** Per-check preflight overrides (default: everything ok). */
+  preflight?: Partial<Record<'docker' | 'internet' | 'registry' | 'resources', CheckResult>>;
+  /** Mailer status per instance id (default: not configured). */
+  mailers?: Record<string, MailerStatus>;
 }
 
 export function fakeInstance(overrides: Partial<InstanceSummary> = {}): InstanceSummary {
@@ -143,15 +107,20 @@ export const FAKE_DRY_RUN_PLAN = {
 /** Manager version baked into every fake snapshot (asserted by header tests). */
 export const FAKE_MANAGER_VERSION = '1.0.6-test';
 
-export function makeFakeClient(opts: FakeClientOptions = {}): ApiClient {
-  const config: WizardConfig = { ...FULL_CONFIG, ...opts.config };
-  let state = opts.startAt ? driveTo(opts.startAt, config) : initWizard(config);
+/** Registry URL the fake preflight reports (mirrors the BFF default). */
+export const FAKE_REGISTRY_URL = 'https://registry.example.com/';
 
-  // In-memory instance/operation store for the persistent-mode console tests.
+const OK: CheckResult = { ok: true, severity: 'ok', detail: 'OK.' };
+
+export function makeFakeClient(opts: FakeClientOptions = {}): ApiClient {
+  // In-memory instance/operation store for the console tests.
   const instances: InstanceSummary[] = opts.instances ?? [fakeInstance()];
   const backups: Record<string, BackupSummary[]> = opts.backups ?? { 'clinic-a': [fakeBackup()] };
   const operations: OperationRecord[] = [...(opts.operations ?? [])];
+  const mailers: Record<string, MailerStatus> = { ...(opts.mailers ?? {}) };
   let opCounter = operations.length;
+  let operatorsConfigured = opts.operatorsConfigured ?? true;
+  let signedIn = false;
 
   function startFakeOperation(kind: OperationRecord['kind'], instanceId: string | null): { operationId: string } {
     if (opts.failMutations) throw opts.failMutations;
@@ -171,59 +140,18 @@ export function makeFakeClient(opts: FakeClientOptions = {}): ApiClient {
     return { operationId: id };
   }
 
-  const snapshot = (extra?: Partial<Snapshot>): Snapshot => ({
-    mode: 'bootstrap',
-    step: currentStep(state),
-    stepIndex: state.stepIndex,
-    steps: [...state.steps],
-    config: state.config,
-    checks: state.checks,
-    completed: state.completed,
-    canAdvance: canAdvance(state),
-    managerVersion: FAKE_MANAGER_VERSION,
-    ...extra,
-  });
-
   return {
-    async getState() {
-      return snapshot();
-    },
-    async setConfig(patch) {
-      state = setConfig(state, patch);
-      return snapshot();
-    },
-    async advance() {
-      state = advance(state);
-      return snapshot();
-    },
-    async back() {
-      state = back(state);
-      return snapshot();
-    },
-    async runCheck(step) {
-      state = recordCheck(state, step, { ok: true, severity: 'ok', detail: `${step} check passed.` });
-      return snapshot();
+    async getState(): Promise<Snapshot> {
+      return {
+        mode: 'persistent',
+        managerVersion: FAKE_MANAGER_VERSION,
+        ...(signedIn
+          ? { session: { email: 'owner@example.com', roles: ['server_owner'], csrfToken: 'csrf-token' } }
+          : {}),
+      };
     },
     async listVersions() {
       return { versions: opts.availableVersions ?? ['0.3.0', '0.2.1', '0.2.0'] };
-    },
-    async install() {
-      if (opts.failInstall) {
-        return snapshot({
-          outcome: {
-            ok: false,
-            detail: 'Provisioning failed at "wait_db": Install failed while pulling images: token=supersecret123',
-            failedStep: 'wait_db',
-          },
-        });
-      }
-      state = recordCheck(state, 'install', { ok: true, severity: 'ok', detail: 'Installed.' });
-      state = recordCheck(state, 'health', { ok: true, severity: 'ok', detail: 'Healthy.' });
-      return snapshot({
-        outcome: { ok: true, instanceDir: '/opt/selfhelp/instances/clinic-a', version: '0.1.0', publicUrl: 'https://clinic-a.example' },
-        health: { healthy: true, degraded: false },
-        publicUrl: 'https://clinic-a.example',
-      });
     },
     async managerUpdateCheck() {
       return opts.managerUpdateAvailable
@@ -238,13 +166,36 @@ export function makeFakeClient(opts: FakeClientOptions = {}): ApiClient {
         : { currentVersion: '0.1.4', latestVersion: '0.1.4', updateAvailable: false, runtime: 'docker' as const, instructions: [] };
     },
     async getAuthMeta() {
-      return { mode: 'persistent' as const, operatorsConfigured: opts.operatorsConfigured ?? true };
+      return { mode: 'persistent' as const, operatorsConfigured, managerVersion: FAKE_MANAGER_VERSION };
     },
     async login() {
+      signedIn = true;
       return { ok: true, email: 'owner@example.com', roles: ['server_owner'], csrfToken: 'csrf-token' };
     },
+    async setupOperator(email) {
+      if (operatorsConfigured) throw new ApiError(409, 'Operators already exist. Sign in instead.');
+      operatorsConfigured = true;
+      signedIn = true;
+      return { ok: true, email, roles: ['server_owner'], csrfToken: 'csrf-token' };
+    },
     async logout() {
-      // no-op
+      signedIn = false;
+    },
+
+    async getServerStatus(): Promise<ServerStatus> {
+      const initialized = opts.serverInitialized ?? true;
+      return initialized
+        ? { initialized: true, serverId: 'srv-1', proxyNetwork: 'selfhelp-proxy', instanceCount: instances.length }
+        : { initialized: false, serverId: null, proxyNetwork: null, instanceCount: 0 };
+    },
+    async runPreflight(): Promise<PreflightResult> {
+      return {
+        docker: opts.preflight?.docker ?? OK,
+        internet: opts.preflight?.internet ?? OK,
+        registry: opts.preflight?.registry ?? OK,
+        resources: opts.preflight?.resources ?? OK,
+        registryUrl: FAKE_REGISTRY_URL,
+      };
     },
 
     async listInstances() {
@@ -275,6 +226,12 @@ export function makeFakeClient(opts: FakeClientOptions = {}): ApiClient {
         checkedAt: '2026-06-01T12:00:00.000Z',
       };
     },
+    async getMailer(instanceId): Promise<MailerStatus> {
+      if (!instances.some((i) => i.instanceId === instanceId)) {
+        throw new ApiError(404, `Instance "${instanceId}" not found.`);
+      }
+      return mailers[instanceId] ?? { configured: false };
+    },
     async updateDryRun() {
       return { plan: opts.dryRunPlan ?? FAKE_DRY_RUN_PLAN };
     },
@@ -299,6 +256,7 @@ export function makeFakeClient(opts: FakeClientOptions = {}): ApiClient {
           mode: req.mode,
         }),
       );
+      if (req.mailerDsn) mailers[req.instanceId] = { configured: true, redactedDsn: 'smtp://***@configured' };
       return started;
     },
     async executeUpdate(instanceId) {
@@ -335,6 +293,15 @@ export function makeFakeClient(opts: FakeClientOptions = {}): ApiClient {
       if (problems.length > 0) throw new ApiError(400, problems.join(' '));
       const started = startFakeOperation('instance_set_address', instanceId);
       target.domain = target.mode === 'local' ? `localhost:${req.localPort}` : req.domain!;
+      return started;
+    },
+    async setMailer(instanceId, req) {
+      if (!instances.some((i) => i.instanceId === instanceId)) {
+        throw new ApiError(404, `Instance "${instanceId}" not found.`);
+      }
+      const started = startFakeOperation('instance_set_mailer', instanceId);
+      if (req.clear === true || !req.dsn) delete mailers[instanceId];
+      else mailers[instanceId] = { configured: true, redactedDsn: 'smtp://***@configured' };
       return started;
     },
     async removeInstance(instanceId) {

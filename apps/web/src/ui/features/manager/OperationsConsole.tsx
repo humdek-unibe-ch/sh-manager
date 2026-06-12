@@ -11,7 +11,7 @@
  * All instance mutations run through the BFF job layer and are watched via
  * the operation journal — the GUI shows real logs, never imagined state.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   AppShell as MantineAppShell,
   Box,
@@ -93,8 +93,20 @@ export function OperationsConsole({ client, onSignOut }: OperationsConsoleProps)
     }
   }, [selectedId, instancesQuery.data]);
 
+  // First-run experience: a server with no instances goes straight into the
+  // guided install wizard (once — closing it returns to the dashboard).
+  const autoOpenedWizard = useRef(false);
+  useEffect(() => {
+    if (autoOpenedWizard.current) return;
+    if (instancesQuery.data && instancesQuery.data.length === 0) {
+      autoOpenedWizard.current = true;
+      setCreateOpen(true);
+    }
+  }, [instancesQuery.data]);
+
   const select = (id: string | null): void => {
     setSelectedId(id);
+    setCreateOpen(false);
     closeNav();
   };
 
@@ -179,7 +191,27 @@ export function OperationsConsole({ client, onSignOut }: OperationsConsoleProps)
       </MantineAppShell.Navbar>
 
       <MantineAppShell.Main>
-        {selectedId === null ? (
+        {createOpen ? (
+          // Full-page guided install (the only install flow; on a fresh
+          // server its first run also bootstraps the proxy + inventory).
+          <CreateInstanceWizard
+            key={String(createOpen)}
+            client={client}
+            onClose={() => setCreateOpen(false)}
+            onStarted={(operationId) => {
+              setWatchedOperationId(operationId);
+              // The new instance shows up in the inventory as the install
+              // progresses; refresh the list immediately and let its regular
+              // polling pick up later state changes.
+              void queryClient.invalidateQueries({ queryKey: INSTANCES_KEY });
+            }}
+            onOpenInstance={(instanceId) => {
+              setCreateOpen(false);
+              void queryClient.invalidateQueries({ queryKey: INSTANCES_KEY });
+              select(instanceId);
+            }}
+          />
+        ) : selectedId === null ? (
           <ConsoleDashboard
             client={client}
             instances={instances}
@@ -192,25 +224,6 @@ export function OperationsConsole({ client, onSignOut }: OperationsConsoleProps)
           <InstanceDetail key={selectedId} client={client} instanceId={selectedId} />
         )}
       </MantineAppShell.Main>
-
-      <CreateInstanceWizard
-        client={client}
-        opened={createOpen}
-        onClose={() => setCreateOpen(false)}
-        defaultRegistryUrl={snapshot?.config.registryUrl ?? ''}
-        onStarted={(operationId) => {
-          setWatchedOperationId(operationId);
-          // The new instance shows up in the inventory as the install
-          // progresses; refresh the list immediately and let its regular
-          // polling pick up later state changes.
-          void queryClient.invalidateQueries({ queryKey: INSTANCES_KEY });
-        }}
-        onOpenInstance={(instanceId) => {
-          setCreateOpen(false);
-          void queryClient.invalidateQueries({ queryKey: INSTANCES_KEY });
-          select(instanceId);
-        }}
-      />
     </MantineAppShell>
   );
 }

@@ -4,9 +4,9 @@
  * Typed client for the manager BFF JSON API (see `apps/web/src/server.ts`).
  *
  * - One method per endpoint, all returning typed results.
- * - CSRF tokens (persistent mode) are captured on login, recovered from
- *   `/api/state` after a page reload, and replayed on every state-changing
- *   request automatically.
+ * - CSRF tokens are captured on login/setup, recovered from `/api/state`
+ *   after a page reload, and replayed on every state-changing request
+ *   automatically.
  * - Failures throw {@link ApiError} carrying the HTTP status and the server's
  *   human message — never a stack trace. Callers turn these into friendly UI.
  * - `fetch` is injectable so the client is unit-testable without a network.
@@ -18,15 +18,17 @@ import type {
   InstanceDetail,
   InstanceSummary,
   LoginResult,
+  MailerStatus,
   ManagerUpdateCheck,
   OperationRecord,
+  PreflightResult,
   RegistryVersions,
   RemoveInstanceRequest,
+  ServerStatus,
   SetAddressRequest,
+  SetMailerRequest,
   Snapshot,
   UpdateInstanceRequest,
-  WizardConfig,
-  WizardStepId,
 } from './types';
 
 /** Health report returned by POST /api/instances/:id/health (mirrors @shm/core). */
@@ -42,11 +44,12 @@ export interface StartedOperation {
   operationId: string;
 }
 
-/** Pre-auth sign-in metadata (GET /api/auth/meta, persistent mode). */
+/** Pre-auth sign-in metadata (GET /api/auth/meta). */
 export interface AuthMeta {
-  mode: 'bootstrap' | 'persistent';
+  mode: 'persistent';
   /** False while no enabled local operator exists (first-run). */
   operatorsConfigured: boolean;
+  managerVersion?: string;
 }
 
 export class ApiError extends Error {
@@ -68,24 +71,26 @@ export interface ApiClientOptions {
 
 export interface ApiClient {
   getState(): Promise<Snapshot>;
-  setConfig(patch: Partial<WizardConfig>): Promise<Snapshot>;
-  advance(): Promise<Snapshot>;
-  back(): Promise<Snapshot>;
-  runCheck(step: WizardStepId): Promise<Snapshot>;
-  install(): Promise<Snapshot>;
   managerUpdateCheck(): Promise<ManagerUpdateCheck>;
-  /** Installable release versions for the wizard's version dropdown. */
+  /** Installable release versions for the create wizard's version dropdown. */
   listVersions(channel?: string): Promise<RegistryVersions>;
   /** Pre-auth sign-in metadata (works without a session). */
   getAuthMeta(): Promise<AuthMeta>;
   login(email: string, password: string): Promise<LoginResult>;
+  /** First-run only: create the FIRST operator account and sign in. */
+  setupOperator(email: string, password: string, displayName?: string): Promise<LoginResult>;
   logout(): Promise<void>;
 
-  // Instance management (persistent mode only; 404 in bootstrap mode).
+  // Server-level views used by the create wizard.
+  getServerStatus(): Promise<ServerStatus>;
+  runPreflight(req: { mode?: 'production' | 'local' }): Promise<PreflightResult>;
+
+  // Instance management.
   listInstances(): Promise<InstanceSummary[]>;
   getInstance(instanceId: string): Promise<InstanceDetail>;
   listBackups(instanceId: string): Promise<BackupSummary[]>;
   runInstanceHealth(instanceId: string): Promise<InstanceHealthReport>;
+  getMailer(instanceId: string): Promise<MailerStatus>;
   updateDryRun(instanceId: string, req: UpdateInstanceRequest): Promise<{ plan: unknown }>;
   listOperations(instanceId?: string): Promise<OperationRecord[]>;
   getOperation(operationId: string): Promise<OperationRecord>;
@@ -96,6 +101,8 @@ export interface ApiClient {
   cloneInstance(instanceId: string, req: CloneInstanceRequest): Promise<StartedOperation>;
   /** Change the routed domain / local port; the instance restarts automatically. */
   setInstanceAddress(instanceId: string, req: SetAddressRequest): Promise<StartedOperation>;
+  /** Set or clear the outbound-mail DSN; the instance restarts automatically. */
+  setMailer(instanceId: string, req: SetMailerRequest): Promise<StartedOperation>;
   removeInstance(instanceId: string, req: RemoveInstanceRequest): Promise<StartedOperation>;
 }
 
@@ -145,15 +152,10 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       const snapshot = await request<Snapshot>('/api/state', 'GET');
       // Recover the CSRF token after a page reload: the session cookie
       // survives, the in-memory token does not. Without this every later
-      // POST (sign out, checks, installs) failed with 403.
+      // POST (sign out, installs) failed with 403.
       if (snapshot.session?.csrfToken) csrfToken = snapshot.session.csrfToken;
       return snapshot;
     },
-    setConfig: (patch) => request<Snapshot>('/api/config', 'POST', patch),
-    advance: () => request<Snapshot>('/api/advance', 'POST'),
-    back: () => request<Snapshot>('/api/back', 'POST'),
-    runCheck: (step) => request<Snapshot>(`/api/check/${step}`, 'POST'),
-    install: () => request<Snapshot>('/api/install', 'POST'),
     managerUpdateCheck: () => request<ManagerUpdateCheck>('/api/manager/update-check', 'GET'),
     listVersions: (channel) =>
       request<RegistryVersions>(
@@ -166,10 +168,22 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       csrfToken = result.csrfToken;
       return result;
     },
+    async setupOperator(email, password, displayName) {
+      const result = await request<LoginResult>('/api/setup/operator', 'POST', {
+        email,
+        password,
+        ...(displayName ? { displayName } : {}),
+      });
+      csrfToken = result.csrfToken;
+      return result;
+    },
     async logout() {
       await request<{ ok: boolean }>('/api/logout', 'POST');
       csrfToken = null;
     },
+
+    getServerStatus: () => request<ServerStatus>('/api/server/status', 'GET'),
+    runPreflight: (req) => request<PreflightResult>('/api/server/preflight', 'POST', req),
 
     listInstances: async () =>
       (await request<{ instances: InstanceSummary[] }>('/api/instances', 'GET')).instances,
@@ -179,6 +193,7 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
         .backups,
     runInstanceHealth: (instanceId) =>
       request<InstanceHealthReport>(`/api/instances/${encodeURIComponent(instanceId)}/health`, 'POST'),
+    getMailer: (instanceId) => request<MailerStatus>(`/api/instances/${encodeURIComponent(instanceId)}/mailer`, 'GET'),
     updateDryRun: (instanceId, req) =>
       request<{ plan: unknown }>(`/api/instances/${encodeURIComponent(instanceId)}/update/dry-run`, 'POST', req),
     listOperations: async (instanceId) =>
@@ -203,6 +218,8 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       request<StartedOperation>(`/api/instances/${encodeURIComponent(instanceId)}/clone`, 'POST', req),
     setInstanceAddress: (instanceId, req) =>
       request<StartedOperation>(`/api/instances/${encodeURIComponent(instanceId)}/address`, 'POST', req),
+    setMailer: (instanceId, req) =>
+      request<StartedOperation>(`/api/instances/${encodeURIComponent(instanceId)}/mailer`, 'POST', req),
     removeInstance: (instanceId, req) =>
       request<StartedOperation>(`/api/instances/${encodeURIComponent(instanceId)}/remove`, 'POST', req),
   };
