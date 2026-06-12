@@ -20,6 +20,9 @@ import { discoverEngineRoot } from '@shm/docker';
 import { FileOperatorStore } from '@shm/auth';
 import { provisionFailureDetail, type BootstrapActions } from './actions.js';
 import { browseUrl, createBootstrapServer, type ServerMode } from './server.js';
+import { AuditLog, InstanceLocks, OperationJournal, OperationRunner } from './jobs.js';
+import { buildInstanceActions } from './instances.js';
+import { CmsOperationsPoller } from './poller.js';
 import { doctor, instanceInstall, serverInit } from '../../cli/src/actions.js';
 import { loadTrustedKeys, realDeps } from '../../cli/src/env.js';
 import { checkSelfUpdate } from '../../cli/src/self-update.js';
@@ -195,6 +198,25 @@ export async function startWebUi(opts: WebUiOptions = {}): Promise<{ host: strin
 
   const operatorStore = mode === 'persistent' ? new FileOperatorStore(path.join(root, 'manager', 'operators.json')) : undefined;
 
+  // Instance lifecycle management + the background CMS-operations poller exist
+  // ONLY in persistent mode (authenticated, CSRF-protected). Bootstrap mode
+  // never exposes them and never drains CMS operations.
+  let instanceManagement: Parameters<typeof createBootstrapServer>[0]['instanceManagement'];
+  let poller: CmsOperationsPoller | undefined;
+  if (mode === 'persistent') {
+    const journal = new OperationJournal(root);
+    const audit = new AuditLog(root);
+    const locks = new InstanceLocks(root);
+    const runner = new OperationRunner(journal, audit, locks);
+    const instances = buildInstanceActions({ deps, locks });
+    instanceManagement = { instances, runner, journal };
+
+    const pollSeconds = Number(process.env.SHM_CMS_POLL_SECONDS ?? '15');
+    if (Number.isFinite(pollSeconds) && pollSeconds > 0) {
+      poller = new CmsOperationsPoller({ instances, runner, intervalMs: pollSeconds * 1000 });
+    }
+  }
+
   const handle = createBootstrapServer({
     actions,
     mode,
@@ -205,9 +227,11 @@ export async function startWebUi(opts: WebUiOptions = {}): Promise<{ host: strin
     clientDir,
     managerVersion,
     ...(operatorStore ? { operatorStore } : {}),
+    ...(instanceManagement ? { instanceManagement } : {}),
   });
 
   const bound = await handle.listen();
+  poller?.start();
   // Always print the URL an operator can actually open: a wildcard bind
   // (in-container) is reachable via the published localhost port, not 0.0.0.0.
   console.log(`SelfHelp Manager ${mode} UI (v${managerVersion}): ${browseUrl(bound.host, bound.port)}`);

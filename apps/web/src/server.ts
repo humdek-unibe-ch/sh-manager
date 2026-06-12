@@ -39,6 +39,14 @@ import {
   resourceToCheck,
   type BootstrapActions,
 } from './actions.js';
+import { InstanceLockedError, type OperationJournal, type OperationRunner } from './jobs.js';
+import type {
+  CloneInstanceRequest,
+  CreateInstanceRequest,
+  ManagerInstanceActions,
+  RemoveInstanceRequest,
+  UpdateInstanceRequest,
+} from './instances.js';
 import {
   advance,
   back,
@@ -73,6 +81,17 @@ export interface BootstrapServerOptions {
   clientDir?: string;
   /** Manager version surfaced in every state snapshot (UI header/footer). */
   managerVersion?: string;
+  /**
+   * Instance lifecycle management (Workstream 2). Persistent mode only: the
+   * unauthenticated bootstrap wizard NEVER exposes these APIs. All mutating
+   * actions run through the operation journal + audit log + per-instance lock
+   * and return `202 { operationId }`.
+   */
+  instanceManagement?: {
+    instances: ManagerInstanceActions;
+    runner: OperationRunner;
+    journal: OperationJournal;
+  };
   now?: () => Date;
 }
 
@@ -137,6 +156,8 @@ interface RequestContext {
   body: unknown;
   session: ManagerSession | null;
   csrf: string | null;
+  /** Remote socket address, recorded in the audit log. */
+  sourceIp: string | null;
 }
 
 function parseCookies(header: string | undefined): Record<string, string> {
@@ -299,6 +320,135 @@ export function createBootstrapServer(options: BootstrapServerOptions): Bootstra
     res.end(renderWizardHtml({ mode }));
   }
 
+  const INSTANCE_ID_RE = /^[a-z0-9][a-z0-9-]*$/i;
+
+  function requireInstanceId(raw: string | undefined): string {
+    if (!raw || !INSTANCE_ID_RE.test(raw)) throw new HttpError(400, 'Invalid instance id.');
+    return raw;
+  }
+
+  /**
+   * Instance lifecycle APIs (persistent mode only; never in bootstrap mode).
+   * Reads answer directly; mutations run through the operation journal +
+   * audit + per-instance lock and answer `202 { operationId }`.
+   */
+  async function routeInstanceManagement(ctx: RequestContext, res: ServerResponse): Promise<boolean> {
+    const im = options.instanceManagement;
+    if (!im || mode !== 'persistent') return false;
+    const path = ctx.url.pathname;
+    const operator = ctx.session?.email ?? 'unknown';
+
+    async function start(
+      kind: Parameters<OperationRunner['start']>[0]['kind'],
+      instanceId: string | null,
+      body: Parameters<OperationRunner['start']>[1],
+    ): Promise<void> {
+      try {
+        const { operationId } = await im!.runner.start(
+          { kind, instanceId, operator, sourceIp: ctx.sourceIp },
+          body,
+        );
+        sendJson(res, 202, { operationId });
+      } catch (err) {
+        if (err instanceof InstanceLockedError) throw new HttpError(409, err.message);
+        throw err;
+      }
+    }
+
+    if (path === '/api/instances' && ctx.method === 'GET') {
+      sendJson(res, 200, { instances: await im.instances.list() });
+      return true;
+    }
+    if (path === '/api/instances' && ctx.method === 'POST') {
+      const body = (ctx.body ?? {}) as Partial<CreateInstanceRequest>;
+      if (!body.instanceId || !body.displayName || !body.mode || !body.registryUrl || !body.adminEmail) {
+        throw new HttpError(400, 'instanceId, displayName, mode, registryUrl and adminEmail are required.');
+      }
+      if (body.mode === 'production' && !body.domain) throw new HttpError(400, 'Production instances require a domain.');
+      if (body.mode === 'local' && body.localPort === undefined) throw new HttpError(400, 'Local instances require a localPort.');
+      const req = body as CreateInstanceRequest;
+      requireInstanceId(req.instanceId);
+      await start('instance_create', req.instanceId, (opCtx) => im.instances.create(req, opCtx));
+      return true;
+    }
+
+    if (path === '/api/operations' && ctx.method === 'GET') {
+      const instanceId = ctx.url.searchParams.get('instanceId') ?? undefined;
+      sendJson(res, 200, {
+        operations: await im.journal.list(instanceId !== undefined ? { instanceId } : {}),
+      });
+      return true;
+    }
+    const opMatch = path.match(/^\/api\/operations\/([a-z0-9-]+)$/i);
+    if (opMatch && ctx.method === 'GET') {
+      const record = await im.journal.get(opMatch[1]!);
+      if (!record) throw new HttpError(404, 'Operation not found.');
+      sendJson(res, 200, record);
+      return true;
+    }
+
+    const m = path.match(/^\/api\/instances\/([^/]+)(\/.*)?$/);
+    if (!m) return false;
+    const instanceId = requireInstanceId(m[1]);
+    const rest = m[2] ?? '';
+
+    if (rest === '' && ctx.method === 'GET') {
+      const detail = await im.instances.detail(instanceId);
+      if (!detail) throw new HttpError(404, `Instance "${instanceId}" not found.`);
+      sendJson(res, 200, detail);
+      return true;
+    }
+    if (rest === '/backups' && ctx.method === 'GET') {
+      sendJson(res, 200, { backups: await im.instances.backups(instanceId) });
+      return true;
+    }
+    if (rest === '/health' && ctx.method === 'POST') {
+      sendJson(res, 200, await im.instances.health(instanceId));
+      return true;
+    }
+    if (rest === '/update/dry-run' && ctx.method === 'POST') {
+      const body = (ctx.body ?? {}) as UpdateInstanceRequest;
+      sendJson(res, 200, { plan: await im.instances.updateDryRun(instanceId, body) });
+      return true;
+    }
+    if (rest === '/update' && ctx.method === 'POST') {
+      const body = (ctx.body ?? {}) as UpdateInstanceRequest;
+      await start('instance_update', instanceId, (opCtx) => im.instances.update(instanceId, body, opCtx));
+      return true;
+    }
+    if (rest === '/backups' && ctx.method === 'POST') {
+      await start('instance_backup', instanceId, (opCtx) => im.instances.backup(instanceId, opCtx));
+      return true;
+    }
+    const restoreMatch = rest.match(/^\/backups\/([a-z0-9-]+)\/restore$/i);
+    if (restoreMatch && ctx.method === 'POST') {
+      const backupId = restoreMatch[1]!;
+      await start('instance_restore', instanceId, (opCtx) => im.instances.restore(instanceId, { backupId }, opCtx));
+      return true;
+    }
+    if (rest === '/clone' && ctx.method === 'POST') {
+      const body = (ctx.body ?? {}) as Partial<CloneInstanceRequest>;
+      if (!body.targetInstanceId || !body.targetDomain) {
+        throw new HttpError(400, 'targetInstanceId and targetDomain are required.');
+      }
+      requireInstanceId(body.targetInstanceId);
+      const req = body as CloneInstanceRequest;
+      // Lock the SOURCE instance: the clone reads its DB/volumes, so no other
+      // mutation may run on it concurrently. The target does not exist yet.
+      await start('instance_clone', instanceId, (opCtx) => im.instances.clone(instanceId, req, opCtx));
+      return true;
+    }
+    if (rest === '/remove' && ctx.method === 'POST') {
+      const body = (ctx.body ?? {}) as Partial<RemoveInstanceRequest>;
+      if (!body.mode) throw new HttpError(400, 'mode is required (disable | remove_containers_keep_data | full_delete).');
+      const req = body as RemoveInstanceRequest;
+      await start('instance_remove', instanceId, (opCtx) => im.instances.remove(instanceId, req, opCtx));
+      return true;
+    }
+
+    return false;
+  }
+
   async function route(ctx: RequestContext, res: ServerResponse): Promise<void> {
     const path = ctx.url.pathname;
     const isApi = path.startsWith('/api/');
@@ -338,6 +488,8 @@ export function createBootstrapServer(options: BootstrapServerOptions): Bootstra
       // Unknown non-API path: serve the shell so the SPA can render (no client router today, but safe).
       return serveAppShell(res);
     }
+
+    if (await routeInstanceManagement(ctx, res)) return;
 
     if (path === '/api/state' && ctx.method === 'GET') return sendJson(res, 200, snapshot());
     if (path === '/api/manager/update-check' && ctx.method === 'GET') {
@@ -391,7 +543,8 @@ export function createBootstrapServer(options: BootstrapServerOptions): Bootstra
         const body = needsBody ? await readBody(req) : undefined;
         const session = mode === 'persistent' ? await loadSession(req) : null;
         const csrf = (req.headers['x-shm-csrf'] as string | undefined) ?? null;
-        await route({ url, method, body, session, csrf }, res);
+        const sourceIp = req.socket?.remoteAddress ?? null;
+        await route({ url, method, body, session, csrf, sourceIp }, res);
       } catch (err) {
         if (err instanceof HttpError) {
           sendJson(res, err.status, { error: err.message });
