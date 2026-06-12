@@ -15,6 +15,7 @@ import type {
   InstanceDetail,
   InstanceSummary,
   RemoveInstanceRequest,
+  SetAddressRequest,
   UpdateInstanceRequest,
 } from '../../instances';
 import type { OperationRecord, OperationStatus } from '../../jobs';
@@ -29,6 +30,7 @@ export type {
   InstanceDetail,
   InstanceSummary,
   RemoveInstanceRequest,
+  SetAddressRequest,
   UpdateInstanceRequest,
   OperationRecord,
   OperationStatus,

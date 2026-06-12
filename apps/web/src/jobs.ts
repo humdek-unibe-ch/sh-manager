@@ -30,6 +30,7 @@ export type OperationKind =
   | 'instance_backup'
   | 'instance_restore'
   | 'instance_clone'
+  | 'instance_set_address'
   | 'instance_remove'
   | 'cms_operations_drain';
 

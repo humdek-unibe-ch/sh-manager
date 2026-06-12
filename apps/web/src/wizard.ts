@@ -16,6 +16,9 @@
  * installer and shown once; it is never part of the wizard config or plan.
  */
 import type { InstanceMode, ReleaseChannel } from '@shm/schemas';
+// Canonical field patterns shared with the instance-management dialogs + BFF
+// routes (instance-validation.ts) so the rules cannot drift.
+import { EMAIL_RE, HOSTNAME_RE, INSTANCE_ID_RE } from './instance-validation.js';
 
 /** Ordered bootstrap steps. */
 export const WIZARD_STEPS = [
@@ -118,10 +121,6 @@ export function setConfig(state: WizardState, partial: Partial<WizardConfig>): W
 export function recordCheck(state: WizardState, step: WizardStepId, result: CheckResult): WizardState {
   return { ...state, checks: { ...state.checks, [step]: result } };
 }
-
-const INSTANCE_ID_RE = /^[a-z][a-z0-9-]{1,38}[a-z0-9]$/;
-const HOSTNAME_RE = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/i;
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
  * Per-step answer validation. Returns the list of blocking problems for the

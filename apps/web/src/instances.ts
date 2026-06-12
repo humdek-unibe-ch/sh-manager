@@ -27,6 +27,7 @@ import {
   instanceList,
   instanceRemove,
   instanceRestore,
+  instanceSetAddress,
   instanceUpdate,
   type ActionDeps,
   type InstanceInstallOptions,
@@ -94,8 +95,17 @@ export interface RestoreInstanceRequest {
 
 export interface CloneInstanceRequest {
   targetInstanceId: string;
-  targetDomain: string;
+  /** Production sources: the clone's new public domain. */
+  targetDomain?: string;
+  /** Local sources: the clone's new published localhost port. */
   targetLocalPort?: number;
+}
+
+export interface SetAddressRequest {
+  /** Production instances: the new public domain. */
+  domain?: string;
+  /** Local instances: the new published localhost port. */
+  localPort?: number;
 }
 
 export interface RemoveInstanceRequest {
@@ -119,6 +129,8 @@ export interface ManagerInstanceActions {
   /** Takes an automatic pre-restore backup, then applies the restore. */
   restore(instanceId: string, req: RestoreInstanceRequest, ctx: OperationContext): Promise<unknown>;
   clone(sourceInstanceId: string, req: CloneInstanceRequest, ctx: OperationContext): Promise<unknown>;
+  /** Changes the routed domain / local port and restarts the instance. */
+  setAddress(instanceId: string, req: SetAddressRequest, ctx: OperationContext): Promise<unknown>;
   remove(instanceId: string, req: RemoveInstanceRequest, ctx: OperationContext): Promise<unknown>;
   /**
    * Cheap read-only peek: is a CMS-requested operation waiting? Lets the
@@ -341,7 +353,7 @@ export function buildInstanceActions(opts: BuildInstanceActionsOptions): Manager
     async clone(sourceInstanceId, req, ctx) {
       await ctx.setPhase('clone');
       const res = await instanceClone(deps, sourceInstanceId, req.targetInstanceId, {
-        targetDomain: req.targetDomain,
+        ...(req.targetDomain ? { targetDomain: req.targetDomain } : {}),
         ...(req.targetLocalPort !== undefined ? { targetLocalPort: req.targetLocalPort } : {}),
         apply: true,
       });
@@ -349,6 +361,30 @@ export function buildInstanceActions(opts: BuildInstanceActionsOptions): Manager
       return {
         targetInstanceId: req.targetInstanceId,
         executed: res.executed ?? false,
+        health: res.health ?? null,
+      };
+    },
+
+    async setAddress(instanceId, req, ctx) {
+      await ctx.setPhase('apply address');
+      const res = await instanceSetAddress(deps, instanceId, {
+        ...(req.domain ? { domain: req.domain } : {}),
+        ...(req.localPort !== undefined ? { localPort: req.localPort } : {}),
+        restart: true,
+      });
+      await ctx.log(
+        res.changed
+          ? `Address changed: ${res.previousDomain} -> ${res.domain}.`
+          : `Configuration re-applied for ${res.domain} (address unchanged).`,
+      );
+      for (const w of res.warnings) await ctx.log(`warning: ${w}`);
+      await ctx.log(`Containers recreated; instance reachable at ${res.publicUrl}.`);
+      return {
+        changed: res.changed,
+        previousDomain: res.previousDomain,
+        domain: res.domain,
+        publicUrl: res.publicUrl,
+        warnings: res.warnings,
         health: res.health ?? null,
       };
     },

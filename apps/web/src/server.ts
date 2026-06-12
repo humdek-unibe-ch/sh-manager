@@ -41,11 +41,17 @@ import {
   type BootstrapActions,
 } from './actions.js';
 import { InstanceLockedError, type OperationJournal, type OperationRunner } from './jobs.js';
+import {
+  validateAddressChange,
+  validateCloneInstance,
+  validateCreateInstance,
+} from './instance-validation.js';
 import type {
   CloneInstanceRequest,
   CreateInstanceRequest,
   ManagerInstanceActions,
   RemoveInstanceRequest,
+  SetAddressRequest,
   UpdateInstanceRequest,
 } from './instances.js';
 import {
@@ -364,13 +370,12 @@ export function createBootstrapServer(options: BootstrapServerOptions): Bootstra
     }
     if (path === '/api/instances' && ctx.method === 'POST') {
       const body = (ctx.body ?? {}) as Partial<CreateInstanceRequest>;
-      if (!body.instanceId || !body.displayName || !body.mode || !body.registryUrl || !body.adminEmail) {
-        throw new HttpError(400, 'instanceId, displayName, mode, registryUrl and adminEmail are required.');
-      }
-      if (body.mode === 'production' && !body.domain) throw new HttpError(400, 'Production instances require a domain.');
-      if (body.mode === 'local' && body.localPort === undefined) throw new HttpError(400, 'Local instances require a localPort.');
+      if (!body.registryUrl) throw new HttpError(400, 'registryUrl is required.');
+      // Same rules the create wizard enforces field-by-field (shared module),
+      // re-checked server-side so the API cannot be driven past them.
+      const problems = validateCreateInstance(body);
+      if (problems.length > 0) throw new HttpError(400, problems.join(' '));
       const req = body as CreateInstanceRequest;
-      requireInstanceId(req.instanceId);
       await start('instance_create', req.instanceId, (opCtx) => im.instances.create(req, opCtx));
       return true;
     }
@@ -431,14 +436,40 @@ export function createBootstrapServer(options: BootstrapServerOptions): Bootstra
     }
     if (rest === '/clone' && ctx.method === 'POST') {
       const body = (ctx.body ?? {}) as Partial<CloneInstanceRequest>;
-      if (!body.targetInstanceId || !body.targetDomain) {
-        throw new HttpError(400, 'targetInstanceId and targetDomain are required.');
-      }
-      requireInstanceId(body.targetInstanceId);
+      // Mode-aware requirements: a production source needs a NEW domain, a
+      // local source a NEW localhost port. The source's mode comes from its
+      // manifest — never from the client.
+      const detail = await im.instances.detail(instanceId);
+      if (!detail) throw new HttpError(404, `Instance "${instanceId}" not found.`);
+      const sourceMode = detail.summary.mode === 'local' ? 'local' : 'production';
+      const problems = validateCloneInstance({
+        sourceInstanceId: instanceId,
+        sourceMode,
+        sourceDomain: detail.summary.domain,
+        ...(body.targetInstanceId ? { targetInstanceId: body.targetInstanceId } : {}),
+        ...(body.targetDomain ? { targetDomain: body.targetDomain } : {}),
+        ...(body.targetLocalPort !== undefined ? { targetLocalPort: body.targetLocalPort } : {}),
+      });
+      if (problems.length > 0) throw new HttpError(400, problems.join(' '));
       const req = body as CloneInstanceRequest;
       // Lock the SOURCE instance: the clone reads its DB/volumes, so no other
       // mutation may run on it concurrently. The target does not exist yet.
       await start('instance_clone', instanceId, (opCtx) => im.instances.clone(instanceId, req, opCtx));
+      return true;
+    }
+    if (rest === '/address' && ctx.method === 'POST') {
+      const body = (ctx.body ?? {}) as Partial<SetAddressRequest>;
+      const detail = await im.instances.detail(instanceId);
+      if (!detail) throw new HttpError(404, `Instance "${instanceId}" not found.`);
+      const mode = detail.summary.mode === 'local' ? 'local' : 'production';
+      const problems = validateAddressChange({
+        mode,
+        ...(body.domain ? { domain: body.domain } : {}),
+        ...(body.localPort !== undefined ? { localPort: body.localPort } : {}),
+      });
+      if (problems.length > 0) throw new HttpError(400, problems.join(' '));
+      const req = body as SetAddressRequest;
+      await start('instance_set_address', instanceId, (opCtx) => im.instances.setAddress(instanceId, req, opCtx));
       return true;
     }
     if (rest === '/remove' && ctx.method === 'POST') {

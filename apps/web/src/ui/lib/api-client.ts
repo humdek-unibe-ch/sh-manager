@@ -22,6 +22,7 @@ import type {
   OperationRecord,
   RegistryVersions,
   RemoveInstanceRequest,
+  SetAddressRequest,
   Snapshot,
   UpdateInstanceRequest,
   WizardConfig,
@@ -93,6 +94,8 @@ export interface ApiClient {
   createBackup(instanceId: string): Promise<StartedOperation>;
   restoreBackup(instanceId: string, backupId: string): Promise<StartedOperation>;
   cloneInstance(instanceId: string, req: CloneInstanceRequest): Promise<StartedOperation>;
+  /** Change the routed domain / local port; the instance restarts automatically. */
+  setInstanceAddress(instanceId: string, req: SetAddressRequest): Promise<StartedOperation>;
   removeInstance(instanceId: string, req: RemoveInstanceRequest): Promise<StartedOperation>;
 }
 
@@ -198,6 +201,8 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       ),
     cloneInstance: (instanceId, req) =>
       request<StartedOperation>(`/api/instances/${encodeURIComponent(instanceId)}/clone`, 'POST', req),
+    setInstanceAddress: (instanceId, req) =>
+      request<StartedOperation>(`/api/instances/${encodeURIComponent(instanceId)}/address`, 'POST', req),
     removeInstance: (instanceId, req) =>
       request<StartedOperation>(`/api/instances/${encodeURIComponent(instanceId)}/remove`, 'POST', req),
   };

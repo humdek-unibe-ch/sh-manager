@@ -452,6 +452,9 @@ describe('instance management APIs', () => {
       async clone() {
         return { executed: true };
       },
+      async setAddress() {
+        return { changed: true, domain: 'b.example.com' };
+      },
       async remove() {
         return { executed: true };
       },
@@ -596,6 +599,59 @@ describe('instance management APIs', () => {
         body: JSON.stringify({ instanceId: 'x' }),
       });
       expect(res.status).toBe(400);
+    } finally {
+      await rm(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  async function waitForOperation(base: string, cookie: string, operationId: string): Promise<string> {
+    let status = 'running';
+    for (let i = 0; i < 50 && status === 'running'; i++) {
+      const op = await fetch(`${base}/api/operations/${operationId}`, { headers: { cookie } });
+      status = ((await op.json()) as { status: string }).status;
+      if (status === 'running') await new Promise((r) => setTimeout(r, 10));
+    }
+    return status;
+  }
+
+  it('clones a production source by domain and rejects a missing/duplicate domain', async () => {
+    const tmpRoot = await mkdtemp(path.join(tmpdir(), 'shm-mgmt-'));
+    try {
+      const { base, cookie, csrfToken } = await managementBase(tmpRoot);
+      const mutating = { cookie, 'Content-Type': 'application/json', 'x-shm-csrf': csrfToken };
+      const post = (body: unknown) =>
+        fetch(base + '/api/instances/clinic-a/clone', { method: 'POST', headers: mutating, body: JSON.stringify(body) });
+
+      // Production source (fake detail says mode=production): a port is not enough.
+      expect((await post({ targetInstanceId: 'clinic-b', targetLocalPort: 9124 })).status).toBe(400);
+      // Reusing the source domain is refused.
+      expect((await post({ targetInstanceId: 'clinic-b', targetDomain: 'a.example.com' })).status).toBe(400);
+      // A fresh domain is accepted and journaled.
+      const ok = await post({ targetInstanceId: 'clinic-b', targetDomain: 'b.example.com' });
+      expect(ok.status).toBe(202);
+      const { operationId } = (await ok.json()) as { operationId: string };
+      await waitForOperation(base, cookie, operationId);
+    } finally {
+      await rm(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('changes an instance address through the journal and validates the input', async () => {
+    const tmpRoot = await mkdtemp(path.join(tmpdir(), 'shm-mgmt-'));
+    try {
+      const { base, cookie, csrfToken } = await managementBase(tmpRoot);
+      const mutating = { cookie, 'Content-Type': 'application/json', 'x-shm-csrf': csrfToken };
+      const post = (body: unknown) =>
+        fetch(base + '/api/instances/clinic-a/address', { method: 'POST', headers: mutating, body: JSON.stringify(body) });
+
+      // Production instance: a localPort alone is invalid, a bad hostname too.
+      expect((await post({ localPort: 9124 })).status).toBe(400);
+      expect((await post({ domain: 'not a domain' })).status).toBe(400);
+      const ok = await post({ domain: 'new.example.com' });
+      expect(ok.status).toBe(202);
+      const { operationId } = (await ok.json()) as { operationId: string };
+      expect(operationId).toMatch(/^op-/);
+      expect(await waitForOperation(base, cookie, operationId)).toBe('succeeded');
     } finally {
       await rm(tmpRoot, { recursive: true, force: true });
     }
