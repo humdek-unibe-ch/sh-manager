@@ -8,13 +8,70 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `1.0.14`). Registry releases
+- **The manager tool** uses its own semver (currently `1.1.0`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
   **`0.x`** line (core, frontend, scheduler, worker — all `0.1.0`).
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
+
+## [1.1.0] - 2026-06-12
+
+### Added
+- **GUI instance management (persistent web mode)** — the operations console
+  now manages the full instance lifecycle from the browser: instances list
+  (inventory state, `broken` instances surface a repair hint instead of
+  crashing), instance detail with on-demand health check, backups
+  (create/restore with automatic pre-restore backup and typed confirmation),
+  dry-run-gated updates, clone (always fresh secrets), staged remove
+  (`disable` / remove-containers-keep-data / `full_delete` with typed
+  confirmation), create, and a live operation log viewer. Everything runs
+  through a file-backed operation journal (redacted logs), a JSONL audit log,
+  per-instance locks and HTTP 202 semantics; the APIs require login + CSRF
+  and exist only in persistent mode. See
+  `docs/operator/gui-instance-management.md`.
+- **Per-instance manager token** — install now generates a
+  `SELFHELP_MANAGER_TOKEN` per instance and injects it via the 0600
+  `secrets.env`, enabling the CMS→Manager update loop out of the box.
+  `instance update` / `instance repair` backfill the token for pre-token
+  installs (existing tokens never change).
+- **Exec-based operations transport (new default)** — `process-operations`
+  talks to the backend by `docker compose exec` into the instance's backend
+  container using the container's own token; no published backend port and no
+  host-side token handling. `--backend-url` still selects the HTTP client for
+  remote setups.
+- **Background CMS poller (persistent web mode)** — CMS-requested updates are
+  drained automatically every 15 s through the same journal + locks, so a
+  documented admin "Update now" actually executes without a cron entry.
+- **`instance repair`** — reconstructs a missing/invalid manifest from the
+  newest backup snapshot or from inventory + lock + compose; `instance list`
+  marks damaged instances `broken` with the repair command instead of
+  failing.
+- **MySQL major-upgrade approval in the GUI** — the dry-run plan now carries
+  the MySQL major-upgrade decision (`plan.mysqlMajor`); when the target
+  release demands manual approval the update dialog shows a one-way warning
+  plus an explicit approval checkbox (mirrors `--approve-mysql-major`).
+
+### Changed
+- The e2e CMS-loop scenario exercises the SHIPPED wiring: the
+  install-generated token + the exec transport (no hand-wired token, no
+  exposed backend port for the loop path).
+- Wrapper scripts and the CLI strip a redundant leading `sh-manager` token,
+  so pasted `./shm.ps1 sh-manager …` commands work; missing-manifest errors
+  now name the state root, known instances and the repair command.
+- Operator docs/deploy examples updated for the exec-transport default; the
+  GUI guide documents the security model (auth + CSRF + journal/audit), the
+  SSH-tunnel-only access pattern, on-demand health checks, and that the
+  generated admin password is never shown in the browser (read the 0600
+  server-side file over SSH).
+
+### Fixed
+- Wrong backup/support-bundle command snippets in the web console; all
+  snippets are wrapper-aware now.
+- Instance-id validation in the BFF routes and lockfiles is lowercase-only,
+  matching what the CLI actually creates (uppercase aliases could collide on
+  case-insensitive filesystems).
 
 ## [1.0.14] - 2026-06-11
 
