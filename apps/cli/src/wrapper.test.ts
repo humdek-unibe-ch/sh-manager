@@ -26,9 +26,19 @@ describe('generateWrapperScript (powershell)', () => {
     expect(script).toContain('--name "sh-manager-cli-$PID"');
   });
 
-  it("strips a pasted leading 'sh-manager' token before the web detection", () => {
+  it("strips a pasted leading 'sh-manager' token before the verb dispatch", () => {
     expect(script).toContain("$CliArgs[0] -eq 'sh-manager'");
-    expect(script.indexOf("-eq 'sh-manager'")).toBeLessThan(script.indexOf("-eq 'web'"));
+    expect(script.indexOf("-eq 'sh-manager'")).toBeLessThan(script.indexOf("'web' {"));
+  });
+
+  it('offers the manager lifecycle verbs (up/down/update/reinstall)', () => {
+    for (const verb of ["'up' {", "'down' {", "'update' {", "'reinstall' {"]) {
+      expect(script).toContain(verb);
+    }
+    // up/reinstall run the GUI detached under the fixed container name.
+    expect(script).toContain('-d --name sh-manager-web');
+    // update delegates to the manager self-update (prints pull instructions).
+    expect(script).toContain('self-update');
   });
 
   it('uses the official image by default and forwards the exit code', () => {
@@ -71,9 +81,17 @@ describe('generateWrapperScript (bash)', () => {
     expect(script).toContain('--name "sh-manager-cli-$$"');
   });
 
-  it("strips a pasted leading 'sh-manager' token before the web detection", () => {
+  it("strips a pasted leading 'sh-manager' token before the verb dispatch", () => {
     expect(script).toContain(`if [ "\${1:-}" = 'sh-manager' ]; then shift; fi`);
-    expect(script.indexOf("= 'sh-manager' ]")).toBeLessThan(script.indexOf("= 'web' ]"));
+    expect(script.indexOf("= 'sh-manager' ]")).toBeLessThan(script.indexOf('\n  web)'));
+  });
+
+  it('offers the manager lifecycle verbs (up/down/update/reinstall)', () => {
+    for (const verb of ['\n  up)', '\n  down)', '\n  update)', '\n  reinstall)']) {
+      expect(script).toContain(verb);
+    }
+    expect(script).toContain('-d --name sh-manager-web');
+    expect(script).toContain('self-update');
   });
 
   it('bakes an explicit root with shell-safe quoting', () => {
