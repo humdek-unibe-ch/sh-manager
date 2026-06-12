@@ -66,8 +66,10 @@ class FixtureFetcher implements Fetcher {
 /**
  * Build a registry that offers BOTH 0.1.0 (committed, already signed) and a
  * freshly minted, dev-signed 0.2.0 upgrade target for core + frontend.
+ * `core020Extra` merges extra (re-signed) fields into the 0.2.0 core release,
+ * e.g. a runtime policy demanding MySQL major-upgrade approval.
  */
-async function buildUpgradeRegistry(): Promise<Record<string, string>> {
+async function buildUpgradeRegistry(core020Extra: Record<string, unknown> = {}): Promise<Record<string, string>> {
   const core010 = await readExample('core-release.json');
   const frontend010 = await readExample('frontend-release.json');
 
@@ -81,6 +83,7 @@ async function buildUpgradeRegistry(): Promise<Record<string, string>> {
   core020Body.frontendCompatibility = { requiredFrontendRange: '>=0.2.0 <0.3.0' };
   // A clean, non-destructive minor so the smoke update needs no risk acceptance.
   core020Body.database = { migrationRange: 'Version20260605081254..Version20260606090000', destructive: false, requiresBackup: true, manualConfirmationRequired: false };
+  Object.assign(core020Body, core020Extra);
   const core020 = JSON.stringify({ ...core020Body, security: sign(core020Body) });
 
   const { security: _feSec, ...fe020Body } = JSON.parse(frontend010) as Record<string, unknown> & { security?: unknown };
@@ -124,8 +127,10 @@ afterEach(async () => {
  * `mysqldump` (so the in-update backup works), DI'd volume/db helpers, an
  * always-healthy probe, and the signed two-version upgrade registry.
  */
-async function smokeDeps(): Promise<{ d: ActionDeps; runner: RecordingComposeRunner }> {
-  const fetcher = new FixtureFetcher(await buildUpgradeRegistry());
+async function smokeDeps(
+  core020Extra: Record<string, unknown> = {},
+): Promise<{ d: ActionDeps; runner: RecordingComposeRunner }> {
+  const fetcher = new FixtureFetcher(await buildUpgradeRegistry(core020Extra));
   const digest = `sha256:${'a'.repeat(64)}`;
   const runner = new RecordingComposeRunner((args: string[]): ComposeResult =>
     args.join(' ').includes('mysqldump') ? { stdout: '-- dump\n', stderr: '' } : { stdout: '', stderr: '' },
@@ -282,6 +287,38 @@ describe('release smoke (offline, signed fixture registry)', () => {
     const { plan, executed } = await instanceUpdate(deps, 'qa-ports', { target: 'latest' });
     expect(plan.status).not.toBe('blocked');
     expect(executed).toBe(true);
+  });
+
+  it('surfaces the MySQL major-upgrade decision on the dry-run plan and refuses to execute without approval', async () => {
+    // The target core's runtime policy recommends MySQL 9 (instance runs the
+    // 8.x default) and demands manual approval. The decision must be on the
+    // DRY-RUN plan (the GUI approval checkbox keys off it), and an execute
+    // without the explicit opt-in must refuse before mutating anything.
+    const { d } = await smokeDeps({
+      runtime: {
+        mysql: { supportedVersions: '>=8.0', recommendedImage: 'mysql:9.0', majorUpgradeRequiresManualApproval: true },
+        redis: { supportedVersions: '>=7.0', recommendedImage: 'redis:7.2' },
+        mercure: { supportedVersions: '>=0.18', recommendedImage: 'dunglas/mercure:v0.18' },
+      },
+    });
+    await serverInit(d, { serverId: 'srv-smoke', mode: 'production', letsencryptEmail: 'ops@example.ch' });
+    await instanceInstall(d, {
+      instanceId: 'qa-mysql9',
+      displayName: 'QA MySQL 9',
+      mode: 'production',
+      domain: 'qa-mysql9.example.ch',
+      registryUrl: REGISTRY_URL,
+      version: '0.1.0',
+      bringUp: true,
+    });
+
+    const dry = await instanceUpdate(d, 'qa-mysql9', { target: 'latest', dryRun: true });
+    expect(dry.executed).toBe(false);
+    expect(dry.plan.mysqlMajor).toEqual({ isMajorUpgrade: true, requiresApproval: true, fromMajor: 8, toMajor: 9 });
+
+    const refused = await instanceUpdate(d, 'qa-mysql9', { target: 'latest' });
+    expect(refused.executed).toBe(false);
+    expect(refused.plan.reasons.join(' ')).toContain('Refusing MySQL major upgrade 8 -> 9');
   });
 
   it('a local-mode update rebuilds the compose with the pinned localPort', async () => {

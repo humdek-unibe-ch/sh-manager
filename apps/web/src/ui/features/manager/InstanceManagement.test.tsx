@@ -14,7 +14,7 @@ import { OperationsConsole } from './OperationsConsole';
 import { InstanceDetail } from './InstanceDetail';
 import { InstancesList } from './InstancesList';
 import { OperationLog } from './OperationLog';
-import { makeFakeClient, fakeInstance, fakeOperation } from '../../test/fake-client';
+import { FAKE_DRY_RUN_PLAN, makeFakeClient, fakeInstance, fakeOperation } from '../../test/fake-client';
 
 describe('InstancesList', () => {
   it('lists instances with status and surfaces broken ones with a repair hint', async () => {
@@ -114,6 +114,40 @@ describe('InstanceDetail', () => {
     // The started operation surfaces with its journaled log.
     expect(await screen.findByText('Operation in progress')).toBeInTheDocument();
     expect(await screen.findByText(/instance_update finished/)).toBeInTheDocument();
+  });
+
+  it('demands an explicit MySQL major-upgrade approval when the dry-run plan requires it', async () => {
+    const user = userEvent.setup();
+    const client = makeFakeClient({
+      dryRunPlan: {
+        ...FAKE_DRY_RUN_PLAN,
+        mysqlMajor: { isMajorUpgrade: true, requiresApproval: true, fromMajor: 8, toMajor: 9 },
+      },
+    });
+    const executeSpy = vi.spyOn(client, 'executeUpdate');
+    render(<InstanceDetail client={client} instanceId="clinic-a" onBack={() => {}} />);
+
+    await user.click(await screen.findByRole('button', { name: /update…/i }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: /run dry-run/i }));
+
+    // The one-way warning names the major jump from the plan.
+    expect(await within(dialog).findByText(/MySQL major upgrade — one-way/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/8 → 9/)).toBeInTheDocument();
+
+    // Migration risk alone is NOT enough: the MySQL approval is a second gate.
+    const executeButton = within(dialog).getByRole('button', { name: /execute update/i });
+    await user.click(within(dialog).getByRole('checkbox', { name: /I understand the migration risk/i }));
+    expect(executeButton).toBeDisabled();
+
+    await user.click(within(dialog).getByRole('checkbox', { name: /approve the one-way mysql major upgrade/i }));
+    expect(executeButton).toBeEnabled();
+
+    await user.click(executeButton);
+    expect(executeSpy).toHaveBeenCalledWith(
+      'clinic-a',
+      expect.objectContaining({ approveMysqlMajor: true, acceptMigrationRisk: true }),
+    );
   });
 
   it('requires typing the exact confirmation before a restore starts (with auto pre-restore backup note)', async () => {

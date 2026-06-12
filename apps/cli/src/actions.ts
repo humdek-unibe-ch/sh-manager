@@ -814,6 +814,21 @@ export async function instanceUpdate(deps: ActionDeps, instanceId: string, opts:
     resources: facts,
   });
 
+  // Resolve the target runtime-service images from the target core's runtime
+  // policy (falling back to the instance's current images) and surface the
+  // MySQL major-upgrade decision ON THE PLAN — dry runs included — so callers,
+  // the GUI update dialog in particular, can demand explicit approval before
+  // executing. The MySQL data volume is always preserved (compose never runs
+  // `down -v`), but a MySQL MAJOR upgrade is one-way.
+  const currentRuntimeImages = {
+    mysql: manifest.images.mysql,
+    redis: manifest.images.redis,
+    mercure: manifest.images.mercure,
+  };
+  const targetRuntimeImages = resolveTargetRuntimeImages(plan.core?.runtime, currentRuntimeImages);
+  const mysqlUpgrade = evaluateMysqlMajorUpgrade(plan.core?.runtime, currentRuntimeImages.mysql, targetRuntimeImages.mysql);
+  if (plan.core !== null) plan.mysqlMajor = mysqlUpgrade;
+
   if (opts.dryRun || plan.status === 'blocked' || plan.status === 'up_to_date' || plan.core === null || plan.frontend === null) {
     return { plan, executed: false };
   }
@@ -848,21 +863,12 @@ export async function instanceUpdate(deps: ActionDeps, instanceId: string, opts:
     }
   }
 
-  // Resolve the target runtime-service images from the target core's runtime
-  // policy, falling back to the instance's current images. The MySQL data volume
-  // is always preserved (compose never runs `down -v`), but a MySQL MAJOR upgrade
-  // is one-way, so when the policy demands it we refuse without an explicit
-  // operator opt-in (a verified backup is taken first regardless).
-  const currentRuntimeImages = {
-    mysql: manifest.images.mysql,
-    redis: manifest.images.redis,
-    mercure: manifest.images.mercure,
-  };
-  const targetRuntimeImages = resolveTargetRuntimeImages(core.runtime, currentRuntimeImages);
-  const mysqlUpgrade = evaluateMysqlMajorUpgrade(core.runtime, currentRuntimeImages.mysql, targetRuntimeImages.mysql);
+  // When the target core's policy demands it, refuse the one-way MySQL major
+  // upgrade without an explicit operator opt-in (a verified backup is taken
+  // first regardless). The decision itself was computed above, pre-dry-run.
   if (mysqlUpgrade.requiresApproval && !opts.approveMysqlMajor) {
     plan.reasons.push(
-      `Refusing MySQL major upgrade ${mysqlUpgrade.fromMajor} -> ${mysqlUpgrade.toMajor} without --approve-mysql-major. ` +
+      `Refusing MySQL major upgrade ${mysqlUpgrade.fromMajor} -> ${mysqlUpgrade.toMajor} without --approve-mysql-major (GUI: the "Approve MySQL major upgrade" checkbox). ` +
         'The data volume is preserved, but a major MySQL upgrade is one-way; take a verified backup, then re-run with the flag.',
     );
     return { plan, executed: false };

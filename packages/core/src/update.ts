@@ -62,6 +62,14 @@ export interface UpdatePlan {
   pluginEvaluations: PluginEvaluation[];
   preflight: UpdatePreflightResult | null;
   steps: string[];
+  /**
+   * MySQL major-upgrade decision for this plan. `planUpdate` itself does not
+   * know the instance's current runtime images, so this is attached by the
+   * CLI's `instanceUpdate` (dry runs included) whenever a target core was
+   * selected — the GUI update dialog uses it to demand explicit approval
+   * before executing a one-way MySQL major upgrade.
+   */
+  mysqlMajor?: MysqlMajorUpgradeDecision;
 }
 
 export function planUpdate(input: UpdatePlanInput): UpdatePlan {

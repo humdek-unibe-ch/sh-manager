@@ -52,6 +52,7 @@ export function InstanceUpdateDialog({
   const [target, setTarget] = useState('');
   const [useTestChannel, setUseTestChannel] = useState(false);
   const [acceptMigrationRisk, setAcceptMigrationRisk] = useState(false);
+  const [approveMysqlMajor, setApproveMysqlMajor] = useState(false);
   const [plan, setPlan] = useState<UpdatePlan | null>(null);
 
   function requestBody(): UpdateInstanceRequest {
@@ -68,7 +69,7 @@ export function InstanceUpdateDialog({
 
   const execute = useMutation({
     mutationFn: () =>
-      client.executeUpdate(instanceId, { ...requestBody(), acceptMigrationRisk }),
+      client.executeUpdate(instanceId, { ...requestBody(), acceptMigrationRisk, approveMysqlMajor }),
     onSuccess: (res) => {
       onClose();
       onStarted(res.operationId);
@@ -78,8 +79,13 @@ export function InstanceUpdateDialog({
   function resetPlan(): void {
     setPlan(null);
     setAcceptMigrationRisk(false);
+    setApproveMysqlMajor(false);
   }
 
+  // The dry-run plan carries the MySQL major-upgrade decision; when the target
+  // core's policy demands approval, execution stays disabled until the
+  // operator explicitly opts in (mirrors the CLI's --approve-mysql-major).
+  const mysqlNeedsApproval = plan?.mysqlMajor?.requiresApproval === true;
   const canExecute = plan !== null && isExecutable(plan) && !execute.isPending;
 
   return (
@@ -182,6 +188,19 @@ export function InstanceUpdateDialog({
                 <Checkbox checked={acceptMigrationRisk} onChange={setAcceptMigrationRisk}>
                   I understand the migration risk and want to execute this update.
                 </Checkbox>
+                {mysqlNeedsApproval ? (
+                  <>
+                    <Alert tone="error" title="MySQL major upgrade — one-way">
+                      This release upgrades MySQL{' '}
+                      {plan.mysqlMajor?.fromMajor ?? '?'} → {plan.mysqlMajor?.toMajor ?? '?'}. The data volume
+                      is preserved, but a major MySQL upgrade cannot be rolled back in place — recovery is
+                      restoring the automatic pre-update backup. Verify a recent backup before approving.
+                    </Alert>
+                    <Checkbox checked={approveMysqlMajor} onChange={setApproveMysqlMajor}>
+                      Approve the one-way MySQL major upgrade.
+                    </Checkbox>
+                  </>
+                ) : null}
               </>
             ) : null}
           </Stack>
@@ -199,7 +218,7 @@ export function InstanceUpdateDialog({
           </Button>
           <Button
             variant="danger"
-            disabled={!canExecute || !acceptMigrationRisk}
+            disabled={!canExecute || !acceptMigrationRisk || (mysqlNeedsApproval && !approveMysqlMajor)}
             loading={execute.isPending}
             onClick={() => execute.mutate()}
           >
