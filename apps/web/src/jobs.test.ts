@@ -67,6 +67,25 @@ describe('OperationJournal', () => {
     expect(onlyB[0]?.error).toContain('boom');
   });
 
+  it('recovers operations orphaned by a process crash as failed at boot', async () => {
+    // Regression: if the manager process dies mid-operation, the journal
+    // record stayed `running` forever and the GUI showed an endless spinner.
+    const journal = new OperationJournal(root);
+    const orphan = await journal.create('instance_clone', 'clinic-a');
+    const finished = await journal.create('instance_backup', 'clinic-a');
+    await journal.complete(finished.id, null);
+
+    const recovered = await new OperationJournal(root).recoverInterrupted();
+    expect(recovered).toBe(1);
+
+    const read = await journal.get(orphan.id);
+    expect(read?.status).toBe('failed');
+    expect(read?.finishedAt).not.toBeNull();
+    expect(read?.error).toMatch(/manager process stopped/i);
+    // Finished records are untouched.
+    expect((await journal.get(finished.id))?.status).toBe('succeeded');
+  });
+
   it('returns null for an unknown operation and never resolves path-like ids', async () => {
     const journal = new OperationJournal(root);
     expect(await journal.get('op-never-created')).toBeNull();
@@ -132,6 +151,22 @@ describe('InstanceLocks', () => {
     const lock = await locks.acquire('clinic-a', 'op-new');
     const holder = await locks.holder('clinic-a');
     expect(holder?.operationId).toBe('op-new');
+    await lock.release();
+  });
+
+  it('holder() treats a dead-process lock as free so the GUI is not stuck busy', async () => {
+    // Regression: after a manager crash mid-operation, the leftover lock made
+    // every instance summary report busy and disabled all actions until an
+    // operation happened to steal it.
+    const locks = new InstanceLocks(root);
+    const { writeFile, mkdir } = await import('node:fs/promises');
+    const dir = path.join(root, 'manager', 'locks');
+    await mkdir(dir, { recursive: true });
+    await writeFile(path.join(dir, 'clinic-a.lock'), JSON.stringify({ operationId: 'op-dead', pid: 999999999, acquiredAt: '2026-01-01T00:00:00Z' }));
+
+    expect(await locks.holder('clinic-a')).toBeNull();
+    // And it cleaned the stale file up, so acquire starts clean.
+    const lock = await locks.acquire('clinic-a', 'op-new');
     await lock.release();
   });
 

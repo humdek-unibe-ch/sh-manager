@@ -167,6 +167,28 @@ export class OperationJournal {
     }
   }
 
+  /**
+   * Startup crash recovery: any record still `running` was orphaned by a
+   * previous process that died mid-operation (nothing else writes this dir).
+   * Mark it failed so the GUI doesn't show a forever-spinning operation.
+   * Call once at boot, before new operations start.
+   */
+  async recoverInterrupted(): Promise<number> {
+    let recovered = 0;
+    for (const record of await this.list({ limit: Number.MAX_SAFE_INTEGER })) {
+      if (record.status !== 'running') continue;
+      await this.mutate(record.id, (r) => {
+        if (r.status !== 'running') return;
+        r.status = 'failed';
+        r.finishedAt = this.now().toISOString();
+        r.error = 'Interrupted: the manager process stopped while this operation was running.';
+        r.log.push(`[${this.now().toISOString()}] --- interrupted by manager restart ---`);
+      });
+      recovered++;
+    }
+    return recovered;
+  }
+
   /** Newest-first operation list, optionally filtered by instance. */
   async list(filter?: { instanceId?: string; limit?: number }): Promise<OperationRecord[]> {
     let names: string[];
@@ -331,7 +353,16 @@ export class InstanceLocks {
   }
 
   async holder(instanceId: string): Promise<LockFilePayload | null> {
-    return this.readHolder(instanceId);
+    const holder = await this.readHolder(instanceId);
+    if (holder === null) return null;
+    // A lock whose owning process is gone is a crash leftover. Report the
+    // instance as free (acquire() steals such locks the same way) so the GUI
+    // doesn't show it busy forever, and clean the file up best-effort.
+    if (holder.pid !== process.pid && !InstanceLocks.pidAlive(holder.pid)) {
+      await rm(this.file(instanceId), { force: true });
+      return null;
+    }
+    return holder;
   }
 }
 

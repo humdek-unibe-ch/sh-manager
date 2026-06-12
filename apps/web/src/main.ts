@@ -214,6 +214,10 @@ export async function startWebUi(opts: WebUiOptions = {}): Promise<{ host: strin
   let poller: CmsOperationsPoller | undefined;
   if (mode === 'persistent') {
     const journal = new OperationJournal(root);
+    const interrupted = await journal.recoverInterrupted();
+    if (interrupted > 0) {
+      console.warn(`Marked ${interrupted} operation(s) left running by a previous process as failed.`);
+    }
     const audit = new AuditLog(root);
     const locks = new InstanceLocks(root);
     const runner = new OperationRunner(journal, audit, locks);
