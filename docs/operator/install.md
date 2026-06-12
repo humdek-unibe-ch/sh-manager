@@ -2,8 +2,8 @@
 
 Audience: Server operators
 Status: Active
-Applies to: `sh-manager` (manager tool `0.1.5`, installs the SelfHelp 0.x pre-release line)
-Last verified: 2026-06-11
+Applies to: `sh-manager` (manager tool `0.1.6+`, installs the SelfHelp 0.x pre-release line)
+Last verified: 2026-06-12
 Source of truth: `apps/cli/src/bin.ts`, `apps/web/src/bin.ts`, `apps/web/src/server.ts`
 
 This installs SelfHelp on a fresh server in two stages: **bootstrap the server**
@@ -103,8 +103,11 @@ ssh -L 8765:127.0.0.1:8765 you@your-server
    password manager and delete the file after your first sign-in.
 
 The wizard **self-locks** after a successful install: the installer can no longer
-change anything. To manage the server afterwards, run it in **persistent mode**
-(see [security hardening](security-hardening.md)).
+change anything. To manage the server afterwards, run it in **persistent mode** —
+the authenticated operations console with full instance lifecycle management
+(see [GUI instance management](gui-instance-management.md) and
+[security hardening](security-hardening.md)). Persistent mode is reached the
+same way as the wizard: localhost bind + SSH tunnel, never internet-exposed.
 
 ## Option B — the CLI
 
@@ -206,6 +209,8 @@ volumes that **survive** updates and removals unless you explicitly full-delete.
 
 ## Next steps
 
+- [Post-install checklist](post-install-checklist.md)
+- [Manage instances from the GUI](gui-instance-management.md)
 - [Update an instance](update.md)
 - [Back up and restore](backup-restore.md)
 - [Security hardening](security-hardening.md)

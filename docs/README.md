@@ -2,8 +2,8 @@
 
 Audience: Developers and server operators
 Status: Active
-Applies to: `sh-manager` (manager tool `1.0.7`, manages the SelfHelp 0.x pre-release platform line)
-Last verified: 2026-06-10
+Applies to: `sh-manager` (manager tool `0.1.6+`, manages the SelfHelp 0.x pre-release platform line)
+Last verified: 2026-06-12
 Source of truth: `apps/`, `packages/`, and `README.md` in this repository
 
 This is the documentation entrypoint for **SelfHelp Manager** — the official
@@ -44,6 +44,10 @@ Task-based runbooks live under [`operator/`](operator/).
 
 - [Install](operator/install.md) — bootstrap a server and install the first
   instance, via the web wizard or the CLI.
+- [GUI instance management](operator/gui-instance-management.md) — manage the
+  full instance lifecycle from the persistent web UI: health, backups, update
+  dry-run + execute, restore, clone, remove, live operation logs, and the
+  automatic CMS-operations drain loop.
 - [Windows quickstart](operator/windows-quickstart.md) — test the whole story
   on Windows + Docker Desktop using only the published manager image: local
   mode on ports (no domains/SSL), multiple side-by-side instances, the GUI,

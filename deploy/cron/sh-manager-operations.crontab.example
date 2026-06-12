@@ -9,11 +9,14 @@
 # Install for the manager service account:
 #   crontab -u sh-manager deploy/cron/sh-manager-operations.crontab.example
 #
-# Keep the token out of the crontab: source it from a 0600 env file instead
-# (see deploy/README.md). SHELL=/bin/bash is required for the `set -a; . file`.
+# The default transport execs into the backend container with the token
+# generated at install — the env file is optional. Remote/HTTP setups put
+# SELFHELP_MANAGER_TOKEN and SHM_OPERATIONS_EXTRA_ARGS=--backend-url http://...
+# into the 0600 env file (see deploy/README.md) so the token stays out of the
+# crontab and process list. SHELL=/bin/bash is required for the `set -a; . file`.
 
 SHELL=/bin/bash
 SELFHELP_MANAGER_ROOT=/var/lib/sh-manager
 
-# Replace <instance-id> and the backend URL. One line per instance.
-* * * * * set -a; . /etc/sh-manager/<instance-id>.env; set +a; /usr/bin/sh-manager --root "$SELFHELP_MANAGER_ROOT" instance process-operations <instance-id> --backend-url "$SELFHELP_BACKEND_URL" >> /var/log/sh-manager/<instance-id>-operations.log 2>&1
+# Replace <instance-id>. One line per instance.
+* * * * * set -a; [ -f /etc/sh-manager/<instance-id>.env ] && . /etc/sh-manager/<instance-id>.env; set +a; /usr/bin/sh-manager --root "$SELFHELP_MANAGER_ROOT" instance process-operations <instance-id> $SHM_OPERATIONS_EXTRA_ARGS >> /var/log/sh-manager/<instance-id>-operations.log 2>&1

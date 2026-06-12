@@ -2,9 +2,13 @@
 
 Audience: Server operators
 Status: Active
-Applies to: `sh-manager` (manager tool `0.1.0`)
-Last verified: 2026-06-08
+Applies to: `sh-manager` (manager tool `0.1.6+`)
+Last verified: 2026-06-12
 Source of truth: `apps/cli/src/bin.ts`, `packages/instances/src/remove.ts`, `packages/backup/src/clone.ts`
+
+Both actions are also available in the persistent web UI with the same modes
+and typed confirmations — see
+[GUI instance management](gui-instance-management.md).
 
 ## Clone an instance
 

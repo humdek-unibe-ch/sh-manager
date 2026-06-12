@@ -2,8 +2,8 @@
 
 Audience: Server operators
 Status: Active
-Applies to: `sh-manager` (manager tool `0.1.0`, manages the SelfHelp 0.x pre-release platform line)
-Last verified: 2026-06-09
+Applies to: `sh-manager` (manager tool `0.1.6+`, manages the SelfHelp 0.x pre-release platform line)
+Last verified: 2026-06-12
 Source of truth: `apps/cli/src/actions.ts`, `packages/core/src`, `packages/docker/src`, backend `src/EventListener`, `docker/Dockerfile`
 
 Symptom-first triage. Start with the two diagnostics that cover most cases, then
@@ -176,8 +176,34 @@ Components reported `not_configured` are optional and not failures.
 
 The backend never trusts a browser-provided `instanceId`; cross-instance update
 attempts are denied and logged. Run `process-operations` against the **matching**
-instance with **its own** `--backend-url` and per-instance `--token`. Detail:
-[update](update.md).
+instance (the default exec transport always targets the right backend; with
+`--backend-url`, use that instance's own URL and per-instance `--token`).
+Detail: [update](update.md).
+
+## CMS update request stuck on "requested"
+
+Nothing is draining the operations queue. The CMS System page shows the
+**manager loop** component ("last seen") — `down` or stale means no drain loop
+has contacted this instance recently. Start one:
+
+- the persistent web UI (`sh-manager web --mode persistent --persist`) drains
+  all instances automatically — see
+  [GUI instance management](gui-instance-management.md);
+- or run `sh-manager instance process-operations <id>` once / wire the
+  systemd-or-cron trigger from [`deploy/`](../../deploy/README.md);
+- `not_configured` means the instance has no manager token (installed by a
+  manager `< 0.1.6`): run `sh-manager instance update <id>` or
+  `sh-manager instance repair <id>` to backfill it, which recreates the
+  backend with the token injected.
+
+## Instance shows `broken` / "Instance not found in this state root"
+
+A `broken` badge in `instance list` (or an error naming the state root and the
+known instances) means the instance's manifest is missing or unreadable while
+other state (lock file, compose file, backups) still exists.
+`sh-manager instance repair <id>` reconstructs the manifest from the newest
+backup snapshot, or from the inventory + lock + compose files when no backup
+exists, and re-registers the instance in the inventory if needed.
 
 ## Still stuck
 

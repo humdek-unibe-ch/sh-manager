@@ -2,8 +2,8 @@
 
 Audience: Server operators
 Status: Active
-Applies to: `sh-manager` (manager tool `0.1.5`)
-Last verified: 2026-06-11
+Applies to: `sh-manager` (manager tool `0.1.6+`)
+Last verified: 2026-06-12
 Source of truth: `apps/cli/src/bin.ts`
 
 The commands you reach for most. `<root>` is the SelfHelp root (default
@@ -61,7 +61,7 @@ Services: `frontend`, `backend`, `worker`, `scheduler`, `mysql`, `redis`,
 | Apply (backup-first, auto-rollback) | `sh-manager instance update website1` |
 | Target a version | `sh-manager instance update website1 --version 0.1.1` |
 | Accept destructive migration | `sh-manager instance update website1 --accept-migration-risk` |
-| Process a CMS-requested update | `sh-manager instance process-operations website1 --backend-url http://127.0.0.1:PORT --token "$SELFHELP_MANAGER_TOKEN"` |
+| Process a CMS-requested update | `sh-manager instance process-operations website1` (execs into the backend container; `--backend-url`/`--token` only for remote setups) |
 | Update the manager itself | `sh-manager self-update` (pulls the new image + restarts the web GUI container; source: git pull + build) |
 | Only check for a manager update | `sh-manager self-update --check` (exit `2` = update available) |
 
@@ -82,6 +82,7 @@ Services: `frontend`, `backend`, `worker`, `scheduler`, `mysql`, `redis`,
 | --- | --- |
 | Enable plugin-free safe mode | `sh-manager instance safe-mode enable website1` |
 | Disable safe mode | `sh-manager instance safe-mode disable website1` |
+| Repair a broken instance (missing manifest) | `sh-manager instance repair website1` |
 | Redacted support bundle | `sh-manager instance support-bundle website1` |
 
 ## Remove (deliberate)
@@ -95,8 +96,13 @@ Services: `frontend`, `backend`, `worker`, `scheduler`, `mysql`, `redis`,
 
 ## Operators (persistent web UI)
 
+The persistent UI also manages the full instance lifecycle from the browser
+(list, health, backups, update dry-run + execute, restore, clone, remove, live
+operation logs) — see [GUI instance management](gui-instance-management.md).
+
 | Task | Command |
 | --- | --- |
+| Start the management UI | `sh-manager web --mode persistent --persist` (reach it via SSH tunnel) |
 | First-run bootstrap token | `sh-manager admin bootstrap-token --ttl 3600` |
 | Create operator | `sh-manager admin create --email ops@example.ch --roles server_owner --name "Ops"` |
 | Grant a role | `sh-manager admin role grant ops@example.ch instance_operator` |
@@ -119,7 +125,8 @@ Services: `frontend`, `backend`, `worker`, `scheduler`, `mysql`, `redis`,
 | --- | --- |
 | `SELFHELP_ROOT` | Root directory (default `/opt/selfhelp`). |
 | `SELFHELP_TRUSTED_KEYS` | Registry trusted-keys file (default: the pinned official prod key shipped with the manager). |
-| `SELFHELP_MANAGER_TOKEN` | Per-instance token for `process-operations`. |
+| `SELFHELP_MANAGER_TOKEN` | Per-instance token for `process-operations` (generated at install, injected via the instance's secrets env). |
+| `SHM_CMS_POLL_SECONDS` | CMS-operations drain interval of the persistent web UI (default `15`, `0` disables). |
 | `SELFHELP_PUBLIC_IP` | Enables a hard server-IP DNS comparison. |
 | `SHM_WEB_HOST` / `SHM_WEB_PORT` | Web BFF bind host/port (default `127.0.0.1:8765`). |
 | `SELFHELP_LOCALHOST_PROBE_HOST` | Host substituted for `localhost` in health probes when the manager runs in a container (auto: `host.docker.internal`; `off` disables). |

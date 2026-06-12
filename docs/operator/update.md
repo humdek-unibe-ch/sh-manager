@@ -2,8 +2,8 @@
 
 Audience: Server operators
 Status: Active
-Applies to: `sh-manager` (manager tool `0.1.0`)
-Last verified: 2026-06-08
+Applies to: `sh-manager` (manager tool `0.1.6+`)
+Last verified: 2026-06-12
 Source of truth: `apps/cli/src/bin.ts`, `apps/cli/src/actions.ts`, `packages/core/src/update.ts`
 
 Updates are **backup-first** and **rollback-on-failure**. The manager resolves a
@@ -67,28 +67,45 @@ sh-manager instance health website1
 ## CMS-requested updates (instance-scoped)
 
 The CMS never controls Docker. When an instance requests an update from its admin
-UI, it records an **instance-scoped** operation. The manager claims and executes
-every pending operation for exactly that instance (one run drains the queue):
+UI, it records an **instance-scoped** operation; the manager claims and executes
+it. The wiring is automatic:
+
+- The per-instance `SELFHELP_MANAGER_TOKEN` is **generated at install** and
+  injected into the instance's backend via its secrets env. Existing instances
+  get it backfilled by the next `sh-manager instance update` or
+  `sh-manager instance repair <id>`.
+- The default transport **execs into the backend container** (no published
+  port, no URL to configure); the container's own token authenticates the call.
+- While the **persistent web UI** is running, a background poller drains
+  pending operations for all instances (default every 15 s,
+  `SHM_CMS_POLL_SECONDS` overrides; see
+  [GUI instance management](gui-instance-management.md)). Each run is
+  journaled and visible in the GUI operation history.
+
+To drain manually, or on a headless schedule (one run drains every pending
+operation for that instance, then exits):
 
 ```bash
-sh-manager instance process-operations website1 \
-  --backend-url http://127.0.0.1:PORT \
-  --token "$SELFHELP_MANAGER_TOKEN"
+sh-manager instance process-operations website1
 
-# Or run it as a resident, supervised loop:
+# resident, supervised loop:
+sh-manager instance process-operations website1 --watch --interval 15
+
+# advanced: a remote/HTTP backend instead of the exec transport
 sh-manager instance process-operations website1 \
-  --backend-url http://127.0.0.1:PORT --watch --interval 15
+  --backend-url http://127.0.0.1:PORT --token "$SELFHELP_MANAGER_TOKEN"
 ```
 
-- The per-instance token authenticates the manager to a single instance's
-  backend (`--token` or `SELFHELP_MANAGER_TOKEN`).
 - The backend never trusts a browser-provided `instanceId`; cross-instance
   attempts are denied and logged.
-- A request stays on `requested` until the manager processes it, so wire this
-  into a supervised trigger per instance — see [`deploy/`](../../deploy/README.md)
-  for the ready-made systemd template unit (`--watch`) and cron example, and
+- For headless servers without the resident GUI, wire a supervised trigger per
+  instance — see [`deploy/`](../../deploy/README.md) for the ready-made systemd
+  template unit (`--watch`) and cron example, and
   [operations-runbook](operations-runbook.md) ("Scheduling the update-operations
   loop").
+- The CMS System page shows the **manager loop** health component ("last seen")
+  and warns when a request sits on `requested` too long — that means no drain
+  loop is running; start the persistent UI or the systemd unit.
 
 ## If an update fails
 

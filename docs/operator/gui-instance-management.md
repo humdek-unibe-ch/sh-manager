@@ -1,0 +1,124 @@
+# Manage instances from the GUI
+
+Audience: Server operators
+Status: Active
+Applies to: `sh-manager` (manager tool `0.1.6+`, persistent web mode)
+Last verified: 2026-06-12
+Source of truth: `apps/web/src/server.ts`, `apps/web/src/instances.ts`, `apps/web/src/operations/`, `apps/web/src/ui/features/manager/`
+
+The persistent-mode web UI manages the full instance lifecycle from the
+browser: list and inspect instances, run health checks, browse backups,
+preview updates, and execute create / update / backup / restore / clone /
+remove — with every action journaled and visible as a **live log** in the GUI.
+
+The bootstrap wizard and the operations console are the same server in two
+modes. **Bootstrap mode** (fresh state folder) only installs and self-locks;
+it never exposes instance management. Everything on this page requires
+**persistent mode**.
+
+## Security model (read this first)
+
+- The BFF binds to **`127.0.0.1`** only. Do **not** expose it to the internet —
+  reach it over an **SSH tunnel**:
+
+```bash
+ssh -L 8765:127.0.0.1:8765 you@your-server
+# then open http://127.0.0.1:8765
+```
+
+- Every API call requires an authenticated **operator session**; all
+  state-changing requests carry a CSRF token. Create operators with
+  `sh-manager admin create` (see [security hardening](security-hardening.md)).
+- Long-running actions run through a file-backed **operation journal**
+  (`<root>/manager/operations/<opId>.json`) with **redacted** log lines —
+  secrets and passwords never enter the journal.
+- Every action is appended to the **audit log** (`<root>/manager/audit.jsonl`):
+  operator, action, instance id, operation id, result.
+- A **per-instance lock** (`<root>/manager/locks/`) allows one mutating
+  operation per instance at a time. A second attempt returns
+  `409 Conflict` — wait for the running operation to finish.
+- Destructive actions (restore, full delete) require a **typed confirmation**
+  in the dialog; a full delete never has a bare one-click path.
+
+## Start the management UI
+
+```bash
+# on the server (or via the shm wrapper: ./shm.sh web --mode persistent --persist)
+sh-manager web --mode persistent --persist
+# SelfHelp Manager persistent UI (vX.Y.Z): http://127.0.0.1:8765
+```
+
+Sign in with an operator account. The console shows the environment checks,
+manager version + self-update status, and the **Instances** section.
+
+## What each page does
+
+- **Instances list** — every instance from the server inventory with its
+  status badge (`active` / `disabled` / `broken`), mode, domain/port, and
+  installed version. A `broken` instance (for example a missing manifest)
+  shows the reason instead of crashing — repair it with
+  `sh-manager instance repair <id>` (see
+  [safe mode & recovery](safe-mode-and-recovery.md)).
+- **Instance detail** — manifest summary, container state, **health check**
+  button (backend + frontend + per-service checks), the **backups list**
+  (id, date, size, versions metadata), and the operation history.
+- **Update** — always runs a **dry-run first** (resolved plan + preflight:
+  ok / warning / blocked, with reasons). Executing asks for explicit
+  confirmation flags when the plan carries migration risk.
+- **Backups** — create a backup, or restore one. A restore **always takes an
+  automatic pre-restore backup first**, so the pre-restore state stays
+  recoverable. The backup file stays on the server (the GUI shows the path;
+  there is no browser download).
+- **Clone** — copy an instance to a new id + domain/port. Clones always get
+  **fresh secrets**; credentials are never copied.
+- **Create** — the same plan/install path as the wizard. The generated admin
+  password is shown **once** and never enters the journal or state files.
+- **Remove** — three modes, same as the CLI: `disable` (reversible),
+  `remove_containers_keep_data`, and `full_delete` (requires typing
+  `delete <id>`).
+- **Operation log viewer** — every action (including CMS-requested updates
+  drained in the background) appears in the operation history; clicking an
+  operation streams its journaled log lines live until it reaches a terminal
+  state.
+
+## CMS-requested updates drain automatically
+
+While the persistent UI is running, a background poller drains pending
+CMS-requested operations for **all** inventory instances (default every 15
+seconds, configurable via `SHM_CMS_POLL_SECONDS`; `0` disables). Each drain
+run is journaled, so a CMS-triggered update shows up in the GUI operation
+history like any other action. The poller shares the per-instance locks with
+GUI actions, so a manual update and the CMS loop can never run concurrently
+on the same instance.
+
+Headless servers without a resident GUI keep using the systemd/cron triggers
+— see [update.md](update.md) and [`deploy/`](../../deploy/README.md).
+
+## API reference (persistent mode only)
+
+All endpoints require a session; non-GET requests require the CSRF header.
+Long-running actions return `202 { operationId }` — poll the operation.
+
+| Endpoint | Action |
+| --- | --- |
+| `GET /api/instances` | List instances (inventory + manifest + status). |
+| `POST /api/instances` | Create + provision an instance. |
+| `GET /api/instances/:id` | Instance detail. |
+| `POST /api/instances/:id/health` | Run a health check (synchronous). |
+| `GET /api/instances/:id/backups` | List backups. |
+| `POST /api/instances/:id/backups` | Create a backup. |
+| `POST /api/instances/:id/backups/:backupId/restore` | Pre-restore backup, then restore. |
+| `POST /api/instances/:id/update/dry-run` | Resolve plan + preflight (synchronous). |
+| `POST /api/instances/:id/update` | Execute an update. |
+| `POST /api/instances/:id/clone` | Clone to a new instance. |
+| `POST /api/instances/:id/remove` | Disable / remove / full-delete. |
+| `GET /api/operations?instanceId=` | Operation history. |
+| `GET /api/operations/:id` | One operation incl. journaled log lines. |
+
+## See also
+
+- [Install](install.md) — bootstrap wizard and CLI install.
+- [Update](update.md) — update plans, rollback, CMS-requested updates.
+- [Backup & restore](backup-restore.md) · [Clone & remove](clone-remove.md) —
+  the CLI equivalents of the GUI actions.
+- [Security hardening](security-hardening.md) — operators, roles, tokens.

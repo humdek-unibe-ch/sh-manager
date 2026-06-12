@@ -2,8 +2,8 @@
 
 Audience: Server operators
 Status: Active
-Applies to: `sh-manager` (manager tool `0.1.0`)
-Last verified: 2026-06-08
+Applies to: `sh-manager` (manager tool `0.1.6+`)
+Last verified: 2026-06-12
 Source of truth: `apps/cli/src/bin.ts`, `apps/cli/src/actions.ts`, `packages/core/src`
 
 When a plugin or a change breaks an instance, **plugin safe-mode** boots the CMS
@@ -34,11 +34,27 @@ sh-manager instance health website1
 
 For a deeper, shareable snapshot, collect a [support bundle](support-bundle.md).
 
+## Repair a broken instance (missing manifest)
+
+If `instance list` shows an instance as `broken` (or commands fail with
+"Instance \<id\> not found in this state root"), the instance's manifest is
+missing or unreadable while other state still exists:
+
+```bash
+sh-manager instance repair website1
+```
+
+Repair reconstructs the manifest from the **newest backup snapshot**, or — when
+no backup exists — from the inventory, lock file, and compose file, and
+re-registers the instance in the inventory if it dropped out. It is a no-op on
+a healthy instance and refuses fully deleted ones. It also backfills the
+per-instance manager token used for CMS-requested updates.
+
 ## Recovery playbook
 
 1. **Stabilise**: if a plugin is suspected, `safe-mode enable` the instance.
-2. **Diagnose**: run `doctor` and `instance health`; collect a support bundle if
-   you need help.
+2. **Diagnose**: run `doctor` and `instance health`; if state files are damaged,
+   run `instance repair`; collect a support bundle if you need help.
 3. **Roll back a bad update**: failed updates roll back automatically. If a change
    you applied manually broke things, restore the pre-change backup:
    `sh-manager instance restore <id> <backupId> --apply` (see

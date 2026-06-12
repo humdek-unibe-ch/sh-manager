@@ -2,8 +2,8 @@
 
 Audience: Server operators
 Status: Active
-Applies to: `sh-manager` (manager tool `0.1.0`)
-Last verified: 2026-06-08
+Applies to: `sh-manager` (manager tool `0.1.6+`)
+Last verified: 2026-06-12
 Source of truth: `apps/web/src/server.ts`, `apps/cli/src/bin.ts`, `packages/auth/src`, `packages/docker/src/guards.ts`
 
 The manager is the single privileged tool on the server. Treat its access as
@@ -31,6 +31,13 @@ root-equivalent. This page is the production checklist plus the model behind it.
 - **Persistent** (management) mode requires an authenticated operator **session**
   for every API call, with **CSRF** on state-changing requests
   (`x-shm-csrf`), and an `HttpOnly; SameSite=Strict` session cookie.
+- The **instance management APIs** (create/update/backup/restore/clone/remove,
+  see [GUI instance management](gui-instance-management.md)) exist **only** in
+  persistent mode. Every action runs through the operation **journal**
+  (`<root>/manager/operations/`, secret-redacted logs), is appended to the
+  **audit log** (`<root>/manager/audit.jsonl`: operator, action, instance,
+  result), and is serialized by a **per-instance lock** — one mutating
+  operation per instance at a time.
 
 ### Reaching the UI remotely
 
@@ -72,7 +79,7 @@ privilege each operator needs. Passwords are hashed; digests are never printed.
 
 | Secret | Where | Notes |
 | --- | --- | --- |
-| Per-instance manager token | `--token` / `SELFHELP_MANAGER_TOKEN` | Authenticates the manager to one instance's backend (`process-operations`). Unique per instance. |
+| Per-instance manager token | generated at install, stored in the instance's secrets env | Authenticates the manager to one instance's backend (`process-operations`). Unique per instance; backfilled on `instance update`/`repair`. `--token`/`SELFHELP_MANAGER_TOKEN` override it for remote (`--backend-url`) setups. |
 | Operator passwords | `--password` / `SELFHELP_MANAGER_ADMIN_PASSWORD` | Used only at creation; stored hashed. |
 | Registry trusted keys | `SELFHELP_TRUSTED_KEYS` | The Ed25519 public keys the client trusts. Keep this file under change control. |
 | Generated admin password | shown once at install + `<instance>/secrets/admin_password` (0600) | Never in manifest/lock/logs; store it in a password manager and delete the file after the first sign-in. |
@@ -88,7 +95,10 @@ bundles.
 - [ ] `SELFHELP_TRUSTED_KEYS` is **unset** (the default is the pinned official
       production key shipped with the manager) or points at the official
       trusted-keys file; no `dev`-keyed releases are accepted.
-- [ ] Each instance has a **unique** per-instance manager token.
+- [ ] Each instance has a **unique** per-instance manager token (generated at
+      install; older instances backfilled via `instance update`/`repair`).
+- [ ] The audit log (`<root>/manager/audit.jsonl`) is reviewed periodically and
+      included in your log retention.
 - [ ] DNS points at this server; consider `--strict-dns` (and `SELFHELP_PUBLIC_IP`
       for a hard server-IP comparison) for production installs.
 - [ ] Backups run on a schedule and are stored off-box.

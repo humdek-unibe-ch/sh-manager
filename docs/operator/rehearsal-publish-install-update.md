@@ -189,6 +189,10 @@ Maintenance & updates**, request an update to `0.1.1`, then let the manager
 process it:
 
 ```bash
+# default: execs into the backend container with the token generated at install
+sh-manager instance process-operations rehearsal1
+
+# explicit HTTP transport (what the e2e harness exercises):
 sh-manager instance process-operations rehearsal1 \
   --backend-url http://127.0.0.1:8080 --token "$SELFHELP_MANAGER_TOKEN"
 ```

@@ -203,18 +203,19 @@ claims and executes it:
 2. Pick the target version — the dropdown is fed by the registry — and click
    **Check compatibility**, then **Request update** to `0.1.1` (if you are
    already on `0.1.1`, rebuild the registry with a newer version first).
-3. Let the manager process the queued request:
+3. Let the manager process the queued request. The per-instance
+   `SELFHELP_MANAGER_TOKEN` was generated at install and injected into the
+   backend, and the default transport execs into the backend container, so no
+   URL or token is needed:
 
    ```bash
-   npm run cli -- instance process-operations demo1 \
-     --backend-url http://127.0.0.1:8080 --token "$SELFHELP_MANAGER_TOKEN"
+   npm run cli -- instance process-operations demo1
    ```
 
-   The per-instance `SELFHELP_MANAGER_TOKEN` is one you set yourself: append
-   `SELFHELP_MANAGER_TOKEN=<a long random string>` to
-   `$SELFHELP_ROOT/instances/demo1/secrets/secrets.env`, recreate the backend
-   (`docker compose up -d --force-recreate backend` in the instance dir), and
-   use the same value here.
+   (An instance installed by an older manager gets the token backfilled by its
+   next `instance update` or `instance repair`. The explicit HTTP transport —
+   `--backend-url http://127.0.0.1:8080 --token "$SELFHELP_MANAGER_TOKEN"` —
+   remains available for remote setups.)
 4. Watch the status on the same admin page until it reads **succeeded**.
 
 ## 8. Clean up

@@ -103,6 +103,7 @@ Full documentation lives in [`docs/`](docs/README.md):
   [release & publishing](docs/release-publishing.md).
 - Operators: [install](docs/operator/install.md),
   [Windows quickstart](docs/operator/windows-quickstart.md),
+  [GUI instance management](docs/operator/gui-instance-management.md),
   [update](docs/operator/update.md),
   [backup & restore](docs/operator/backup-restore.md),
   [clone & remove](docs/operator/clone-remove.md),

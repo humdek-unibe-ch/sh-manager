@@ -2,8 +2,8 @@
 
 Audience: Server operators
 Status: Active
-Applies to: `sh-manager` (manager tool `0.1.0`, manages the SelfHelp 0.x pre-release platform line)
-Last verified: 2026-06-09
+Applies to: `sh-manager` (manager tool `0.1.6+`, manages the SelfHelp 0.x pre-release platform line)
+Last verified: 2026-06-12
 Source of truth: `apps/cli/src/bin.ts`, `apps/web/src/server.ts`, `packages/auth/src`
 
 Work through this **immediately after** a successful install, before you rely on
@@ -26,8 +26,11 @@ docker compose -f <root>/instances/website1/compose.yaml \
   exec backend php bin/console <create-admin-command>
 ```
 
-- [ ] **Record the per-instance manager token** (`SELFHELP_MANAGER_TOKEN`) you'll
-      use for CMS-requested updates, unique per instance.
+- [ ] The per-instance manager token for CMS-requested updates is **generated
+      at install** and stored in the instance's secrets env — nothing to set up.
+      (Instances installed by a manager `< 0.1.6`: run
+      `sh-manager instance update <id>` or `sh-manager instance repair <id>`
+      once to backfill it.)
 - [ ] Confirm `SELFHELP_TRUSTED_KEYS` is unset (the manager defaults to the
       pinned official production key) or points at the official trusted-keys
       file so only signed releases are accepted.
@@ -86,16 +89,22 @@ sh-manager instance backup website1   # confirm a manual backup succeeds first
 
 ## 5. Wire CMS-requested updates (optional but recommended)
 
-If admins should be able to request updates from the CMS, run the per-instance
-operation processor on a timer so requests are picked up:
+If admins should be able to request updates from the CMS, something must drain
+the requested operations. Either of these works:
+
+- Keep the **persistent web UI** running — it drains all instances
+  automatically every 15 s and journals each run (see
+  [GUI instance management](gui-instance-management.md)).
+- Headless: schedule the per-instance processor (it execs into the backend
+  container — no URL or token to configure):
 
 ```bash
-sh-manager instance process-operations website1 \
-  --backend-url http://127.0.0.1:PORT --token "$SELFHELP_MANAGER_TOKEN"
+sh-manager instance process-operations website1
 ```
 
-- [ ] Scheduled per instance (cron / systemd timer) with that instance's own
-      backend URL and token.
+- [ ] A drain loop is in place (resident GUI, or cron / systemd per instance —
+      see [`deploy/`](../../deploy/README.md)).
+- [ ] The CMS System page shows the **manager loop** as seen recently.
 
 ## 6. Set up monitoring
 

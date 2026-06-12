@@ -2,8 +2,8 @@
 
 Audience: Server operators
 Status: Active
-Applies to: `sh-manager` (manager tool `0.1.0`, manages the SelfHelp 0.x pre-release platform line)
-Last verified: 2026-06-09
+Applies to: `sh-manager` (manager tool `0.1.6+`, manages the SelfHelp 0.x pre-release platform line)
+Last verified: 2026-06-12
 Source of truth: `apps/cli/src/bin.ts`, `apps/cli/src/actions.ts`, `apps/web/src/bin.ts`
 
 This is the **single walkthrough** of the whole instance lifecycle, from an empty
@@ -101,27 +101,34 @@ sh-manager instance health website1               # verify
 ```
 
 For CMS-requested updates, the manager claims the instance-scoped operation. A
-single run **drains every pending operation** for the instance, then exits:
+single run **drains every pending operation** for the instance, then exits. The
+default transport execs into the backend container using the token generated at
+install — no URL or token to configure:
 
 ```bash
-sh-manager instance process-operations website1 \
-  --backend-url http://127.0.0.1:PORT --token "$SELFHELP_MANAGER_TOKEN"
+sh-manager instance process-operations website1
 ```
 
 ### Scheduling the update-operations loop
 
-A CMS-requested update only leaves `requested` once the manager processes it, so
-the consumer must run on a schedule. Wire one of the supervised triggers shipped
-in [`deploy/`](../../deploy/README.md):
+A CMS-requested update only leaves `requested` until something drains it. Two
+supported setups:
 
-- **systemd (recommended)** — `sh-manager-operations@<id>.service` runs
-  `process-operations <id> --watch`, a resident loop (`Restart=always`) that
-  drains every `--interval` seconds (default 15s).
-- **cron** — one-shot drain every minute per instance for hosts without systemd.
+- **Persistent web UI (simplest)** — while
+  `sh-manager web --mode persistent --persist` runs, a background poller drains
+  all inventory instances every 15 s (`SHM_CMS_POLL_SECONDS` overrides) and
+  journals each run — see
+  [GUI instance management](gui-instance-management.md).
+- **Headless** — wire one of the supervised triggers shipped in
+  [`deploy/`](../../deploy/README.md): **systemd (recommended)**,
+  `sh-manager-operations@<id>.service` running
+  `process-operations <id> --watch` (`Restart=always`, drains every
+  `--interval` seconds, default 15 s); or **cron**, a one-shot drain every
+  minute per instance.
 
-Both read the per-instance token + backend URL from a `0600` env file so secrets
-never appear in the unit, crontab, or process list. The manager token is
-per-instance, and server-side scope checks reject cross-instance operations.
+The manager token is per-instance, and server-side scope checks reject
+cross-instance operations. The CMS System page shows the manager-loop health
+("last seen") and warns when a request sits unprocessed.
 
 → Detail: [update](update.md).
 

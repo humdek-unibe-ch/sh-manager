@@ -2,8 +2,8 @@
 
 Audience: Operators and developers testing SelfHelp on a Windows machine
 Status: Active
-Applies to: `sh-manager` >= 0.1.5 (Docker image), Windows 10/11 + Docker Desktop (WSL2 backend)
-Last verified: 2026-06-11
+Applies to: `sh-manager` >= 0.1.6 (Docker image), Windows 10/11 + Docker Desktop (WSL2 backend)
+Last verified: 2026-06-12
 Source of truth: `apps/cli/src/bin.ts`, `apps/cli/src/wrapper.ts`, `packages/docker/src/host-paths.ts`, `Dockerfile`, [install.md](install.md)
 
 This guide runs the **published manager image** on Windows — no Node.js, no
@@ -107,8 +107,11 @@ version is shown in the page header):
   registry → instance config → install) and self-locks after success. You can
   do the whole first install from the GUI instead of step 2/3 above.
 - With `.\shm.ps1 web --mode persistent --persist` it serves the authenticated
-  **operations console** (live environment checks, manager version + update
-  status, operator commands). Create an operator first:
+  **operations console**: live environment checks, manager version + update
+  status, and full **instance management** — list/health/backups, update
+  dry-run + execute, restore, clone, remove, with live operation logs (see
+  [GUI instance management](gui-instance-management.md)). Create an operator
+  first:
   `.\shm.ps1 admin create --email you@example.test --roles server_owner --password ...`.
 
 Stop it with `Ctrl+C`.
@@ -125,16 +128,21 @@ under `selfhelp_<instance-id>`.
 ```
 
 Or from the CMS: **Admin → System → Maintenance & updates** requests an
-update; the manager executes it. That loop authenticates with a per-instance
-token you set once (in `D:\selfhelp\instances\demo1\secrets\secrets.env`, add
-`SELFHELP_MANAGER_TOKEN=<a long random string>` and restart the backend
-container), then:
+update; the manager executes it. The wiring is automatic — the per-instance
+manager token is generated at install and injected into the backend, and the
+manager execs into the backend container to claim operations (no URL, no
+manual token):
 
 ```powershell
-.\shm.ps1 instance process-operations demo1 --backend-url http://host.docker.internal:8080 --token "<the same token>"
+.\shm.ps1 instance process-operations demo1
 ```
 
-(`host.docker.internal`, not `localhost` — the manager runs in a container.)
+Even easier: keep the persistent GUI running (`.\shm.ps1 web --mode persistent
+--persist`) — it drains CMS-requested operations for all instances every 15
+seconds and shows each run's log in the operation history (see
+[GUI instance management](gui-instance-management.md)). An instance installed
+by an older manager gets the token backfilled by its next
+`instance update` or `instance repair`.
 
 ## 6. Update the manager itself
 
@@ -190,6 +198,8 @@ to the engine's view of the state folder, or `off` to disable translation.
 | Symptom | Cause / fix |
 |---------|-------------|
 | `.\shm.ps1` fails with "running scripts is disabled on this system" | One-time: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` (step 0). |
+| `unknown command 'sh-manager'` | Fixed in >= 0.1.6: a redundant leading `sh-manager` token (`.\shm.ps1 sh-manager instance list`) is now stripped by the wrapper and the CLI. On older images, drop the `sh-manager` word — the wrapper already *is* the manager. |
+| `Instance "<id>" not found in this state root` | The manifest is missing or the id is misspelled. The message lists the known instances; `.\shm.ps1 instance list` shows `broken` entries, and `.\shm.ps1 instance repair <id>` reconstructs a lost manifest from the newest backup or the remaining metadata. |
 | `ENOENT ... selfhelp.server.json` + "not initialized" on every command | The state mount differs between calls. Use the wrapper script (it bakes the folder in); if running `docker run` by hand, pass the exact same `-v <folder>:/opt/selfhelp` every time. |
 | `invalid reference format` or a path like `C:\Program Files\Git\run\...` in errors | Git Bash path mangling on hand-written `docker run` commands. Use the generated `shm.sh` (it disables the mangling) or prefix manual commands with `MSYS_NO_PATHCONV=1`. |
 | Instance containers start but secrets/JWT files appear empty | Manager < 0.1.5 with a state mount that differs between the engine and the container. Update the image, or use the old same-path mount (`-v /run/desktop/mnt/host/d/selfhelp:/run/desktop/mnt/host/d/selfhelp`). |
