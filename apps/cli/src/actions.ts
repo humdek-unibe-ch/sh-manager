@@ -232,6 +232,29 @@ async function waitForMysqlReady(deps: ActionDeps, instanceDir: string): Promise
   throw new Error(`MySQL not ready after ${attempts} attempts: ${errMessage(lastErr)}`);
 }
 
+/**
+ * Import a SQL dump with a bounded retry. `waitForMysqlReady` can pass against
+ * MySQL's first-boot TEMPORARY server, which then restarts before the real one
+ * comes up — the import's client connection dies with ERROR 2002 mid-stream.
+ * The dump is idempotent (mysqldump emits CREATE DATABASE + DROP TABLE IF
+ * EXISTS per table), so re-confirming readiness and re-running it is safe.
+ */
+async function importDatabaseWithRetry(deps: ActionDeps, instanceDir: string, sqlFile: string): Promise<void> {
+  if (!deps.importDatabase) throw new Error('importDatabase host helper missing.');
+  const attempts = 3;
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    if (i > 0) await waitForMysqlReady(deps, instanceDir);
+    try {
+      await deps.importDatabase(instanceDir, sqlFile);
+      return;
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw new Error(`Database import failed after ${attempts} attempts: ${errMessage(lastErr)}`);
+}
+
 const DEFAULT_SERVICE_IMAGES = { mysql: 'mysql:8.4', redis: 'redis:7.2', mercure: 'dunglas/mercure:v0.18' };
 
 /**
@@ -1306,7 +1329,7 @@ export async function instanceRestore(
   // 3. Start MySQL only, wait until ready, import the database dump.
   await deps.runner.run(paths.dir, [...composeCommands.upDetached(), 'mysql']);
   await waitForMysqlReady(deps, paths.dir);
-  await deps.importDatabase(paths.dir, path.join(backupDir, 'database.sql'));
+  await importDatabaseWithRetry(deps, paths.dir, path.join(backupDir, 'database.sql'));
 
   // 4. Restore configuration. A same-instance restore re-applies the point-in-time
   // compose (so code matches the restored DB). A clone/DR import keeps the current
@@ -1563,7 +1586,7 @@ export async function instanceClone(
   await mkdir(targetPaths.backupsDir, { recursive: true });
   const tmpDump = path.join(targetPaths.backupsDir, 'clone-source.sql');
   await writeFile(tmpDump, dump);
-  await deps.importDatabase(targetPaths.dir, tmpDump);
+  await importDatabaseWithRetry(deps, targetPaths.dir, tmpDump);
   await rm(tmpDump, { force: true });
 
   // Bring the full clone stack up and health-check it.

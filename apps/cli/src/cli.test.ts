@@ -716,6 +716,52 @@ describe('instance lifecycle (offline)', () => {
     expect(compose).not.toContain('127.0.0.1:9123:3000');
   });
 
+  it('clone retries the database import when MySQL drops the first connection', async () => {
+    // Regression: MySQL's first-boot temp-init server can answer the readiness
+    // probe and then restart, so the first import dies mid-stream (ERROR 2002 /
+    // broken stdin pipe). The dump is idempotent — the import must retry after
+    // re-confirming readiness instead of failing (or crashing) the operation.
+    const { d } = await lifecycleDeps();
+    let importAttempts = 0;
+    d.importDatabase = async () => {
+      importAttempts++;
+      if (importAttempts === 1) throw new Error('Database import exited with code 1.');
+    };
+    await serverInit(d, { serverId: 's1', mode: 'local' });
+    await instanceInstall(d, {
+      instanceId: 'localtest',
+      displayName: 'Local Test',
+      mode: 'local',
+      localPort: 9123,
+      registryUrl: 'https://humdek-unibe-ch.github.io/sh2-plugin-registry/',
+      version: 'latest',
+    });
+
+    const res = await instanceClone(d, 'localtest', 'localtest-copy', { targetLocalPort: 9124, apply: true });
+    expect(res.executed).toBe(true);
+    expect(importAttempts).toBe(2);
+  });
+
+  it('clone fails (not crashes) when the database import never succeeds', async () => {
+    const { d } = await lifecycleDeps();
+    d.importDatabase = async () => {
+      throw new Error('Database import exited with code 1.');
+    };
+    await serverInit(d, { serverId: 's1', mode: 'local' });
+    await instanceInstall(d, {
+      instanceId: 'localtest',
+      displayName: 'Local Test',
+      mode: 'local',
+      localPort: 9123,
+      registryUrl: 'https://humdek-unibe-ch.github.io/sh2-plugin-registry/',
+      version: 'latest',
+    });
+
+    await expect(instanceClone(d, 'localtest', 'localtest-copy', { targetLocalPort: 9124, apply: true })).rejects.toThrow(
+      /import failed after 3 attempts/i,
+    );
+  });
+
   it('refuses mode-mismatched clone addresses (local without port, production without domain)', async () => {
     const { d } = await lifecycleDeps();
     await serverInit(d, { serverId: 's1', mode: 'local' });

@@ -250,6 +250,12 @@ export function realDeps(root: string, trustedKeys: TrustedKeysFile, opts: RealD
           { cwd: instanceDir, stdio: ['pipe', 'inherit', 'inherit'] },
         );
         child.on('error', rejectImport);
+        // If mysql exits early (e.g. the server restarts right after its
+        // first-boot temp-init), the stdin pipe breaks while the dump is still
+        // being flushed. Without a handler that 'error' event (EPIPE/EOF)
+        // crashes the whole process; the close handler below already reports
+        // the failure through the exit code.
+        child.stdin?.on('error', () => {});
         child.on('close', (code) =>
           code === 0
             ? resolveImport()
