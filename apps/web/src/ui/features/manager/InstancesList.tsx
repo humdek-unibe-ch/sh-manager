@@ -47,7 +47,7 @@ export function InstancesList({ client, onOpen, onCreate }: InstancesListProps):
   return (
     <Card
       title="Instances"
-      description="Every SelfHelp instance on this server. Click one to inspect health, backups, updates and operation logs."
+      description="Every SelfHelp instance on this server (inventory state — containers are not polled). Open an instance to run an on-demand health check, manage backups and updates, and read operation logs."
       aside={
         <Group gap="sm">
           <Button variant="ghost" loading={query.isFetching} onClick={() => void query.refetch()}>

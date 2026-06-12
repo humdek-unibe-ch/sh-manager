@@ -4,7 +4,7 @@ Audience: Server operators
 Status: Active
 Applies to: `sh-manager` (manager tool `0.1.6+`, persistent web mode)
 Last verified: 2026-06-12
-Source of truth: `apps/web/src/server.ts`, `apps/web/src/instances.ts`, `apps/web/src/operations/`, `apps/web/src/ui/features/manager/`
+Source of truth: `apps/web/src/server.ts`, `apps/web/src/instances.ts`, `apps/web/src/jobs.ts`, `apps/web/src/poller.ts`, `apps/web/src/ui/features/manager/`
 
 The persistent-mode web UI manages the full instance lifecycle from the
 browser: list and inspect instances, run health checks, browse backups,
@@ -55,13 +55,18 @@ manager version + self-update status, and the **Instances** section.
 
 - **Instances list** — every instance from the server inventory with its
   status badge (`active` / `disabled` / `broken`), mode, domain/port, and
-  installed version. A `broken` instance (for example a missing manifest)
-  shows the reason instead of crashing — repair it with
+  installed version. The list reflects the **inventory/manifest state only**
+  — it does not poll containers, so it stays instant with many instances.
+  Live container/health state is checked **on demand** from the instance
+  detail page. A `broken` instance (for example a missing manifest) shows
+  the reason instead of crashing — repair it with
   `sh-manager instance repair <id>` (see
   [safe mode & recovery](safe-mode-and-recovery.md)).
-- **Instance detail** — manifest summary, container state, **health check**
-  button (backend + frontend + per-service checks), the **backups list**
-  (id, date, size, versions metadata), and the operation history.
+- **Instance detail** — manifest summary, the **backups list** (id, date,
+  size, versions metadata), the operation history, and a **Run health
+  check** button (backend + frontend + per-service container checks). Health
+  is checked on demand when you click the button; nothing polls the
+  containers in the background.
 - **Update** — always runs a **dry-run first** (resolved plan + preflight:
   ok / warning / blocked, with reasons). Executing asks for explicit
   confirmation flags when the plan carries migration risk.
@@ -72,7 +77,16 @@ manager version + self-update status, and the **Instances** section.
 - **Clone** — copy an instance to a new id + domain/port. Clones always get
   **fresh secrets**; credentials are never copied.
 - **Create** — the same plan/install path as the wizard. The generated admin
-  password is shown **once** and never enters the journal or state files.
+  password is **never shown in the browser** and never enters the journal log
+  or state files: provisioning writes it to a restricted `0600` file on the
+  server (`<root>/instances/<id>/secrets/admin_password`) and the operation
+  result shows that file's path. Read it over SSH once, then remove it:
+
+  ```bash
+  ssh you@server
+  cat /opt/selfhelp/instances/<id>/secrets/admin_password   # path shown in the operation result
+  rm /opt/selfhelp/instances/<id>/secrets/admin_password    # optional, after the first login
+  ```
 - **Remove** — three modes, same as the CLI: `disable` (reversible),
   `remove_containers_keep_data`, and `full_delete` (requires typing
   `delete <id>`).

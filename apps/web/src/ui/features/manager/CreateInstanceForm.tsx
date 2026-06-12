@@ -84,8 +84,9 @@ export function CreateInstanceForm({
       <Stack gap="md">
         <Text size="sm" c="dimmed">
           The manager installs the latest published release, provisions the database and creates the first
-          admin account. The generated admin password is written to a restricted file on the server — it is
-          never shown here.
+          admin account. The generated admin password is never shown in the browser: it is written to a
+          restricted (0600) file on the server and the operation result shows the file path — read it over
+          SSH after the install finishes.
         </Text>
 
         <Group grow align="flex-start">

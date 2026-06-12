@@ -257,8 +257,10 @@ describe('OperationsConsole instance flows', () => {
     await user.click(await screen.findByRole('button', { name: /new instance/i }));
     const dialog = await screen.findByRole('dialog');
 
-    // The admin password is explicitly NOT shown in the browser.
-    expect(within(dialog).getByText(/never shown here/i)).toBeInTheDocument();
+    // The admin password is explicitly NOT shown in the browser; the operator
+    // reads the restricted server-side file (path in the operation result).
+    expect(within(dialog).getByText(/never shown in the browser/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/read it over\s+SSH/i)).toBeInTheDocument();
 
     await user.type(within(dialog).getByLabelText(/instance id/i), 'website1');
     await user.type(within(dialog).getByLabelText(/display name/i), 'Website One');
