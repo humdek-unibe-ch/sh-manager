@@ -402,6 +402,32 @@ describe('CLI actions (offline)', () => {
     expect(lockText).not.toContain(res.adminPassword!);
   });
 
+  it('install reports every stage through onStep so the GUI can show live progress', async () => {
+    const d = await makeDeps();
+    d.sleep = async () => {};
+    d.dbWaitDelayMs = 0;
+    await serverInit(d, { serverId: 's1', mode: 'production', letsencryptEmail: 'ops@example.ch' });
+
+    const stages: string[] = [];
+    await instanceInstall(d, {
+      instanceId: 'website1',
+      displayName: 'Website 1',
+      mode: 'production',
+      domain: 'website1.example.ch',
+      registryUrl: 'https://humdek-unibe-ch.github.io/sh2-plugin-registry/',
+      version: 'latest',
+      provision: true,
+      adminEmail: 'qa.admin@selfhelp.test',
+      onStep: (s) => {
+        stages.push(s);
+      },
+    });
+
+    // The journaled phases the create wizard's checklist is driven by:
+    // pre-up stages, then every provisioning step in execution order.
+    expect(stages).toEqual(['registry', 'compose', 'start', 'wait_db', 'migrations', 'admin', 'cache_warm', 'health']);
+  });
+
   it('provision fails fast on a failed migration and never creates an admin', async () => {
     const d = await makeDeps();
     d.sleep = async () => {};

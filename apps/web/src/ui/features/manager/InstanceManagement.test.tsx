@@ -372,6 +372,13 @@ describe('OperationsConsole instance flows', () => {
     expect(await within(dialog).findByText('site.example.org', { exact: false })).toBeInTheDocument();
     await user.click(within(dialog).getByRole('button', { name: /install instance/i }));
 
+    // The install screen shows the bootstrap-style phase checklist (driven by
+    // the journaled operation phase) plus the raw log. The fake's operation
+    // completes instantly, so every row is already ticked.
+    expect(await within(dialog).findByText('Resolve & verify release')).toBeInTheDocument();
+    expect(within(dialog).getByText('Run database migrations')).toBeInTheDocument();
+    expect(within(dialog).getByText('Run health checks')).toBeInTheDocument();
+
     // The journaled install log streams INSIDE the wizard.
     expect(await within(dialog).findByText(/instance_create finished/)).toBeInTheDocument();
     expect(await within(dialog).findByText(/is installed/i)).toBeInTheDocument();

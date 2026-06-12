@@ -153,3 +153,39 @@ export function installStepIndexForFailure(failedStep: string | undefined): numb
   const id = FAILED_STEP_TO_INSTALL_STEP[failedStep] ?? failedStep;
   return INSTALL_STEPS.findIndex((s) => s.id === id);
 }
+
+/**
+ * Checklist rows for the CREATE-INSTANCE wizard's install screen. Unlike the
+ * bootstrap's {@link INSTALL_STEPS} animation, these are driven by the REAL
+ * journaled operation phase: `instanceInstall` reports each stage (via
+ * `onStep`) and the journal stores it as `OperationRecord.phase`.
+ */
+export const CREATE_INSTANCE_STEPS: InstallStepView[] = [
+  { id: 'registry', label: 'Resolve & verify release', note: 'Signatures are checked against the official registry.' },
+  { id: 'compose', label: 'Generate configuration & secrets', note: 'Secrets go to restricted files — never shown here.' },
+  { id: 'start', label: 'Pull verified images & start services' },
+  { id: 'wait_db', label: 'Wait for the database' },
+  { id: 'migrations', label: 'Run database migrations' },
+  { id: 'admin', label: 'Create the first admin account' },
+  { id: 'plugins', label: 'Install initial plugins' },
+  { id: 'cache_warm', label: 'Warm caches & restart backend' },
+  { id: 'health', label: 'Run health checks' },
+];
+
+/** Journal phases that predate the first real stage (treated as step 0). */
+const CREATE_PRELUDE_PHASES = new Set(['starting', 'install', 'seed']);
+
+/**
+ * Index of the ACTIVE checklist row for a journaled create-operation phase.
+ * Unknown phases (and the journal's generic prelude phases) map onto the
+ * first row so the checklist always shows forward motion; `seed` (skipped on
+ * normal installs, journalled between migrations and admin) sticks to the
+ * migrations row.
+ */
+export function createStepIndexForPhase(phase: string | undefined): number {
+  if (!phase) return 0;
+  if (phase === 'seed') return CREATE_INSTANCE_STEPS.findIndex((s) => s.id === 'migrations');
+  if (CREATE_PRELUDE_PHASES.has(phase)) return 0;
+  const idx = CREATE_INSTANCE_STEPS.findIndex((s) => s.id === phase);
+  return idx < 0 ? 0 : idx;
+}

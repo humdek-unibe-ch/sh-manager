@@ -5,6 +5,8 @@ import { WIZARD_STEPS } from '../../wizard';
 import {
   activePhaseIndex,
   CHECK_META,
+  CREATE_INSTANCE_STEPS,
+  createStepIndexForPhase,
   INSTALL_STEPS,
   phaseIndexForStep,
   WIZARD_PHASES,
@@ -44,5 +46,24 @@ describe('check + install metadata', () => {
     expect(INSTALL_STEPS.length).toBeGreaterThanOrEqual(13);
     expect(INSTALL_STEPS[0]?.label).toMatch(/folder/i);
     expect(INSTALL_STEPS.some((s) => /migration/i.test(s.label))).toBe(true);
+  });
+});
+
+describe('create-instance phase checklist', () => {
+  it('maps every journaled install stage onto its checklist row, in order', () => {
+    // The exact stages instanceInstall reports via onStep (journaled as the
+    // operation phase); the checklist must track them monotonically.
+    const journalPhases = ['registry', 'compose', 'start', 'wait_db', 'migrations', 'admin', 'plugins', 'cache_warm', 'health'];
+    const indices = journalPhases.map((p) => createStepIndexForPhase(p));
+    expect(indices).toEqual(journalPhases.map((p) => CREATE_INSTANCE_STEPS.findIndex((s) => s.id === p)));
+    for (let i = 1; i < indices.length; i++) expect(indices[i]!).toBeGreaterThan(indices[i - 1]!);
+  });
+
+  it('parks prelude/unknown phases on the first row and "seed" on migrations', () => {
+    expect(createStepIndexForPhase(undefined)).toBe(0);
+    expect(createStepIndexForPhase('starting')).toBe(0);
+    expect(createStepIndexForPhase('install')).toBe(0);
+    expect(createStepIndexForPhase('something-new')).toBe(0);
+    expect(createStepIndexForPhase('seed')).toBe(CREATE_INSTANCE_STEPS.findIndex((s) => s.id === 'migrations'));
   });
 });

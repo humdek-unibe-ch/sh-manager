@@ -106,7 +106,11 @@ self-update status, and the **Instances** section.
   **Basics** (name, id, admin account) → **Address** (production domain or
   local port) → **Release** (version picked from the **verified registry
   dropdown** — never typed by hand) → **Review & install**. The install then
-  streams its **journaled log live inside the wizard**; when it finishes you
+  shows a **live step checklist** (resolve & verify release → generate
+  configuration & secrets → pull images & start services → wait for the
+  database → run migrations → create the first admin → install plugins →
+  warm caches → health checks) driven by the real journaled operation phase,
+  with the **full journaled log streaming underneath**; when it finishes you
   can open the new instance directly. The generated admin password is
   **never shown in the browser** and never enters the journal log or state
   files: provisioning writes it to a restricted `0600` file on the server

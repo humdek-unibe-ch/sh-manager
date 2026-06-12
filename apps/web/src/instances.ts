@@ -273,6 +273,10 @@ export function buildInstanceActions(opts: BuildInstanceActionsOptions): Manager
         provision: true,
         adminEmail: req.adminEmail,
         ...(req.adminName ? { adminName: req.adminName } : {}),
+        // Journal each install stage as the operation phase: the create wizard
+        // renders these as a live step checklist (registry → compose → start →
+        // wait_db → migrations → … → health).
+        onStep: (step) => ctx.setPhase(step),
       };
       const res = await instanceInstall(deps, installOpts);
       await ctx.log(`Installed ${req.instanceId} at version ${res.version}.`);

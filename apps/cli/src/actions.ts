@@ -50,6 +50,7 @@ import {
   type PreflightResourceFacts,
   type ProcessOutcome,
   type ProvisionReport,
+  type ProvisionStepName,
   type ServiceProbeResult,
   type UpdatePlan,
 } from '@shm/core';
@@ -446,6 +447,13 @@ export interface InstanceInstallOptions {
    * the stack's worker finalises them via the documented Messenger pipeline).
    */
   pluginManifests?: string[];
+  /**
+   * Live progress callback, fired when the install enters a stage: `registry`,
+   * `compose`, `start`, then the provisioning steps (`wait_db`, `migrations`,
+   * `seed`, `admin`, `plugins`, `cache_warm`, `health`). The manager GUI
+   * journals these so the create wizard can show a real step checklist.
+   */
+  onStep?: (step: string) => void | Promise<void>;
 }
 
 async function fetchAllFrontends(client: RegistryClient, refs: RegistryReleaseRef[], channel: string): Promise<FrontendRelease[]> {
@@ -484,6 +492,7 @@ export async function instanceInstall(
 
   const channel = opts.channel ?? 'stable';
   const client = registryClient(deps, opts.registryUrl);
+  await opts.onStep?.('registry');
   const index = await client.getIndex();
 
   const coreRef = selectCoreRef(index.core, channel, opts.version);
@@ -499,6 +508,7 @@ export async function instanceInstall(
   };
   const services = await deps.resolveServiceDigests(serviceImages);
 
+  await opts.onStep?.('compose');
   const artifacts = buildInstanceInstallArtifacts({
     instanceId: opts.instanceId,
     displayName: opts.displayName,
@@ -517,6 +527,7 @@ export async function instanceInstall(
 
   // Provisioning requires a running stack, so it implies bringUp.
   const bringUp = (opts.bringUp ?? false) || (opts.provision ?? false);
+  if (bringUp) await opts.onStep?.('start');
   // The instance compose declares the shared proxy network as external; make
   // sure it exists even on servers bootstrapped by an older manager.
   if (bringUp && deps.ensureNetwork) {
@@ -730,6 +741,7 @@ async function runInstanceProvisioning(
           await deps.probeHealth(routing.publicFrontendUrl, routing.browserApiPrefix),
           deps.now,
         ),
+      ...(opts.onStep ? { onPhase: (name: ProvisionStepName) => opts.onStep!(name) } : {}),
     },
   );
 }

@@ -25,11 +25,14 @@ import {
   ChoiceCard,
   KeyValue,
   StatusBadge,
+  StepProgress,
   TextField,
   WizardStepper,
+  type ProgressStep,
 } from '../../components';
 import { ApiError, type ApiClient } from '../../lib/api-client';
 import { slugify } from '../../lib/formatting';
+import { CREATE_INSTANCE_STEPS, createStepIndexForPhase } from '../../lib/wizard-view';
 import type { CreateInstanceRequest } from '../../lib/types';
 import { EMAIL_RE, HOSTNAME_RE, INSTANCE_ID_RE, isValidLocalPort } from '../../../instance-validation';
 import { OperationLog, operationTone } from './OperationLog';
@@ -328,6 +331,22 @@ export function CreateInstanceWizard({
   }
 
   function renderProgress(): JSX.Element {
+    // Real progress: the journaled operation phase marks the active row —
+    // earlier rows are done, later rows are waiting (same checklist styling
+    // as the single-instance bootstrap install).
+    const activeIndex = opStatus === 'succeeded' ? CREATE_INSTANCE_STEPS.length : createStepIndexForPhase(operationQuery.data?.phase);
+    const progressSteps: ProgressStep[] = CREATE_INSTANCE_STEPS.map((s, i) => {
+      const state: ProgressStep['state'] =
+        i < activeIndex
+          ? 'success'
+          : i === activeIndex
+            ? opStatus === 'failed'
+              ? 'failed'
+              : 'running'
+            : 'waiting';
+      return { id: s.id, label: s.label, state, ...(s.note ? { note: s.note } : {}) };
+    });
+
     return (
       <Stack gap="md">
         <Group gap="sm">
@@ -337,6 +356,16 @@ export function CreateInstanceWizard({
             on the dashboard.
           </Text>
         </Group>
+
+        <Paper withBorder radius="md" p="lg">
+          <StepProgress steps={progressSteps} />
+        </Paper>
+
+        {opStatus === 'failed' && operationQuery.data?.error ? (
+          <Alert tone="error" title="What failed">
+            {operationQuery.data.error}
+          </Alert>
+        ) : null}
 
         <OperationLog client={client} operationId={operationId!} />
 
