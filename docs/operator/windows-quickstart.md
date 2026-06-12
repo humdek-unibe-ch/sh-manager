@@ -106,13 +106,15 @@ version is shown in the page header):
 - On a fresh state folder it runs the **install wizard** (environment checks →
   registry → instance config → install) and self-locks after success. You can
   do the whole first install from the GUI instead of step 2/3 above.
-- With `.\shm.ps1 web --mode persistent --persist` it serves the authenticated
+- Once the server is initialized (after the first install), `.\shm.ps1 web`
+  auto-selects **persistent mode** and serves the authenticated
   **operations console**: live environment checks, manager version + update
   status, and full **instance management** — list/health/backups, update
   dry-run + execute, restore, clone, remove, with live operation logs (see
   [GUI instance management](gui-instance-management.md)). Create an operator
   first:
-  `.\shm.ps1 admin create --email you@example.test --roles server_owner --password ...`.
+  `.\shm.ps1 admin create --email you@example.test --roles server_owner`
+  (the generated password is printed once; add `--password ...` to choose one).
 
 Stop it with `Ctrl+C`.
 

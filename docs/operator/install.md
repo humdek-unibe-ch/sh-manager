@@ -103,9 +103,12 @@ ssh -L 8765:127.0.0.1:8765 you@your-server
    password manager and delete the file after your first sign-in.
 
 The wizard **self-locks** after a successful install: the installer can no longer
-change anything. To manage the server afterwards, run it in **persistent mode** —
-the authenticated operations console with full instance lifecycle management
-(see [GUI instance management](gui-instance-management.md) and
+change anything. From then on, starting the web UI again (`sh-manager web`, no
+flags) **auto-selects persistent mode** — the authenticated operations console
+with full instance lifecycle management. Create an operator account first
+(`sh-manager admin create --email you@example.org --roles server_owner`; the
+generated password is printed once), then sign in (see
+[GUI instance management](gui-instance-management.md) and
 [security hardening](security-hardening.md)). Persistent mode is reached the
 same way as the wizard: localhost bind + SSH tunnel, never internet-exposed.
 

@@ -16,6 +16,12 @@ modes. **Bootstrap mode** (fresh state folder) only installs and self-locks;
 it never exposes instance management. Everything on this page requires
 **persistent mode**.
 
+**Mode is auto-detected**: `sh-manager web` starts in persistent mode as soon
+as the server is initialized (`<root>/selfhelp.server.json` exists — i.e.
+after the first install), and in bootstrap mode on a fresh state folder. An
+explicit `--mode bootstrap|persistent` (or `SHM_WEB_MODE`) always overrides
+the detection.
+
 ## Security model (read this first)
 
 - The BFF binds to **`127.0.0.1`** only. Do **not** expose it to the internet —
@@ -43,13 +49,29 @@ ssh -L 8765:127.0.0.1:8765 you@your-server
 ## Start the management UI
 
 ```bash
-# on the server (or via the shm wrapper: ./shm.sh web --mode persistent --persist)
-sh-manager web --mode persistent --persist
+# on the server (or via the shm wrapper: ./shm.sh web)
+sh-manager web
 # SelfHelp Manager persistent UI (vX.Y.Z): http://127.0.0.1:8765
+# Mode auto-selected: persistent (server inventory found) — sign in to manage instances.
 ```
 
-Sign in with an operator account. The console shows the environment checks,
-manager version + self-update status, and the **Instances** section.
+On an initialized server this starts the management console directly (no
+flags needed). `--mode persistent --persist` still works and forces the same
+mode explicitly.
+
+Sign in with an operator account. **First run:** no operator accounts exist
+yet — the sign-in page tells you so and shows the command to create one:
+
+```bash
+sh-manager admin create --email you@example.org --roles server_owner
+# Created operator you@example.org [server_owner].
+# Generated password (shown once, store it now): <generated>
+```
+
+Omitting `--password` generates a strong password and prints it exactly once
+(same convention as the install's admin password). Then reload the sign-in
+page and log in. The console shows the environment checks, manager version +
+self-update status, and the **Instances** section.
 
 ## What each page does
 

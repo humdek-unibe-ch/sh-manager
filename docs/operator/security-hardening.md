@@ -57,10 +57,8 @@ Persistent mode authenticates operators against an operator store
 (`<root>/manager/operators.json`). Manage operators with the CLI:
 
 ```bash
-# first-run: issue a one-time bootstrap token to unlock operator creation
-sh-manager admin bootstrap-token --ttl 3600
-
-# create a local operator (password via flag or SELFHELP_MANAGER_ADMIN_PASSWORD)
+# create a local operator; omitting --password generates a strong one and
+# prints it exactly once (or pass --password / SELFHELP_MANAGER_ADMIN_PASSWORD)
 sh-manager admin create --email ops@example.ch --roles server_owner --name "Ops"
 
 # roles and lifecycle

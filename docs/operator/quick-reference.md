@@ -102,9 +102,8 @@ operation logs) — see [GUI instance management](gui-instance-management.md).
 
 | Task | Command |
 | --- | --- |
-| Start the management UI | `sh-manager web --mode persistent --persist` (reach it via SSH tunnel) |
-| First-run bootstrap token | `sh-manager admin bootstrap-token --ttl 3600` |
-| Create operator | `sh-manager admin create --email ops@example.ch --roles server_owner --name "Ops"` |
+| Start the management UI | `sh-manager web` (auto-persistent once the server is initialized; reach it via SSH tunnel) |
+| Create operator | `sh-manager admin create --email ops@example.ch --roles server_owner --name "Ops"` (no `--password` = generated + shown once) |
 | Grant a role | `sh-manager admin role grant ops@example.ch instance_operator` |
 | Allow OIDC email | `sh-manager admin allow-email ops@example.ch` |
 | List / disable | `sh-manager admin list` · `sh-manager admin disable old@example.ch` |
