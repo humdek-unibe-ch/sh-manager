@@ -21,9 +21,10 @@ import { CloneInstanceDialog } from './CloneInstanceDialog';
 import { InstanceUpdateDialog } from './InstanceUpdateDialog';
 import { OperationLog, operationTone } from './OperationLog';
 import { RemoveInstanceDialog } from './RemoveInstanceDialog';
+import { SetAddressDialog } from './SetAddressDialog';
 import { instanceStatusTone } from './InstancesList';
 
-type DialogKind = 'update' | 'clone' | 'remove' | null;
+type DialogKind = 'update' | 'clone' | 'address' | 'remove' | null;
 
 function healthTone(overall: InstanceHealthReport['overall']): 'ok' | 'warning' | 'error' | 'neutral' {
   switch (overall) {
@@ -41,10 +42,9 @@ function healthTone(overall: InstanceHealthReport['overall']): 'ok' | 'warning' 
 export interface InstanceDetailProps {
   client: ApiClient;
   instanceId: string;
-  onBack: () => void;
 }
 
-export function InstanceDetail({ client, instanceId, onBack }: InstanceDetailProps): JSX.Element {
+export function InstanceDetail({ client, instanceId }: InstanceDetailProps): JSX.Element {
   const [dialog, setDialog] = useState<DialogKind>(null);
   const [watchedOperationId, setWatchedOperationId] = useState<string | null>(null);
 
@@ -81,50 +81,43 @@ export function InstanceDetail({ client, instanceId, onBack }: InstanceDetailPro
 
   if (detailQuery.isError || !detail || !summary) {
     return (
-      <Stack gap="md">
-        <Anchor component="button" type="button" onClick={onBack} size="sm">
-          ← Back to instances
-        </Anchor>
-        <Alert tone="error" title={`Instance "${instanceId}" could not be loaded`}>
-          {detailQuery.error instanceof ApiError
-            ? detailQuery.error.message
-            : 'The manager service did not answer.'}
-        </Alert>
-      </Stack>
+      <Alert tone="error" title={`Instance "${instanceId}" could not be loaded`}>
+        {detailQuery.error instanceof ApiError
+          ? detailQuery.error.message
+          : 'The manager service did not answer.'}
+      </Alert>
     );
   }
 
   return (
     <Stack gap="xl">
-      <Stack gap="xs">
-        <Anchor component="button" type="button" onClick={onBack} size="sm">
-          ← Back to instances
-        </Anchor>
-        <Group justify="space-between" align="flex-start" wrap="wrap">
-          <div>
-            <Group gap="sm">
-              <Title order={2}>{summary.instanceId}</Title>
-              <StatusBadge tone={instanceStatusTone(summary.status)}>{summary.status}</StatusBadge>
-              {busy ? <StatusBadge tone="pending">operation running</StatusBadge> : null}
-            </Group>
-            {summary.displayName ? <Text c="dimmed">{summary.displayName}</Text> : null}
-          </div>
+      <Group justify="space-between" align="flex-start" wrap="wrap">
+        <div>
           <Group gap="sm">
-            <Button variant="secondary" loading={health.isPending} onClick={() => health.mutate()}>
-              Run health check
-            </Button>
-            <Button variant="primary" disabled={busy} onClick={() => setDialog('update')}>
-              Update…
-            </Button>
-            <Button variant="secondary" disabled={busy} onClick={() => setDialog('clone')}>
-              Clone…
-            </Button>
-            <Button variant="danger" disabled={busy} onClick={() => setDialog('remove')}>
-              Remove…
-            </Button>
+            <Title order={2}>{summary.instanceId}</Title>
+            <StatusBadge tone={instanceStatusTone(summary.status)}>{summary.status}</StatusBadge>
+            {busy ? <StatusBadge tone="pending">operation running</StatusBadge> : null}
           </Group>
+          {summary.displayName ? <Text c="dimmed">{summary.displayName}</Text> : null}
+        </div>
+        <Group gap="sm">
+          <Button variant="secondary" loading={health.isPending} onClick={() => health.mutate()}>
+            Run health check
+          </Button>
+          <Button variant="primary" disabled={busy} onClick={() => setDialog('update')}>
+            Update…
+          </Button>
+          <Button variant="secondary" disabled={busy} onClick={() => setDialog('clone')}>
+            Clone…
+          </Button>
+          <Button variant="secondary" disabled={busy} onClick={() => setDialog('address')}>
+            Change address…
+          </Button>
+          <Button variant="danger" disabled={busy} onClick={() => setDialog('remove')}>
+            Remove…
+          </Button>
         </Group>
-      </Stack>
+      </Group>
 
       {summary.status === 'broken' && summary.brokenReason ? (
         <Alert tone="error" title="This instance needs repair">
@@ -255,7 +248,17 @@ export function InstanceDetail({ client, instanceId, onBack }: InstanceDetailPro
       <CloneInstanceDialog
         client={client}
         sourceInstanceId={instanceId}
+        sourceMode={summary.mode === 'local' ? 'local' : summary.mode === 'production' ? 'production' : null}
         opened={dialog === 'clone'}
+        onClose={() => setDialog(null)}
+        onStarted={onStarted}
+      />
+      <SetAddressDialog
+        client={client}
+        instanceId={instanceId}
+        mode={summary.mode === 'local' ? 'local' : summary.mode === 'production' ? 'production' : null}
+        currentAddress={summary.domain ?? ''}
+        opened={dialog === 'address'}
         onClose={() => setDialog(null)}
         onStarted={onStarted}
       />

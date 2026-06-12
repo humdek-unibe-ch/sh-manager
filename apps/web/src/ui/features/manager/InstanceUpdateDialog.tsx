@@ -12,9 +12,10 @@ import { useState } from 'react';
 import { Code, Divider, Group, List, Modal, Stack, Text } from '@mantine/core';
 import { useMutation } from '@tanstack/react-query';
 import type { UpdatePlan } from '@shm/core';
-import { Alert, Button, Checkbox, StatusBadge, TextField, type BadgeTone } from '../../components';
+import { Alert, Button, Checkbox, StatusBadge, type BadgeTone } from '../../components';
 import { ApiError, type ApiClient } from '../../lib/api-client';
 import type { UpdateInstanceRequest } from '../../lib/types';
+import { VersionSelect } from './VersionSelect';
 
 function planTone(status: UpdatePlan['status']): BadgeTone {
   switch (status) {
@@ -97,18 +98,17 @@ export function InstanceUpdateDialog({
           automatically during execution.
         </Text>
 
-        <Group grow align="flex-end">
-          <TextField
-            label="Target version"
-            value={target}
-            onChange={(v) => {
-              setTarget(v);
-              resetPlan();
-            }}
-            placeholder="latest"
-            help="Leave empty for the newest release in the channel."
-          />
-        </Group>
+        <VersionSelect
+          client={client}
+          label="Target version"
+          {...(useTestChannel ? { channel: 'test' } : {})}
+          value={target === '' ? 'latest' : target}
+          onChange={(v) => {
+            setTarget(v === 'latest' ? '' : v);
+            resetPlan();
+          }}
+          help='Versions come from the verified release registry — "latest" resolves to the newest release in the channel.'
+        />
         <Checkbox
           checked={useTestChannel}
           onChange={(v) => {

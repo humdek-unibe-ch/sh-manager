@@ -1,259 +1,199 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
 /**
- * Authenticated operations console (persistent mode).
+ * Authenticated operations console (persistent mode), laid out as a Mantine
+ * AppShell — the same admin-panel structure operators know from the SelfHelp
+ * CMS UI: instances live in the LEFT SIDEBAR (with live status dots), the
+ * CENTER shows either the server dashboard or the selected instance's
+ * workspace, and the header carries the brand, the signed-in operator and the
+ * sign-out action.
  *
- * Two views, no client router: the overview (environment checks, manager
- * version, instances list) and the per-instance detail page (health, backups,
- * update with dry-run, clone, remove, live operation logs). All instance
- * mutations run through the BFF job layer and are watched via the operation
- * journal — the GUI shows real logs, never imagined state.
+ * All instance mutations run through the BFF job layer and are watched via
+ * the operation journal — the GUI shows real logs, never imagined state.
  */
-import { useMemo, useState } from 'react';
-import { Anchor, Center, Group, SimpleGrid, Stack, Text, Title } from '@mantine/core';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
 import {
-  Alert,
-  Button,
-  Card,
-  CheckRow,
-  CommandPreview,
-  Spinner,
-  StatusBadge,
-  type BadgeTone,
-  type CheckStatus,
-} from '../../components';
-import { ApiError, type ApiClient } from '../../lib/api-client';
-import { CHECK_META } from '../../lib/wizard-view';
-import type { CheckResult, Snapshot, WizardStepId } from '../../lib/types';
-import { CreateInstanceForm } from './CreateInstanceForm';
+  AppShell as MantineAppShell,
+  Box,
+  Burger,
+  Divider,
+  Group,
+  NavLink,
+  ScrollArea,
+  Text,
+  Tooltip,
+} from '@mantine/core';
+import { useDisclosure } from '@mantine/hooks';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Brand, Button, StatusBadge, type BadgeTone } from '../../components';
+import type { ApiClient } from '../../lib/api-client';
+import type { InstanceSummary } from '../../lib/types';
+import { ConsoleDashboard, CONSOLE_STATE_KEY } from './ConsoleDashboard';
+import { CreateInstanceWizard } from './CreateInstanceWizard';
 import { InstanceDetail } from './InstanceDetail';
-import { InstancesList, INSTANCES_KEY } from './InstancesList';
-import { OperationLog } from './OperationLog';
+import { INSTANCES_KEY, instanceStatusTone } from './InstancesList';
 
-const CHECKS: WizardStepId[] = ['docker', 'internet', 'registry', 'resources'];
-const STATE_KEY = ['manager', 'console', 'state'] as const;
-const UPDATE_KEY = ['manager', 'console', 'update-check'] as const;
+const DOT_COLOR: Record<BadgeTone, string> = {
+  ok: 'var(--mantine-color-teal-6)',
+  warning: 'var(--mantine-color-yellow-6)',
+  error: 'var(--mantine-color-red-6)',
+  info: 'var(--mantine-color-blue-6)',
+  neutral: 'var(--mantine-color-gray-5)',
+  pending: 'var(--mantine-color-gray-5)',
+};
 
-/**
- * CLI-only tools that have no GUI equivalent (everything lifecycle-related now
- * lives on the instance pages). Command names match `sh-manager --help`.
- */
-const CLI_TOOLS: { label: string; command: string }[] = [
-  { label: 'Generate a support bundle', command: 'sh-manager instance support-bundle <instance-id>' },
-  { label: 'Host resource preflight', command: 'sh-manager doctor' },
-];
-
-function checkStatus(result: CheckResult | undefined, running: boolean): CheckStatus {
-  if (running) return 'running';
-  if (!result) return 'pending';
-  if (result.severity === 'error' || !result.ok) return 'error';
-  if (result.severity === 'warning') return 'warning';
-  return 'ok';
-}
-
-function friendly(err: unknown, fallback: string): string {
-  return err instanceof ApiError ? err.message : fallback;
+function StatusDot({ instance }: { instance: InstanceSummary }): JSX.Element {
+  const tone = instanceStatusTone(instance.status);
+  const label = instance.busy ? `${instance.status} · operation running` : instance.status;
+  return (
+    <Tooltip label={label}>
+      <Box
+        aria-hidden="true"
+        style={{
+          width: 10,
+          height: 10,
+          borderRadius: '50%',
+          background: DOT_COLOR[tone],
+          flexShrink: 0,
+        }}
+      />
+    </Tooltip>
+  );
 }
 
 export interface OperationsConsoleProps {
   client: ApiClient;
+  /** Sign-out handler (owned by the app shell so the state query resets). */
+  onSignOut?: () => void;
 }
 
-export function OperationsConsole({ client }: OperationsConsoleProps): JSX.Element {
+export function OperationsConsole({ client, onSignOut }: OperationsConsoleProps): JSX.Element {
   const queryClient = useQueryClient();
-  const [openInstanceId, setOpenInstanceId] = useState<string | null>(null);
+  const [navOpened, { toggle: toggleNav, close: closeNav }] = useDisclosure(false);
+  /** `null` = dashboard, otherwise the selected instance id. */
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
-  /** Operation started from the overview (instance create) — watched inline. */
+  /** Operation started from the create wizard — watched on the dashboard. */
   const [watchedOperationId, setWatchedOperationId] = useState<string | null>(null);
 
-  const stateQuery = useQuery({ queryKey: STATE_KEY, queryFn: () => client.getState() });
+  const stateQuery = useQuery({ queryKey: CONSOLE_STATE_KEY, queryFn: () => client.getState() });
   const snapshot = stateQuery.data ?? null;
-  // Non-blocking: the console renders fully even when the release feed is slow
-  // or unreachable (the card then shows the error detail).
-  const updateQuery = useQuery({ queryKey: UPDATE_KEY, queryFn: () => client.managerUpdateCheck(), retry: false });
-  const update = updateQuery.data ?? null;
-
-  const runCheck = useMutation({
-    mutationFn: (step: WizardStepId) => client.runCheck(step),
-    onSuccess: (snap: Snapshot) => queryClient.setQueryData(STATE_KEY, snap),
+  const instancesQuery = useQuery({
+    queryKey: INSTANCES_KEY,
+    queryFn: () => client.listInstances(),
+    refetchInterval: 10_000,
   });
-  const runningStep = runCheck.isPending ? (runCheck.variables ?? null) : null;
+  const instances = instancesQuery.data ?? [];
 
-  const error = stateQuery.isError
-    ? friendly(stateQuery.error, 'Could not load server status.')
-    : runCheck.isError
-      ? friendly(runCheck.error, 'That check could not run.')
-      : null;
+  // If the selected instance disappears from the inventory (full delete from
+  // another session or this one), fall back to the dashboard.
+  useEffect(() => {
+    if (selectedId && instancesQuery.data && !instancesQuery.data.some((i) => i.instanceId === selectedId)) {
+      setSelectedId(null);
+    }
+  }, [selectedId, instancesQuery.data]);
 
-  const overall = useMemo<{ tone: BadgeTone; label: string }>(() => {
-    if (!snapshot) return { tone: 'pending', label: 'Unknown' };
-    const results = CHECKS.map((c) => snapshot.checks[c]).filter(Boolean) as CheckResult[];
-    if (results.length === 0) return { tone: 'pending', label: 'Not checked yet' };
-    if (results.some((r) => r.severity === 'error' || !r.ok)) return { tone: 'error', label: 'Needs attention' };
-    if (results.some((r) => r.severity === 'warning')) return { tone: 'warning', label: 'Degraded' };
-    return { tone: 'ok', label: 'Healthy' };
-  }, [snapshot]);
-
-  if (stateQuery.isPending) {
-    return (
-      <Center mih="40vh">
-        <Spinner size="lg" />
-      </Center>
-    );
-  }
-
-  if (openInstanceId) {
-    return <InstanceDetail client={client} instanceId={openInstanceId} onBack={() => setOpenInstanceId(null)} />;
-  }
+  const select = (id: string | null): void => {
+    setSelectedId(id);
+    closeNav();
+  };
 
   return (
-    <Stack gap="xl">
-      <Group justify="space-between" align="flex-start" wrap="wrap">
-        <div>
-          <Title order={2}>Server operations</Title>
-          <Text c="dimmed">Live status of this SelfHelp server and the operator actions available to you.</Text>
-        </div>
-        <Group gap="sm">
-          <StatusBadge tone={overall.tone}>{overall.label}</StatusBadge>
-          <Button
-            variant="secondary"
-            loading={runCheck.isPending}
-            onClick={() => {
-              void (async () => {
-                for (const c of CHECKS) await runCheck.mutateAsync(c).catch(() => undefined);
-              })();
-            }}
-          >
-            Run all checks
-          </Button>
+    <MantineAppShell
+      header={{ height: 64 }}
+      navbar={{ width: 300, breakpoint: 'sm', collapsed: { mobile: !navOpened } }}
+      padding="lg"
+    >
+      <MantineAppShell.Header px="md">
+        <Group h="100%" justify="space-between" wrap="nowrap">
+          <Group gap="sm" wrap="nowrap">
+            <Burger opened={navOpened} onClick={toggleNav} hiddenFrom="sm" size="sm" aria-label="Toggle navigation" />
+            <Brand subtitle="Operations console" version={snapshot?.managerVersion} />
+          </Group>
+          <Group gap="sm" wrap="nowrap">
+            {snapshot?.session?.email ? (
+              <Text size="sm" c="dimmed" visibleFrom="sm">
+                {snapshot.session.email}
+              </Text>
+            ) : null}
+            <Button variant="ghost" onClick={() => onSignOut?.()}>
+              Sign out
+            </Button>
+          </Group>
         </Group>
-      </Group>
+      </MantineAppShell.Header>
 
-      {error ? (
-        <Alert tone="error" title="Something went wrong">
-          {error}
-        </Alert>
-      ) : null}
+      <MantineAppShell.Navbar p="sm">
+        <MantineAppShell.Section>
+          <NavLink
+            component="button"
+            type="button"
+            label="Dashboard"
+            description="Server status & environment checks"
+            active={selectedId === null}
+            onClick={() => select(null)}
+            aria-label="Dashboard"
+            style={{ borderRadius: 'var(--mantine-radius-sm)' }}
+          />
+        </MantineAppShell.Section>
 
-      <InstancesList client={client} onOpen={setOpenInstanceId} onCreate={() => setCreateOpen(true)} />
+        <Divider my="sm" />
+        <Group justify="space-between" px="xs" pb={6} wrap="nowrap">
+          <Text size="xs" tt="uppercase" fw={700} c="dimmed">
+            Instances
+          </Text>
+          <StatusBadge tone="neutral" dot={false}>
+            {String(instances.length)}
+          </StatusBadge>
+        </Group>
 
-      {watchedOperationId ? (
-        <Card
-          title="Instance creation in progress"
-          description="The new instance appears in the list above as soon as the install finishes."
-          aside={
-            <Button variant="ghost" onClick={() => setWatchedOperationId(null)}>
-              Hide
-            </Button>
-          }
-        >
-          <OperationLog client={client} operationId={watchedOperationId} />
-        </Card>
-      ) : null}
-
-      <Card title="Environment status" description="Re-run any check to refresh its status.">
-        <Stack gap="md">
-          {CHECKS.map((c) => {
-            const meta = CHECK_META[c];
-            const result = snapshot?.checks[c];
-            const status = checkStatus(result, runningStep === c);
-            return (
-              <Group key={c} gap="sm" align="stretch" wrap="nowrap">
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <CheckRow
-                    status={status}
-                    title={meta?.title ?? c}
-                    description={meta?.description ?? ''}
-                    detail={result?.detail}
-                    fix={meta?.fix}
-                  />
-                </div>
-                <Button
-                  variant="ghost"
-                  loading={runningStep === c}
-                  onClick={() => void runCheck.mutate(c)}
-                  aria-label={`Run ${meta?.title ?? c} check`}
-                >
-                  Run
-                </Button>
-              </Group>
-            );
-          })}
-        </Stack>
-      </Card>
-
-      <Card
-        title="Manager version"
-        description="The manager checks the official GitHub releases for newer versions."
-        aside={
-          update ? (
-            <StatusBadge tone={update.error ? 'neutral' : update.updateAvailable ? 'warning' : 'ok'}>
-              {update.error ? 'Unknown' : update.updateAvailable ? `Update available: ${update.latestVersion}` : 'Up to date'}
-            </StatusBadge>
+        <MantineAppShell.Section grow component={ScrollArea}>
+          {instances.length === 0 ? (
+            <Text size="sm" c="dimmed" px="xs" py="sm">
+              {instancesQuery.isPending ? 'Loading instances…' : 'No instances yet — create the first one below.'}
+            </Text>
           ) : (
-            <StatusBadge tone="pending">{updateQuery.isError ? 'Unavailable' : 'Checking…'}</StatusBadge>
-          )
-        }
-      >
-        <Stack gap="sm">
-          <Group gap="xs">
-            <Text size="sm" fw={500}>
-              Installed:
-            </Text>
-            <Text size="sm">{update ? `sh-manager ${update.currentVersion} (${update.runtime === 'docker' ? 'Docker image' : 'source checkout'})` : '…'}</Text>
-          </Group>
-          {update?.error ? (
-            <Text size="sm" c="dimmed">
-              Could not reach the release feed: {update.error}
-            </Text>
-          ) : null}
-          {update?.updateAvailable ? (
-            <>
-              {update.releaseUrl ? (
-                <Anchor href={update.releaseUrl} target="_blank" rel="noreferrer" size="sm">
-                  Release notes for {update.latestVersion}
-                </Anchor>
-              ) : null}
-              <Text size="sm" fw={500}>
-                To update, run on the server:
-              </Text>
-              {update.instructions.map((cmd) =>
-                cmd.startsWith('sh-manager ') || cmd.startsWith('docker ') || cmd.startsWith('git ') || cmd.startsWith('npm ') ? (
-                  <CommandPreview key={cmd} value={cmd} label="Update command" />
-                ) : (
-                  <Text key={cmd} size="sm" c="dimmed">
-                    {cmd}
-                  </Text>
-                ),
-              )}
-            </>
-          ) : null}
-          <Group>
-            <Button variant="ghost" loading={updateQuery.isFetching} onClick={() => void updateQuery.refetch()}>
-              Check for updates
-            </Button>
-          </Group>
-        </Stack>
-      </Card>
+            instances.map((inst) => (
+              <NavLink
+                key={inst.instanceId}
+                component="button"
+                type="button"
+                label={inst.displayName || inst.instanceId}
+                description={`${inst.instanceId}${inst.domain ? ` · ${inst.domain}` : ''}`}
+                active={selectedId === inst.instanceId}
+                onClick={() => select(inst.instanceId)}
+                aria-label={`Instance ${inst.instanceId}`}
+                leftSection={<StatusDot instance={inst} />}
+                style={{ borderRadius: 'var(--mantine-radius-sm)' }}
+              />
+            ))
+          )}
+        </MantineAppShell.Section>
 
-      <Card
-        title="Server CLI tools"
-        description="Diagnostics that stay on the command line. Wrapper users: replace sh-manager with ./shm.ps1 (Windows) or ./shm.sh (Linux/macOS)."
-      >
-        <SimpleGrid cols={{ base: 1, sm: 2 }}>
-          {CLI_TOOLS.map((c) => (
-            <Stack key={c.label} gap={6}>
-              <Text size="sm" fw={500}>
-                {c.label}
-              </Text>
-              <CommandPreview value={c.command} label={c.label} />
-            </Stack>
-          ))}
-        </SimpleGrid>
-      </Card>
+        <MantineAppShell.Section>
+          <Divider my="sm" />
+          <Button variant="primary" block onClick={() => setCreateOpen(true)}>
+            New instance
+          </Button>
+        </MantineAppShell.Section>
+      </MantineAppShell.Navbar>
 
-      <CreateInstanceForm
+      <MantineAppShell.Main>
+        {selectedId === null ? (
+          <ConsoleDashboard
+            client={client}
+            instances={instances}
+            onOpenInstance={select}
+            onCreate={() => setCreateOpen(true)}
+            watchedOperationId={watchedOperationId}
+            onHideWatched={() => setWatchedOperationId(null)}
+          />
+        ) : (
+          <InstanceDetail key={selectedId} client={client} instanceId={selectedId} />
+        )}
+      </MantineAppShell.Main>
+
+      <CreateInstanceWizard
         client={client}
         opened={createOpen}
         onClose={() => setCreateOpen(false)}
@@ -265,7 +205,12 @@ export function OperationsConsole({ client }: OperationsConsoleProps): JSX.Eleme
           // polling pick up later state changes.
           void queryClient.invalidateQueries({ queryKey: INSTANCES_KEY });
         }}
+        onOpenInstance={(instanceId) => {
+          setCreateOpen(false);
+          void queryClient.invalidateQueries({ queryKey: INSTANCES_KEY });
+          select(instanceId);
+        }}
       />
-    </Stack>
+    </MantineAppShell>
   );
 }

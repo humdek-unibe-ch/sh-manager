@@ -58,22 +58,16 @@ export function App({ client: injected }: AppProps = {}): JSX.Element {
           : 'bootstrap';
 
   const subtitle =
-    view === 'bootstrap'
-      ? 'Server bootstrap'
-      : view === 'console'
-        ? 'Operations console'
-        : view === 'login'
-          ? 'Sign in'
-          : undefined;
+    view === 'bootstrap' ? 'Server bootstrap' : view === 'login' ? 'Sign in' : undefined;
 
   const headerActions =
-    view === 'console' ? (
-      <Button variant="ghost" onClick={() => void signOut()}>
-        Sign out
-      </Button>
-    ) : view === 'bootstrap' || view === 'login' ? (
-      <StatusBadge tone="neutral">Localhost</StatusBadge>
-    ) : null;
+    view === 'bootstrap' || view === 'login' ? <StatusBadge tone="neutral">Localhost</StatusBadge> : null;
+
+  // The console brings its own admin shell (sidebar + header, like the CMS
+  // admin UI); every other view uses the simple centered page chrome.
+  if (view === 'console') {
+    return <OperationsConsole client={client} onSignOut={() => void signOut()} />;
+  }
 
   return (
     <AppShell subtitle={subtitle} version={stateQuery.data?.managerVersion} headerActions={headerActions}>
@@ -96,10 +90,8 @@ export function App({ client: injected }: AppProps = {}): JSX.Element {
         </Center>
       ) : view === 'bootstrap' ? (
         <BootstrapWizard client={client} />
-      ) : view === 'login' ? (
-        <LoginForm client={client} onSuccess={refetchState} />
       ) : (
-        <OperationsConsole client={client} />
+        <LoginForm client={client} onSuccess={refetchState} />
       )}
     </AppShell>
   );

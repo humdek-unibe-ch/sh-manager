@@ -17,6 +17,7 @@ import {
   type WizardState,
   type WizardStepId,
 } from '../../wizard';
+import { validateAddressChange, validateCloneInstance, validateCreateInstance } from '../../instance-validation';
 import { ApiError, type ApiClient, type InstanceHealthReport } from '../lib/api-client';
 import type {
   BackupSummary,
@@ -286,12 +287,15 @@ export function makeFakeClient(opts: FakeClientOptions = {}): ApiClient {
       return op;
     },
     async createInstance(req) {
+      // Same shared validation the BFF route runs (instance-validation.ts).
+      const problems = validateCreateInstance(req);
+      if (problems.length > 0) throw new ApiError(400, problems.join(' '));
       const started = startFakeOperation('instance_create', req.instanceId);
       instances.push(
         fakeInstance({
           instanceId: req.instanceId,
           displayName: req.displayName,
-          domain: req.domain ?? `127.0.0.1:${req.localPort ?? 0}`,
+          domain: req.domain ?? `localhost:${req.localPort ?? 0}`,
           mode: req.mode,
         }),
       );
@@ -306,8 +310,32 @@ export function makeFakeClient(opts: FakeClientOptions = {}): ApiClient {
     async restoreBackup(instanceId) {
       return startFakeOperation('instance_restore', instanceId);
     },
-    async cloneInstance(instanceId) {
+    async cloneInstance(instanceId, req) {
+      const source = instances.find((i) => i.instanceId === instanceId);
+      if (!source) throw new ApiError(404, `Instance "${instanceId}" not found.`);
+      const problems = validateCloneInstance({
+        sourceInstanceId: instanceId,
+        sourceMode: source.mode === 'local' ? 'local' : 'production',
+        sourceDomain: source.domain,
+        ...(req.targetInstanceId ? { targetInstanceId: req.targetInstanceId } : {}),
+        ...(req.targetDomain ? { targetDomain: req.targetDomain } : {}),
+        ...(req.targetLocalPort !== undefined ? { targetLocalPort: req.targetLocalPort } : {}),
+      });
+      if (problems.length > 0) throw new ApiError(400, problems.join(' '));
       return startFakeOperation('instance_clone', instanceId);
+    },
+    async setInstanceAddress(instanceId, req) {
+      const target = instances.find((i) => i.instanceId === instanceId);
+      if (!target) throw new ApiError(404, `Instance "${instanceId}" not found.`);
+      const problems = validateAddressChange({
+        mode: target.mode === 'local' ? 'local' : 'production',
+        ...(req.domain ? { domain: req.domain } : {}),
+        ...(req.localPort !== undefined ? { localPort: req.localPort } : {}),
+      });
+      if (problems.length > 0) throw new ApiError(400, problems.join(' '));
+      const started = startFakeOperation('instance_set_address', instanceId);
+      target.domain = target.mode === 'local' ? `localhost:${req.localPort}` : req.domain!;
+      return started;
     },
     async removeInstance(instanceId) {
       return startFakeOperation('instance_remove', instanceId);
