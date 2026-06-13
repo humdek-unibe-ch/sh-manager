@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { TrustedKeysFile } from '@shm/schemas';
+import type { BackupSchedulePolicy, TrustedKeysFile } from '@shm/schemas';
 import { RecordingComposeRunner, type ComposeResult } from '@shm/docker';
 import type { Fetcher, FetchResponse } from '@shm/registry';
 import {
@@ -20,7 +20,11 @@ import type { ActionDeps } from './actions.js';
 import {
   doctor,
   instanceBackup,
+  instanceBackupPrune,
+  instanceBackupScheduleGet,
+  instanceBackupScheduleSet,
   instanceClone,
+  instanceGetMailer,
   instanceHealth,
   instanceInstall,
   instanceList,
@@ -28,9 +32,11 @@ import {
   instanceRepair,
   instanceRestore,
   instanceSetAddress,
+  instanceSetMailer,
   instanceSupportBundle,
   serverInit,
   serverPurge,
+  serverRunScheduledBackups,
 } from './actions.js';
 import { formatHealth, formatPreflight, formatSteps, formatTable } from './output.js';
 
@@ -626,6 +632,225 @@ describe('instance lifecycle (offline)', () => {
     expect(dump).toContain('-- dump');
   });
 
+  it('two same-day backups get distinct ids and never overwrite each other (regression)', async () => {
+    const { d } = await lifecycleDeps();
+    await installWebsite1(d);
+
+    // deps.now is frozen, so both backups land on the same calendar day.
+    const first = await instanceBackup(d, 'website1');
+    const second = await instanceBackup(d, 'website1');
+
+    expect(first.backupId).not.toBe(second.backupId);
+    expect(first.backupId.endsWith('-001')).toBe(true);
+    expect(second.backupId.endsWith('-002')).toBe(true);
+    // The first backup is still intact (its manifest still describes itself).
+    const firstManifest = JSON.parse(
+      await readFile(path.join(first.backupDir, 'backup-manifest.json'), 'utf8'),
+    ) as { backupId: string };
+    expect(firstManifest.backupId).toBe(first.backupId);
+  });
+
+  it('tags backups with their origin (manual default, pre_update/pre_restore/scheduled explicit)', async () => {
+    const { d } = await lifecycleDeps();
+    await installWebsite1(d);
+
+    const manual = await instanceBackup(d, 'website1');
+    expect(manual.manifest.origin).toBe('manual');
+
+    const preUpdate = await instanceBackup(d, 'website1', { origin: 'pre_update' });
+    expect(preUpdate.manifest.origin).toBe('pre_update');
+    const onDisk = JSON.parse(
+      await readFile(path.join(preUpdate.backupDir, 'backup-manifest.json'), 'utf8'),
+    ) as { origin: string };
+    expect(onDisk.origin).toBe('pre_update');
+  });
+
+  describe('scheduled backups + GFS retention', () => {
+    const policy = (overrides: Partial<BackupSchedulePolicy> = {}): BackupSchedulePolicy => ({
+      enabled: true,
+      time: '02:00',
+      retention: { daily: 7, weekly: 5, monthly: 12, maxAgeDays: 365 },
+      ...overrides,
+    });
+
+    /** Drops a synthetic backup dir with a self-consistent manifest on disk. */
+    async function seedBackupDir(
+      instanceId: string,
+      createdAtLocalIso: string,
+      origin: string,
+      seqNo: number,
+    ): Promise<string> {
+      const at = new Date(createdAtLocalIso);
+      const p = (n: number) => String(n).padStart(2, '0');
+      const yyyymmdd = `${at.getFullYear()}${p(at.getMonth() + 1)}${p(at.getDate())}`;
+      const backupId = `backup-${yyyymmdd}-${instanceId}-${String(seqNo).padStart(3, '0')}`;
+      const dir = path.join(instancePaths(instanceId, root).backupsDir, backupId);
+      await mkdir(dir, { recursive: true });
+      await writeFile(
+        path.join(dir, 'backup-manifest.json'),
+        JSON.stringify({
+          backupManifestVersion: 1,
+          backupId,
+          instanceId,
+          createdAt: createdAtLocalIso,
+          mode: 'online',
+          origin,
+          selfhelpVersion: '0.1.0',
+          migrationVersion: 'V1',
+          plugins: [],
+          includedAreas: ['database'],
+          files: [{ path: 'database.sql', sha256: `sha256:${'a'.repeat(64)}`, bytes: 1000 }],
+        }),
+      );
+      return backupId;
+    }
+
+    it('schedule set persists the policy on the manifest and get reports the next run', async () => {
+      const { d } = await lifecycleDeps();
+      await installWebsite1(d);
+
+      const status = await instanceBackupScheduleSet(d, 'website1', policy(), new Date(2026, 5, 5, 9, 0));
+      expect(status.policy?.enabled).toBe(true);
+      expect(status.nextRunAt).not.toBeNull();
+
+      // Survives a re-read through the validated store (schema accepts it).
+      const manifest = await new ManifestStore('website1', root).read();
+      expect(manifest.backupSchedule?.time).toBe('02:00');
+      expect(manifest.backupSchedule?.retention.monthly).toBe(12);
+    });
+
+    it('schedule set refuses an invalid policy (no partial writes)', async () => {
+      const { d } = await lifecycleDeps();
+      await installWebsite1(d);
+      await expect(instanceBackupScheduleSet(d, 'website1', policy({ time: '25:00' }))).rejects.toThrow(/Invalid backup schedule/);
+      const manifest = await new ManifestStore('website1', root).read();
+      expect(manifest.backupSchedule).toBeUndefined();
+    });
+
+    it('run-scheduled-backups takes a due backup once, tags it scheduled, and never double-runs (guard)', async () => {
+      const { d } = await lifecycleDeps();
+      await installWebsite1(d);
+      await instanceBackupScheduleSet(d, 'website1', policy());
+
+      const now = new Date(2026, 5, 5, 12, 0); // matches deps.now's calendar day
+      const first = await serverRunScheduledBackups(d, { now });
+      expect(first.entries).toHaveLength(1);
+      expect(first.entries[0]!.action).toBe('backup_taken');
+      const backupId = first.entries[0]!.backupId!;
+      const backupDir = path.join(instancePaths('website1', root).backupsDir, backupId);
+      const manifest = JSON.parse(await readFile(path.join(backupDir, 'backup-manifest.json'), 'utf8')) as { origin: string };
+      expect(manifest.origin).toBe('scheduled');
+
+      // Same tick again (web loop + cron overlap): the occurrence is covered.
+      const second = await serverRunScheduledBackups(d, { now });
+      expect(second.entries[0]!.action).toBe('skipped_not_due');
+
+      // Next day: due again.
+      const third = await serverRunScheduledBackups(d, { now: new Date(2026, 5, 6, 12, 0) });
+      expect(third.entries[0]!.action).toBe('backup_taken');
+      expect(third.entries[0]!.backupId).not.toBe(backupId);
+    });
+
+    it('skips (and records) the run when free disk is below the safety margin', async () => {
+      const { d } = await lifecycleDeps();
+      await installWebsite1(d);
+      await instanceBackupScheduleSet(d, 'website1', policy());
+      d.resourceFacts = async () => ({
+        requiredPortsFree: [],
+        diskBytesFree: 10 * 1024 * 1024, // 10 MiB << 512 MiB floor
+        memoryBytesTotal: 16 * 1024 * 1024 * 1024,
+        cpuCount: 8,
+        dockerAvailable: true,
+        dockerComposeAvailable: true,
+      });
+
+      const now = new Date(2026, 5, 5, 12, 0);
+      const res = await serverRunScheduledBackups(d, { now });
+      expect(res.entries[0]!.action).toBe('skipped_low_disk');
+      // No backup directory was created.
+      const names = await readdir(instancePaths('website1', root).backupsDir).catch(() => []);
+      expect(names).toHaveLength(0);
+      // The occurrence is marked covered (no retry storm) and surfaced in status.
+      const again = await serverRunScheduledBackups(d, { now: new Date(2026, 5, 5, 12, 5) });
+      expect(again.entries[0]!.action).toBe('skipped_not_due');
+      const status = await instanceBackupScheduleGet(d, 'website1', now);
+      expect(status.lastResult).toBe('skipped_low_disk');
+    });
+
+    it('instances without an enabled schedule are left alone', async () => {
+      const { d } = await lifecycleDeps();
+      await installWebsite1(d);
+      const res = await serverRunScheduledBackups(d, { now: new Date(2026, 5, 5, 12, 0) });
+      expect(res.entries).toHaveLength(0);
+      await instanceBackupScheduleSet(d, 'website1', policy({ enabled: false }));
+      const res2 = await serverRunScheduledBackups(d, { now: new Date(2026, 5, 5, 12, 0) });
+      expect(res2.entries).toHaveLength(0);
+    });
+
+    it('prune deletes exactly the planned scheduled backups and never touches manual/safety/foreign dirs', async () => {
+      const { d } = await lifecycleDeps();
+      await installWebsite1(d);
+      await instanceBackupScheduleSet(d, 'website1', policy({ retention: { daily: 2, weekly: 0, monthly: 0, maxAgeDays: 365 } }));
+
+      const now = new Date(2026, 5, 12, 12, 0);
+      const keepA = await seedBackupDir('website1', '2026-06-12T02:00:00', 'scheduled', 1);
+      const keepB = await seedBackupDir('website1', '2026-06-11T02:00:00', 'scheduled', 1);
+      const dropC = await seedBackupDir('website1', '2026-06-10T02:00:00', 'scheduled', 1);
+      const manualOld = await seedBackupDir('website1', '2026-01-05T08:00:00', 'manual', 1);
+      const preUpdate = await seedBackupDir('website1', '2026-06-01T08:00:00', 'pre_update', 2);
+      // Foreign / corrupt content that must never be deleted:
+      const backupsDir = instancePaths('website1', root).backupsDir;
+      await mkdir(path.join(backupsDir, 'random-folder'), { recursive: true });
+      const renamed = path.join(backupsDir, 'backup-20260301-website1-099');
+      await mkdir(renamed, { recursive: true });
+      await writeFile(
+        path.join(renamed, 'backup-manifest.json'),
+        JSON.stringify({ backupId: 'backup-20260301-website1-001', instanceId: 'website1', createdAt: '2026-03-01T02:00:00', origin: 'scheduled', files: [] }),
+      );
+
+      // Dry run deletes nothing.
+      const dry = await instanceBackupPrune(d, 'website1', { dryRun: true, now });
+      expect(dry.deleted).toHaveLength(0);
+      expect((await readdir(backupsDir)).length).toBe(7);
+      expect(dry.plan.prune.map((p) => p.backupId)).toEqual([dropC]);
+
+      // Real prune deletes exactly the planned set.
+      const res = await instanceBackupPrune(d, 'website1', { now });
+      expect(res.deleted).toEqual([dropC]);
+      const remaining = await readdir(backupsDir);
+      expect(remaining).toContain(keepA);
+      expect(remaining).toContain(keepB);
+      expect(remaining).toContain(manualOld);
+      expect(remaining).toContain(preUpdate);
+      expect(remaining).toContain('random-folder');
+      expect(remaining).toContain('backup-20260301-website1-099');
+      expect(remaining).not.toContain(dropC);
+      // The mismatched dir was reported as skipped, not deleted.
+      expect(res.skipped.some((s) => s.name === 'backup-20260301-website1-099')).toBe(true);
+    });
+
+    it('scheduled runs prune old nightly backups automatically (end to end, offline)', async () => {
+      const { d } = await lifecycleDeps();
+      await installWebsite1(d);
+      await instanceBackupScheduleSet(d, 'website1', policy({ retention: { daily: 3, weekly: 0, monthly: 0, maxAgeDays: 365 } }));
+
+      // Seed a week of old nightlies (June 1..5).
+      for (let day = 1; day <= 5; day++) {
+        await seedBackupDir('website1', `2026-06-0${day}T02:00:00`, 'scheduled', 1);
+      }
+      // deps.now() pins createdAt to 2026-06-05, so use a matching "now".
+      const res = await serverRunScheduledBackups(d, { now: new Date(2026, 5, 5, 12, 0) });
+      expect(res.entries[0]!.action).toBe('backup_taken');
+      // Retention daily=3 keeps the 3 newest distinct days (Jun 5 incl. the new
+      // backup, Jun 4, Jun 3) and prunes Jun 1 + Jun 2.
+      expect(res.entries[0]!.prunedCount).toBe(2);
+      const remaining = await readdir(instancePaths('website1', root).backupsDir);
+      expect(remaining.some((n) => n.startsWith('backup-20260601'))).toBe(false);
+      expect(remaining.some((n) => n.startsWith('backup-20260602'))).toBe(false);
+      expect(remaining.some((n) => n.startsWith('backup-20260603'))).toBe(true);
+    });
+  });
+
   it('restore validates the just-created backup and returns a same-instance plan', async () => {
     const { d } = await lifecycleDeps();
     await installWebsite1(d);
@@ -978,6 +1203,72 @@ describe('instance lifecycle (offline)', () => {
     expect(restoreCalls.some((c) => c.args.includes('-v') || c.args.includes('--volumes'))).toBe(false);
   });
 
+  it('restore --apply refuses a corrupted backup BEFORE the stack is touched (integrity gate)', async () => {
+    const base = await lifecycleDeps();
+    const d: ActionDeps = { ...base.d, jwtModulusLength: 2048 };
+    await installWebsite1(d);
+    const backup = await instanceBackup(d, 'website1');
+
+    // Tamper with the dump after the manifest hashes were recorded.
+    await writeFile(path.join(backup.backupDir, 'database.sql'), '-- tampered bytes --');
+
+    const website1Dir = instancePaths('website1', root).dir;
+    const callsBefore = base.runner.calls.filter((c) => c.cwd === website1Dir).length;
+
+    const res = await instanceRestore(d, 'website1', backup.backupId, { mode: 'same_instance', apply: true });
+    expect(res.validation.ok).toBe(false);
+    expect(res.validation.errors.join(' ')).toContain('Checksum mismatch: database.sql');
+    expect(res.plan).toBeNull();
+    expect(res.executed).toBeUndefined();
+
+    // The running stack was never quiesced, nothing was imported or extracted.
+    const callsDuringRestore = base.runner.calls.filter((c) => c.cwd === website1Dir).slice(callsBefore);
+    expect(callsDuringRestore.some((c) => c.args[0] === 'stop')).toBe(false);
+    expect(base.imported).toHaveLength(0);
+    expect(base.extracted).toHaveLength(0);
+  });
+
+  it('restore --apply that dies on the DB import leaves the instance recoverable and a retry succeeds', async () => {
+    const base = await lifecycleDeps();
+    const d: ActionDeps = { ...base.d, jwtModulusLength: 2048 };
+    await installWebsite1(d);
+    const backup = await instanceBackup(d, 'website1');
+
+    // Make the instance state distinguishable from the backed-up state, so we
+    // can prove the failed attempt never wrote the restored manifest.
+    const manifestStore = new ManifestStore('website1', root);
+    const current = await manifestStore.read();
+    await manifestStore.write({ ...current, displayName: 'Renamed AFTER the backup' });
+
+    // The import fails on every retry attempt of the first restore call.
+    let failImports = true;
+    d.importDatabase = async (_instanceDir, sqlFile) => {
+      if (failImports) throw new Error('server has gone away');
+      base.imported.push(path.basename(sqlFile));
+    };
+
+    await expect(
+      instanceRestore(d, 'website1', backup.backupId, { mode: 'same_instance', apply: true }),
+    ).rejects.toThrow(/Database import failed after 3 attempts: server has gone away/);
+
+    // Recoverable: no volume was removed, `-v` was never used, and the
+    // manifest/lock were NOT overwritten by the failed attempt.
+    expect(base.removedVolumes).toHaveLength(0);
+    const website1Dir = instancePaths('website1', root).dir;
+    const calls = base.runner.calls.filter((c) => c.cwd === website1Dir);
+    expect(calls.some((c) => c.args.includes('-v') || c.args.includes('--volumes'))).toBe(false);
+    expect((await manifestStore.read()).displayName).toBe('Renamed AFTER the backup');
+
+    // Once the database answers again, the SAME backup restores cleanly.
+    failImports = false;
+    const retry = await instanceRestore(d, 'website1', backup.backupId, { mode: 'same_instance', apply: true });
+    expect(retry.executed).toBe(true);
+    expect(retry.health?.overall).toBe('healthy');
+    expect(base.imported).toContain('database.sql');
+    // The successful retry applied the point-in-time manifest from the backup.
+    expect((await manifestStore.read()).displayName).toBe('Website 1');
+  });
+
   it('clone --apply copies the source into an isolated target and leaves the source untouched', async () => {
     const base = await lifecycleDeps();
     const d: ActionDeps = { ...base.d, jwtModulusLength: 2048 };
@@ -1015,6 +1306,83 @@ describe('instance lifecycle (offline)', () => {
     const sourceCalls = base.runner.calls.filter((c) => c.cwd === sourceDir).slice(sourceCallsBefore);
     expect(sourceCalls.every((c) => c.args[0] === 'exec')).toBe(true);
     expect(sourceCalls.some((c) => ['stop', 'down', 'up'].includes(c.args[0]!))).toBe(false);
+  });
+
+  describe('outbound mail (set-mailer / get-mailer)', () => {
+    const DSN = 'smtp://mailuser:s3cret-pw@mail.example.org:587';
+    const REDACTED = 'smtp://***@mail.example.org:587';
+
+    it('reports "not configured" on a fresh install (Mailpit/image default applies)', async () => {
+      const { d } = await lifecycleDeps();
+      await installWebsite1(d);
+      expect(await instanceGetMailer(d, 'website1')).toEqual({ configured: false });
+    });
+
+    it('set-mailer stores the DSN in secrets.env, recreates the stack, and only ever returns it redacted', async () => {
+      const base = await lifecycleDeps();
+      await installWebsite1(base.d);
+      const paths = instancePaths('website1', root);
+      const callsBefore = base.runner.calls.filter((c) => c.cwd === paths.dir).length;
+
+      const res = await instanceSetMailer(base.d, 'website1', { dsn: DSN });
+      expect(res.configured).toBe(true);
+      expect(res.restarted).toBe(true);
+      expect(res.redactedDsn).toBe(REDACTED);
+      // The credential never leaves through ANY returned field.
+      expect(JSON.stringify(res)).not.toContain('s3cret-pw');
+
+      // Raw DSN only in the 0600 secrets.env; the non-secret .env keeps Mailpit.
+      const secretEnv = parseEnv(await readFile(path.join(paths.secretsDir, 'secrets.env'), 'utf8'));
+      expect(secretEnv.MAILER_DSN).toBe(DSN);
+      const dotenv = await readFile(path.join(paths.dir, '.env'), 'utf8');
+      expect(dotenv).toContain('MAILER_DSN=smtp://mailpit:1025');
+      expect(dotenv).not.toContain('s3cret-pw');
+
+      // The stack was recreated so backend/worker/scheduler pick the DSN up.
+      const calls = base.runner.calls.filter((c) => c.cwd === paths.dir).slice(callsBefore);
+      expect(calls.some((c) => c.args[0] === 'up')).toBe(true);
+
+      expect(await instanceGetMailer(base.d, 'website1')).toEqual({
+        configured: true,
+        redactedDsn: REDACTED,
+      });
+    });
+
+    it('refuses a schemeless DSN and an empty call without touching the secrets', async () => {
+      const { d } = await lifecycleDeps();
+      await installWebsite1(d);
+      await expect(instanceSetMailer(d, 'website1', { dsn: 'mail.example.org:587' })).rejects.toThrow(
+        /not a valid mailer DSN/,
+      );
+      await expect(instanceSetMailer(d, 'website1', {})).rejects.toThrow(/Provide a mailer DSN/);
+
+      const paths = instancePaths('website1', root);
+      const secretEnv = parseEnv(await readFile(path.join(paths.secretsDir, 'secrets.env'), 'utf8'));
+      expect(secretEnv.MAILER_DSN).toBeUndefined();
+      expect(await instanceGetMailer(d, 'website1')).toEqual({ configured: false });
+    });
+
+    it('--clear falls back to Mailpit and --no-restart leaves the stack alone', async () => {
+      const base = await lifecycleDeps();
+      await installWebsite1(base.d);
+      await instanceSetMailer(base.d, 'website1', { dsn: DSN });
+
+      const paths = instancePaths('website1', root);
+      const callsBefore = base.runner.calls.filter((c) => c.cwd === paths.dir).length;
+      const res = await instanceSetMailer(base.d, 'website1', { clear: true, restart: false });
+      expect(res).toEqual({ configured: false, restarted: false });
+
+      // The override is gone from secrets.env, so the non-secret Mailpit
+      // default (loaded first) applies again.
+      const secretEnv = parseEnv(await readFile(path.join(paths.secretsDir, 'secrets.env'), 'utf8'));
+      expect(secretEnv.MAILER_DSN).toBeUndefined();
+      const dotenv = await readFile(path.join(paths.dir, '.env'), 'utf8');
+      expect(dotenv).toContain('MAILER_DSN=smtp://mailpit:1025');
+
+      // --no-restart: not a single compose command ran.
+      expect(base.runner.calls.filter((c) => c.cwd === paths.dir).length).toBe(callsBefore);
+      expect(await instanceGetMailer(base.d, 'website1')).toEqual({ configured: false });
+    });
   });
 });
 

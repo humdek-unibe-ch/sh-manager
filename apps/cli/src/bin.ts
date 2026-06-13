@@ -17,10 +17,13 @@ import { CrossInstanceError } from '@shm/core';
 import { discoverEngineRoot } from '@shm/docker';
 import { OFFICIAL_REGISTRY_URL } from '@shm/registry';
 import { instancePaths, type RemoveMode } from '@shm/instances';
-import type { RestoreMode } from '@shm/backup';
+import { DEFAULT_BACKUP_SCHEDULE, type RestoreMode } from '@shm/backup';
 import {
   doctor,
   instanceBackup,
+  instanceBackupPrune,
+  instanceBackupScheduleGet,
+  instanceBackupScheduleSet,
   instanceClone,
   instanceSetAddress,
   instanceGetMailer,
@@ -38,6 +41,8 @@ import {
   drainInstancePluginOperations,
   serverInit,
   serverPurge,
+  serverRunScheduledBackups,
+  type BackupScheduleStatus,
 } from './actions.js';
 import { stripRedundantManagerToken } from './argv.js';
 import { ComposeExecBackendOperationsClient, HttpBackendOperationsClient } from './operations-client.js';
@@ -291,6 +296,29 @@ server
     }
   });
 
+server
+  .command('run-scheduled-backups')
+  .description('One-shot: take every due scheduled backup + prune by retention (for cron / systemd timers; the web GUI runs this automatically)')
+  .action(async () => {
+    try {
+      const d = await deps(program.opts().root as string);
+      const res = await serverRunScheduledBackups(d, { log: (line) => console.log(line) });
+      if (res.entries.length === 0) {
+        console.log('No instance has an enabled backup schedule with a due run.');
+        return;
+      }
+      console.log(
+        formatTable(
+          ['INSTANCE', 'ACTION', 'BACKUP', 'PRUNED', 'DETAIL'],
+          res.entries.map((e) => [e.instanceId, e.action, e.backupId ?? '-', e.prunedCount !== undefined ? String(e.prunedCount) : '-', e.detail ?? '']),
+        ),
+      );
+      if (res.entries.some((e) => e.action === 'failed')) process.exitCode = 1;
+    } catch (err) {
+      fail(err);
+    }
+  });
+
 const instance = program.command('instance').description('Instance-level operations');
 
 instance
@@ -497,6 +525,96 @@ instance
       const res = await instanceBackup(d, id, { seq: opts.seq });
       console.log(`Backup ${res.backupId} -> ${res.backupDir}`);
       console.log(`Areas: ${res.manifest.includedAreas.join(', ')}  Files: ${res.manifest.files.length}`);
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+function printScheduleStatus(status: BackupScheduleStatus): void {
+  if (!status.policy) {
+    console.log(`No backup schedule configured for ${status.instanceId}.`);
+    console.log('Enable one with: sh-manager instance backup-schedule <id> --enable [--time HH:MM]');
+    return;
+  }
+  const p = status.policy;
+  const mib = (n: number) => `${(n / 1024 / 1024).toFixed(1)} MiB`;
+  console.log(`Backup schedule for ${status.instanceId}: ${p.enabled ? 'ENABLED' : 'disabled'}`);
+  console.log(`  Daily at ${p.time} (server local time)`);
+  console.log(
+    `  Retention: ${p.retention.daily} dailies, ${p.retention.weekly} weeklies (Mon), ` +
+      `${p.retention.monthly} monthlies (1st), max age ${p.retention.maxAgeDays} days`,
+  );
+  console.log(`  Last run:  ${status.lastRunAt ?? 'never'}${status.lastResult ? ` (${status.lastResult})` : ''}`);
+  if (status.lastDetail) console.log(`             ${status.lastDetail}`);
+  console.log(`  Next run:  ${status.nextRunAt ?? '-'}`);
+  console.log(`  Backups:   ${status.backups.count} on disk, ${mib(status.backups.totalBytes)} total`);
+  console.log(
+    `  Projected steady state: ~${mib(status.footprint.steadyStateBytes)} ` +
+      `(${status.footprint.slots} retention slots x ${mib(status.footprint.averageBackupBytes)} average)`,
+  );
+}
+
+instance
+  .command('backup-schedule <id>')
+  .description('Show or change the nightly backup schedule + GFS retention of an instance')
+  .option('--enable', 'enable scheduled backups')
+  .option('--disable', 'disable scheduled backups')
+  .option('--time <HH:MM>', 'daily run time, server local time (default 02:00)')
+  .option('--keep-daily <n>', 'retained daily backups', (v) => parseInt(v, 10))
+  .option('--keep-weekly <n>', 'retained weekly (Monday) backups', (v) => parseInt(v, 10))
+  .option('--keep-monthly <n>', 'retained monthly (1st of month) backups', (v) => parseInt(v, 10))
+  .option('--max-age-days <n>', 'hard cap: prunable backups older than this are deleted', (v) => parseInt(v, 10))
+  .action(async (id: string, opts) => {
+    try {
+      const d = await deps(program.opts().root as string);
+      const mutating =
+        opts.enable || opts.disable || opts.time !== undefined || opts.keepDaily !== undefined ||
+        opts.keepWeekly !== undefined || opts.keepMonthly !== undefined || opts.maxAgeDays !== undefined;
+      if (opts.enable && opts.disable) {
+        console.error('Error: --enable and --disable are mutually exclusive.');
+        process.exit(1);
+      }
+      if (!mutating) {
+        printScheduleStatus(await instanceBackupScheduleGet(d, id));
+        return;
+      }
+      const current = (await instanceBackupScheduleGet(d, id)).policy ?? DEFAULT_BACKUP_SCHEDULE;
+      const policy = {
+        enabled: opts.enable ? true : opts.disable ? false : current.enabled,
+        time: (opts.time as string | undefined) ?? current.time,
+        retention: {
+          daily: (opts.keepDaily as number | undefined) ?? current.retention.daily,
+          weekly: (opts.keepWeekly as number | undefined) ?? current.retention.weekly,
+          monthly: (opts.keepMonthly as number | undefined) ?? current.retention.monthly,
+          maxAgeDays: (opts.maxAgeDays as number | undefined) ?? current.retention.maxAgeDays,
+        },
+      };
+      printScheduleStatus(await instanceBackupScheduleSet(d, id, policy));
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+instance
+  .command('backup-prune <id>')
+  .description('Apply the GFS retention policy to the instance backups (--dry-run shows the plan only)')
+  .option('--dry-run', 'show what would be kept/deleted without deleting anything', false)
+  .action(async (id: string, opts) => {
+    try {
+      const d = await deps(program.opts().root as string);
+      const res = await instanceBackupPrune(d, id, { dryRun: opts.dryRun as boolean });
+      console.log(
+        formatTable(
+          ['BACKUP', 'ORIGIN', 'DECISION', 'REASONS'],
+          [...res.plan.keep, ...res.plan.prune].map((dec) => [dec.backupId, dec.origin, dec.action, dec.reasons.join(', ')]),
+        ),
+      );
+      for (const s of res.skipped) console.log(`  skipped ${s.name}: ${s.reason}`);
+      console.log(
+        res.dryRun
+          ? `Dry run: ${res.plan.prune.length} backup(s) would be deleted, nothing was touched.`
+          : `Deleted ${res.deleted.length} backup(s); kept ${res.plan.keep.length}.`,
+      );
     } catch (err) {
       fail(err);
     }
