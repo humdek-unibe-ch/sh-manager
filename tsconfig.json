@@ -39,7 +39,8 @@
     "apps/*/src/**/*.ts",
     "scripts/**/*.ts",
     "scripts/**/*.mts",
-    "vitest.config.ts"
+    "vitest.config.ts",
+    "vitest.coverage-gate.config.ts"
   ],
   "exclude": ["node_modules", "dist", "coverage", "apps/web/src/ui", "apps/web/dist-web"]
 }
