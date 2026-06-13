@@ -8,13 +8,58 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `1.3.0`). Registry releases
+- **The manager tool** uses its own semver (currently `1.4.0`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
   **`0.x`** line (core, frontend, scheduler, worker — all `0.1.0`).
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
+
+## [1.4.0] - 2026-06-13
+
+### Added
+- **Scheduled backups with GFS retention.** Every instance can now take an
+  automatic nightly backup: `sh-manager instance backup-schedule <id>
+  --enable [--time HH:MM --keep-daily N --keep-weekly N --keep-monthly N
+  --max-age-days N]` stores the policy in the instance manifest
+  (schema-validated), the web console runs due backups from a built-in
+  scheduler loop (disable with `SHM_BACKUP_SCHEDULER=0`), and
+  `sh-manager server run-scheduled-backups` is the one-shot trigger for
+  cron/systemd hosts (ready-made units under `deploy/`). Runs are journaled,
+  audited, take the per-instance operation lock, record state in
+  `manager/backup-scheduler.json` (a GUI loop and a cron job can coexist
+  without double-running), catch up exactly once after downtime, and skip
+  with a journaled warning when free disk is below ~2× the newest backup.
+- **GFS pruning with safety invariants.** Scheduled backups are retained on
+  grandfather-father-son slots (recent dailies, Monday weeklies,
+  1st-of-month monthlies, hard max age); `sh-manager instance backup-prune
+  <id> [--dry-run]` previews/applies the keep/delete plan with an explicit
+  reason per backup. Manual backups are **never** auto-pruned, `pre_update`/
+  `pre_restore` safety backups only beyond max age, the newest scheduled
+  backup never, and pruning never touches anything but this instance's own
+  backup directories.
+- **Backup origins.** Every backup manifest now records why it exists —
+  `manual`, `scheduled`, `pre_update` or `pre_restore` (older backups
+  without the field count as `manual`) — shown as badges in the console's
+  Backups panel next to the schedule card (policy, last/next run, current
+  size and projected steady-state footprint) and served via
+  `GET/PUT /api/instances/:id/backup-schedule`.
+- **Manual QA test plan.** `docs/qa/manual-test-plan.md` (structured,
+  severity-tagged cases for every operator workflow incl. the v1.3.0
+  surface: first-run setup, wrapper verbs, purge, in-CMS plugin pipeline,
+  mailer) + `docs/qa/results-template.md` for per-release sign-off, with
+  Windows and Linux appendices.
+- New operator runbook [docs/operator/scheduled-backups.md](docs/operator/scheduled-backups.md);
+  nightly e2e now exercises the one-shot scheduler, GFS prune, double-run
+  guard, the managed plugin drain pipeline and `server purge` against real
+  Docker.
+
+### Fixed
+- **Same-day backups no longer overwrite each other.** A second
+  `instance backup` on the same day silently reused sequence `001` and
+  clobbered the first backup's directory; the next free sequence is now
+  picked automatically (`--seq` still wins for explicit control).
 
 ## [1.3.0] - 2026-06-12
 
