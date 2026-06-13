@@ -2,8 +2,8 @@
 
 Audience: Developers and release engineers
 Status: Active
-Applies to: `sh-manager` (manager tool `0.1.0`) and the SelfHelp 0.x pre-release distribution across `sh-selfhelp_backend`, `sh-selfhelp_frontend`, `sh-selfhelp_shared`, and `sh2-plugin-registry`
-Last verified: 2026-06-09
+Applies to: `sh-manager` (manager tool `1.4.0`) and the SelfHelp 0.x pre-release distribution across `sh-selfhelp_backend`, `sh-selfhelp_frontend`, `sh-selfhelp_shared`, and `sh2-plugin-registry`
+Last verified: 2026-06-13
 Source of truth: the test files cited below, and `sh-selfhelp_backend/docs/archive/core-installation-and-distribution-plan.md` ("Testing And Verification Plan", lines 2972–3120)
 
 This page does two things:
@@ -144,6 +144,32 @@ prefix; other repos are prefixed, e.g. `backend:`).
 | --- | --- | --- |
 | Backup writes under the instance `backups/`; includes MySQL dump + uploads + plugin artifacts + identity/lock/compose + redacted metadata + checksum manifest | `packages/backup/src/backup.test.ts`; live in `e2e/docker-e2e.test.ts` | Covered + Nightly |
 | Integrity verification fails on missing/invalid checksums; redacted metadata never stores secrets | `packages/backup/src/backup.test.ts` | Covered |
+| Two same-day backups get distinct sequence numbers (regression: second used to overwrite the first) | `packages/backup/src/backup.test.ts` (`nextBackupSeq`), `apps/cli/src/cli.test.ts` | New |
+| Every backup records its origin (`manual`/`scheduled`/`pre_update`/`pre_restore`); update + GUI-restore call sites tag correctly; legacy manifests default to `manual` | `packages/backup/src/backup.test.ts`, `apps/cli/src/cli.test.ts`, `packages/backup/src/retention.test.ts` | New |
+
+## Scheduled backups + retention
+
+| Scenario(s) | Test(s) | Status |
+| --- | --- | --- |
+| Schedule engine: due/not-due around the daily occurrence, month/year boundaries, downtime catch-up runs exactly once, invalid policy rejected | `packages/backup/src/schedule.test.ts` (fake clock) | New |
+| GFS classifier: daily/weekly(Monday)/monthly(1st) slots, Monday-the-1st overlap → monthly wins, max-age hard cap | `packages/backup/src/retention.test.ts` | New |
+| Prune safety invariants (security regressions): never the newest scheduled backup, never `manual`, safety backups only beyond max age, never a path outside this instance's `backups/`, dry-run deletes nothing | `packages/backup/src/retention.test.ts`, `apps/cli/src/cli.test.ts` | New |
+| `backupSchedule` policy block on the instance manifest is schema-validated (shape, HH:MM, integer bounds) | `packages/schemas/src/validate.test.ts` + fixtures | New |
+| CLI: `instance backup-schedule` get/set, `instance backup-prune [--dry-run]`, `server run-scheduled-backups` over all instances | `apps/cli/src/cli.test.ts` | New |
+| One-shot run: disk-low skip (journaled `skipped_low_disk`, retried next occurrence), double-run guard via `manager/backup-scheduler.json`, per-run prune report | `apps/cli/src/cli.test.ts` | New |
+| Web scheduler loop ticks through `OperationRunner` (journal + audit + per-instance lock), `SHM_BACKUP_SCHEDULER=0` disables; scheduler and CMS/plugin drain never run concurrently on one instance | `apps/web/src/backup-scheduler.test.ts`, `apps/web/src/jobs.test.ts` | New |
+| BFF `GET/PUT /api/instances/:id/backup-schedule` validates server-side (auth + CSRF); Backups panel renders schedule card, origin badges, footprint | `apps/web/src/server.test.ts`, `apps/web/src/ui/features/manager/BackupManager.test.tsx` | New |
+| Live: due-now schedule → one-shot takes a restorable `origin: scheduled` backup; seeded old backups GFS-pruned exactly as planned; double-run guard; instance stays healthy | `e2e/docker-e2e.test.ts` | Nightly |
+
+## v1.3.0 surface (managed plugins, mailer, purge, wrapper)
+
+| Scenario(s) | Test(s) | Status |
+| --- | --- | --- |
+| Generated instance env carries the plugin trust chain: `SELFHELP_PLUGIN_TRUSTED_KEYS` = exactly the manager's active trusted keys, `SELFHELP_PLUGIN_REQUIRE_SIGNATURE=true`, registry install source; no-keys failure path never weakens enforcement | `packages/docker/src/env.test.ts` | New |
+| Mailer: DSN validation, secret file write, credential redaction in every returned status, `--clear` falls back to Mailpit, `--no-restart` honored | `packages/instances/src/secrets.test.ts`, `apps/cli/src/cli.test.ts` | New |
+| Managed plugin pipeline: unsigned install refused by the prod CMS (fail closed); dev-signed request parked → drained by the manager; composer failure propagates to a `cancelled` operation; instance stays healthy | `packages/core/src/plugin-state.test.ts`, `apps/cli/src/plugin-state-client.test.ts`; live in `e2e/docker-e2e.test.ts` | Covered + Nightly |
+| Test registry publishes a dev-signed plugin release that passes the manager's registry schema + signature chain (tampering breaks it) | `e2e/harness.test.ts` | New |
+| `server purge`: typed confirmation required; tears down every instance + proxy + state against real Docker; backups retained; clean re-bootstrap afterwards | `apps/cli/src/cli.test.ts`; live in `e2e/docker-e2e.test.ts` | Covered + Nightly |
 
 ## Persistent state
 

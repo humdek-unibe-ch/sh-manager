@@ -150,16 +150,19 @@ cross-instance operations. The CMS System page shows the manager-loop health
 
 ## Phase 5 — Back up
 
-Take a backup before every risky operation, and run scheduled backups stored
-off-box.
+Take a manual backup before every risky operation, and enable the nightly
+schedule so every instance always has a recent automatic backup (GFS retention
+keeps the set bounded; copy backups off-box).
 
 ```bash
 sh-manager instance backup website1                       # checksummed backup
+sh-manager instance backup-schedule website1 --enable     # nightly + retention
 sh-manager instance restore website1 <backupId>           # validate + show plan
 sh-manager instance restore website1 <backupId> --apply   # restore in place
 ```
 
-→ Detail: [backup & restore](backup-restore.md). Copying a live instance is in
+→ Detail: [backup & restore](backup-restore.md) and
+[scheduled backups](scheduled-backups.md). Copying a live instance is in
 [clone & remove](clone-remove.md).
 
 ## Phase 6 — Recover / troubleshoot

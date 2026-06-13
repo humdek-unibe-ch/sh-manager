@@ -74,17 +74,27 @@ Updates back up automatically, but you still want regular, independent backups.
 sh-manager instance backup website1   # confirm a manual backup succeeds first
 ```
 
-- [ ] Add a scheduled backup (cron / systemd timer), e.g. daily:
+- [ ] Enable the built-in nightly schedule with GFS retention
+      (see [scheduled backups](scheduled-backups.md)):
+
+```bash
+sh-manager instance backup-schedule website1 --enable --time 02:00
+```
+
+- [ ] The web console takes due backups while it runs. If the console is not
+      up permanently, add the one-shot trigger (examples under `deploy/`):
 
 ```cron
-# /etc/cron.d/selfhelp-backup-website1
-0 3 * * *  root  sh-manager instance backup website1 >> /var/log/selfhelp-backup.log 2>&1
+# /etc/cron.d/selfhelp-scheduled-backups — the command itself decides what is due
+*/15 * * * *  root  sh-manager server run-scheduled-backups >> /var/log/selfhelp-backup.log 2>&1
 ```
 
 - [ ] **Copy backups off the server** (another host / object storage). A backup
-      that only lives on the same box does not survive a disk failure.
-- [ ] Note your retention policy and prune old local backups (they are plain
-      directories under `<root>/instances/<id>/backups/`).
+      that only lives on the same box does not survive a disk failure. Backups
+      are plain directories under `<root>/instances/<id>/backups/`.
+- [ ] Check the projected disk footprint
+      (`sh-manager instance backup-schedule website1`) against the disk budget;
+      tune the retention slots if needed.
 
 ## 5. Wire CMS-requested updates (optional but recommended)
 

@@ -82,7 +82,11 @@ Services: `frontend`, `backend`, `worker`, `scheduler`, `mysql`, `redis`,
 | Task | Command |
 | --- | --- |
 | Backup | `sh-manager instance backup website1` |
-| Second backup same day | `sh-manager instance backup website1 --seq 2` |
+| Second backup same day | `sh-manager instance backup website1` (sequence auto-increments) |
+| Nightly schedule on/off | `sh-manager instance backup-schedule website1 --enable --time 02:00` · `--disable` |
+| Show schedule + footprint | `sh-manager instance backup-schedule website1` |
+| Preview / apply retention | `sh-manager instance backup-prune website1 --dry-run` · without `--dry-run` |
+| Run due scheduled backups now | `sh-manager server run-scheduled-backups` |
 | Validate + plan a restore | `sh-manager instance restore website1 <backupId>` |
 | Restore in place | `sh-manager instance restore website1 <backupId> --apply` |
 | Restore as a clone | `sh-manager instance restore website1 <backupId> --mode restore_as_clone --new-domain copy.example.ch --apply` |

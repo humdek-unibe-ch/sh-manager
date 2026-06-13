@@ -56,7 +56,7 @@ sh-manager (CLI)            sh-manager-web (BFF)
 | `@shm/traefik` | The single shared reverse proxy (the only container with the Docker socket, read-only). |
 | `@shm/instances` | Path layout, **atomic writes**, inventory/manifest/lock stores, drift detection, operator README generation, secrets, remove. |
 | `@shm/core` | Instance-scope guard, preflight, health, update plan/execute, bootstrap/install orchestration, post-up provisioning. |
-| `@shm/backup` | Backup manifest + integrity (checksums), restore/clone planning + secret policy. |
+| `@shm/backup` | Backup manifest + integrity (checksums), restore/clone planning + secret policy, the pure backup **schedule engine** (due/catch-up, injected clock) and **GFS retention** classifier/prune planner (slot model + safety invariants). |
 | `@shm/support` | Secret redaction + support-bundle assembly (re-scanned for residual secrets). |
 | `@shm/auth` | Configurable local + campus/OIDC operator authorization, sessions, CSRF, password hashing, operator store. |
 | `apps/cli` | `sh-manager` command-line entrypoint + real boundary implementations. |
@@ -101,10 +101,16 @@ tool needs:
 
 JSON API surface (all under `/api`): auth (`login`/`logout`/`meta`,
 `setup/operator`), server (`status`, `preflight`), instances (CRUD, health,
-backups, restore, update dry-run/execute, clone, address, mailer, remove),
-operations (history + journaled logs), and registry version listings — see
-[GUI instance management](operator/gui-instance-management.md) for the
-endpoint table.
+backups + backup schedule, restore, update dry-run/execute, clone, address,
+mailer, remove), operations (history + journaled logs), and registry version
+listings — see [GUI instance management](operator/gui-instance-management.md)
+for the endpoint table.
+
+The persistent server also runs two background loops through the same
+journaled, per-instance-locked operation runner as interactive actions: the
+**CMS operations poller** (drains CMS-requested update + plugin operations)
+and the **backup scheduler** (takes due scheduled backups and applies GFS
+retention; `SHM_BACKUP_SCHEDULER=0` disables).
 
 The SPA talks to this API through one typed client
 (`apps/web/src/ui/lib/api-client.ts`), which captures the CSRF token on

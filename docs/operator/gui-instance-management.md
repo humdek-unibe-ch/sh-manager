@@ -128,7 +128,13 @@ manager version + self-update status, and the **Instances** section.
 - **Backups** — create a backup, or restore one. A restore **always takes an
   automatic pre-restore backup first**, so the pre-restore state stays
   recoverable. The backup file stays on the server (the GUI shows the path;
-  there is no browser download).
+  there is no browser download). Each backup carries an **origin badge**
+  (manual / scheduled / pre-update / pre-restore), and the **schedule card**
+  manages the automatic nightly backup: enable toggle, time, GFS retention
+  slots, last/next run with the last result, current total size and the
+  projected steady-state footprint — see
+  [scheduled backups](scheduled-backups.md). While the console is running,
+  its scheduler loop takes due backups automatically.
 - **Clone** — copy an instance to a new id. The target address follows the
   source's mode: **production sources get a new domain, local sources get a
   new localhost port**. Clones always get **fresh secrets**; credentials are
@@ -168,8 +174,15 @@ runs the composer step, finalizes the operation, and propagates the plugin
 state to the worker and scheduler containers — installing a plugin from the
 CMS admin UI completes end-to-end within a poll tick, no shell required.
 
+A second background loop runs **scheduled backups**: instances with an enabled
+backup schedule get their nightly backup + retention pruning while the console
+is up (`SHM_BACKUP_SCHEDULER=0` disables the loop; it shares the same
+per-instance locks, so it never overlaps another operation). See
+[scheduled backups](scheduled-backups.md).
+
 Headless servers without a resident GUI keep using the systemd/cron triggers
-— see [update.md](update.md) and [`deploy/`](../../deploy/README.md).
+— see [update.md](update.md), [scheduled backups](scheduled-backups.md) and
+[`deploy/`](../../deploy/README.md).
 
 ## API reference
 
@@ -186,9 +199,11 @@ the operation.
 | `POST /api/instances` | Create + provision an instance (first install also initializes the server). |
 | `GET /api/instances/:id` | Instance detail. |
 | `POST /api/instances/:id/health` | Run a health check (synchronous). |
-| `GET /api/instances/:id/backups` | List backups. |
+| `GET /api/instances/:id/backups` | List backups (with origin). |
 | `POST /api/instances/:id/backups` | Create a backup. |
 | `POST /api/instances/:id/backups/:backupId/restore` | Pre-restore backup, then restore. |
+| `GET /api/instances/:id/backup-schedule` | Schedule policy + last/next run + disk footprint. |
+| `PUT /api/instances/:id/backup-schedule` | Update the schedule policy (validated server-side). |
 | `POST /api/instances/:id/update/dry-run` | Resolve plan + preflight (synchronous). |
 | `POST /api/instances/:id/update` | Execute an update. |
 | `POST /api/instances/:id/clone` | Clone to a new instance (domain for production sources, port for local ones). |

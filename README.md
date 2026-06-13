@@ -18,8 +18,8 @@ never controls Docker directly.
 - Generates per-instance Docker Compose, `.env` (non-secret), manifest, lock
   file, and an operator README.
 - Runs preflight/resource checks, health checks, update dry-runs and updates
-  (backup-first, rollback-on-failure), backups, restores, clones, and redacted
-  support bundles.
+  (backup-first, rollback-on-failure), backups — manual and **scheduled nightly
+  with GFS retention** — restores, clones, and redacted support bundles.
 
 It ships **two interfaces over the same logic**: the `sh-manager` **CLI** (the
 canonical interface) and a localhost **web UI** (`sh-manager-web`) — one
@@ -129,10 +129,13 @@ Full documentation lives in [`docs/`](docs/README.md):
   [GUI instance management](docs/operator/gui-instance-management.md),
   [update](docs/operator/update.md),
   [backup & restore](docs/operator/backup-restore.md),
+  [scheduled backups](docs/operator/scheduled-backups.md),
   [clone & remove](docs/operator/clone-remove.md),
   [safe mode & recovery](docs/operator/safe-mode-and-recovery.md),
   [support bundle](docs/operator/support-bundle.md),
   [security hardening](docs/operator/security-hardening.md).
+- QA: [manual test plan](docs/qa/manual-test-plan.md) +
+  [results template](docs/qa/results-template.md).
 - [`CHANGELOG.md`](CHANGELOG.md) and the repository contract [`AGENTS.md`](AGENTS.md).
 
 ## Hard rules (enforced in code + tests)
@@ -212,6 +215,12 @@ sh-manager instance update website1 --accept-migration-risk
 sh-manager instance mailer website1
 sh-manager instance mailer website1 --set smtp://user:pass@mail.example.org:587
 sh-manager instance mailer website1 --clear
+
+# manual backups + automatic nightly backups with GFS retention
+sh-manager instance backup website1
+sh-manager instance backup-schedule website1 --enable --time 02:00
+sh-manager instance backup-prune website1 --dry-run
+sh-manager server run-scheduled-backups   # one-shot for cron/systemd hosts
 
 sh-manager server status    # initialized? which instances?
 sh-manager doctor

@@ -2,8 +2,8 @@
 
 Audience: Developers and server operators
 Status: Active
-Applies to: `sh-manager` (manager tool `0.1.6+`, manages the SelfHelp 0.x pre-release platform line)
-Last verified: 2026-06-12
+Applies to: `sh-manager` (manager tool `1.4.0+`, manages the SelfHelp 0.x pre-release platform line)
+Last verified: 2026-06-13
 Source of truth: `apps/`, `packages/`, and `README.md` in this repository
 
 This is the documentation entrypoint for **SelfHelp Manager** — the official
@@ -23,6 +23,15 @@ below go deeper.
 - [Distribution architecture audit & test-coverage matrix](distribution-architecture-audit-and-coverage.md)
   — the audit of the publish/install/update pipeline and the scenario → test map
   (covered / new / nightly) across all five repos.
+
+## For QA / release sign-off
+
+- [Manual QA test plan](qa/manual-test-plan.md) — the structured pre-release
+  test cases (QA-XXX-NNN) for every operator workflow, with severity, expected
+  results, links to the automated equivalents, and Windows/Linux setup
+  appendices.
+- [QA results template](qa/results-template.md) — the per-release,
+  per-platform sign-off record.
 
 ## For operators
 
@@ -59,6 +68,10 @@ Task-based runbooks live under [`operator/`](operator/).
   update (backup-first, rollback-on-failure).
 - [Backup & restore](operator/backup-restore.md) — create checksummed backups
   and restore them (same-instance or as a clone).
+- [Scheduled backups](operator/scheduled-backups.md) — automatic nightly
+  backups per instance with GFS retention (dailies/weeklies/monthlies),
+  pruning, disk-footprint planning, and cron/systemd triggers for headless
+  servers.
 - [Clone & remove](operator/clone-remove.md) — copy an instance with fresh
   secrets, and disable / remove / fully delete an instance.
 - [Safe mode & recovery](operator/safe-mode-and-recovery.md) — plugin safe-mode

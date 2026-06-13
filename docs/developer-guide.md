@@ -31,6 +31,7 @@ npm run check   # typecheck + lint + test + validate:schemas
 | `npm run test` | Vitest run (packages + CLI + web BFF + web UI). |
 | `npm run test:watch` | Vitest in watch mode. |
 | `npm run test:coverage` | Vitest with V8 coverage. |
+| `npm run coverage:gate` | CI coverage gate: the backup engine (`packages/backup`) + the web backup-scheduler loop must stay >= 70% covered (scoped — legacy files cannot trip it). |
 | `npm run validate:schemas` | Validate the JSON Schemas + examples. |
 | `npm run build` | Build packages (tsc + tsc-alias) and the web SPA (Vite). |
 | `npm run cli -- <args>` | Run the CLI from source (`tsx`), e.g. `npm run cli -- --help`. |
