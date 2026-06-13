@@ -3,3 +3,5 @@
 export * from './manifest.js';
 export * from './restore.js';
 export * from './clone.js';
+export * from './schedule.js';
+export * from './retention.js';

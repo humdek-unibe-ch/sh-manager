@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MPL-2.0
 import { describe, expect, it } from 'vitest';
 import type { BackupManifest } from '@shm/schemas';
-import { buildBackupManifest, makeBackupId, verifyBackupIntegrity } from './manifest.js';
+import { buildBackupManifest, makeBackupId, nextBackupSeq, verifyBackupIntegrity } from './manifest.js';
 import { planRestore, validateBackupForRestore, type RestoreRequest } from './restore.js';
 import { planClone } from './clone.js';
 
@@ -26,6 +26,51 @@ describe('backup manifest', () => {
     const bad = verifyBackupIntegrity(baseManifest, { 'db.sql.gz': 'zzz' });
     expect(bad.ok).toBe(false);
     expect(bad.errors[0]).toMatch(/mismatch/i);
+  });
+
+  it('defaults the origin to manual and preserves an explicit origin', () => {
+    expect(baseManifest.origin).toBe('manual');
+    const scheduled = buildBackupManifest({
+      instanceId: 'website1',
+      selfhelpVersion: '1.4.2',
+      migrationVersion: 'V1',
+      plugins: [],
+      origin: 'scheduled',
+      includedAreas: ['database'],
+      files: [],
+      createdAt: '2026-06-05T10:00:00Z',
+    });
+    expect(scheduled.origin).toBe('scheduled');
+  });
+});
+
+describe('nextBackupSeq (same-day collision guard)', () => {
+  const day = new Date('2026-06-05T10:00:00Z');
+
+  it('starts at 1 for an empty backups directory', () => {
+    expect(nextBackupSeq([], 'website1', day)).toBe(1);
+  });
+
+  it('continues after the highest existing same-day sequence', () => {
+    const existing = ['backup-20260605-website1-001', 'backup-20260605-website1-003'];
+    expect(nextBackupSeq(existing, 'website1', day)).toBe(4);
+  });
+
+  it('ignores other days, other instances and non-backup names', () => {
+    const existing = [
+      'backup-20260604-website1-009', // yesterday
+      'backup-20260605-website2-001', // other instance
+      'backup-20260605-website1-abc', // malformed seq
+      'notes.txt',
+    ];
+    expect(nextBackupSeq(existing, 'website1', day)).toBe(1);
+  });
+
+  it('never reuses an id even when an instance id is a prefix of another', () => {
+    // "website1" must not match "website1-copy" backups.
+    const existing = ['backup-20260605-website1-copy-002'];
+    expect(nextBackupSeq(existing, 'website1', day)).toBe(1);
+    expect(nextBackupSeq(existing, 'website1-copy', day)).toBe(3);
   });
 });
 
