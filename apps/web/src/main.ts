@@ -25,6 +25,7 @@ import { browseUrl, createManagerServer, DEFAULT_REGISTRY_URL } from './server.j
 import { AuditLog, InstanceLocks, OperationJournal, OperationRunner } from './jobs.js';
 import { buildInstanceActions } from './instances.js';
 import { CmsOperationsPoller } from './poller.js';
+import { BackupSchedulerLoop } from './backup-scheduler.js';
 import { doctor } from '../../cli/src/actions.js';
 import { loadTrustedKeys, realDeps } from '../../cli/src/env.js';
 import { checkSelfUpdate } from '../../cli/src/self-update.js';
@@ -151,6 +152,14 @@ export async function startWebUi(opts: WebUiOptions = {}): Promise<{ host: strin
     poller = new CmsOperationsPoller({ instances, runner, intervalMs: pollSeconds * 1000 });
   }
 
+  // Nightly scheduled backups + GFS retention. `SHM_BACKUP_SCHEDULER=0`
+  // disables the in-process loop (e.g. when a cron/systemd timer runs
+  // `sh-manager server run-scheduled-backups` instead).
+  let backupScheduler: BackupSchedulerLoop | undefined;
+  if (process.env.SHM_BACKUP_SCHEDULER !== '0') {
+    backupScheduler = new BackupSchedulerLoop({ instances, runner });
+  }
+
   const handle = createManagerServer({
     actions,
     host,
@@ -165,6 +174,7 @@ export async function startWebUi(opts: WebUiOptions = {}): Promise<{ host: strin
 
   const bound = await handle.listen();
   poller?.start();
+  backupScheduler?.start();
   // Always print the URL an operator can actually open: a wildcard bind
   // (in-container) is reachable via the published localhost port, not 0.0.0.0.
   console.log(`SelfHelp Manager console (v${managerVersion}): ${browseUrl(bound.host, bound.port)}`);

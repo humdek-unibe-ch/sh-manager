@@ -28,6 +28,8 @@ export type OperationKind =
   | 'instance_create'
   | 'instance_update'
   | 'instance_backup'
+  | 'instance_scheduled_backup'
+  | 'instance_backup_prune'
   | 'instance_restore'
   | 'instance_clone'
   | 'instance_set_address'

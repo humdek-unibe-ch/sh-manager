@@ -17,28 +17,37 @@ import { randomBytes } from 'node:crypto';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import type { HealthReport } from '@shm/core';
-import type { BackupManifest, InstanceManifest, ServerInventory } from '@shm/schemas';
+import type { BackupManifest, BackupOrigin, BackupSchedulePolicy, InstanceManifest, ServerInventory } from '@shm/schemas';
+
+export type { BackupScheduleStatus, PruneExecutionReport } from '../../cli/src/actions.js';
 import { InventoryStore, ManifestStore, instancePaths, type RemoveMode } from '@shm/instances';
 import {
   drainInstanceOperations,
   drainInstancePluginOperations,
   hasPendingPluginOperations,
   instanceBackup,
+  instanceBackupPrune,
+  instanceBackupScheduleGet,
+  instanceBackupScheduleSet,
   instanceClone,
   instanceGetMailer,
+  instanceHasDueScheduledBackup,
   instanceHealth,
   instanceInstall,
   instanceList,
   instanceRemove,
   instanceRestore,
+  instanceRunScheduledBackup,
   instanceSetAddress,
   instanceSetMailer,
   instanceUpdate,
   serverInit,
   type ActionDeps,
+  type BackupScheduleStatus,
   type InstanceInstallOptions,
   type InstanceUpdateOptions,
   type MailerStatus,
+  type PruneExecutionReport,
 } from '../../cli/src/actions.js';
 import { ComposeExecBackendOperationsClient } from '../../cli/src/operations-client.js';
 import type { InstanceLocks, OperationContext } from './jobs.js';
@@ -67,6 +76,8 @@ export interface InstanceDetail {
 export interface BackupSummary {
   backupId: string;
   createdAt: string;
+  /** Why the backup exists (legacy manifests without the field = manual). */
+  origin: BackupOrigin;
   selfhelpVersion: string;
   migrationVersion: string;
   includedAreas: string[];
@@ -173,6 +184,22 @@ export interface ManagerInstanceActions {
   hasPendingCmsOperation(instanceId: string): Promise<boolean>;
   /** Drain pending CMS-requested update operations (used by the poller). */
   drainCmsOperations(instanceId: string, ctx: OperationContext): Promise<{ processed: number; outcomes: string[] }>;
+
+  /** Schedule policy + run state + footprint estimate (read-only). */
+  backupSchedule(instanceId: string): Promise<BackupScheduleStatus>;
+  /** Validates and persists the schedule policy on the instance manifest. */
+  setBackupSchedule(instanceId: string, policy: BackupSchedulePolicy): Promise<BackupScheduleStatus>;
+  /** Read-only GFS keep/prune preview (deletes nothing). */
+  backupPrunePlan(instanceId: string): Promise<PruneExecutionReport>;
+  /** Applies the GFS retention policy (runs inside the OperationRunner). */
+  backupPrune(instanceId: string, ctx: OperationContext): Promise<unknown>;
+  /**
+   * Cheap read-only peek: is a scheduled backup due? Lets the scheduler loop
+   * avoid creating a journal row on every idle tick.
+   */
+  hasDueScheduledBackup(instanceId: string): Promise<boolean>;
+  /** Takes the due scheduled backup + prunes (used by the scheduler loop). */
+  runScheduledBackup(instanceId: string, ctx: OperationContext): Promise<unknown>;
 }
 
 export interface BuildInstanceActionsOptions {
@@ -266,6 +293,7 @@ export function buildInstanceActions(opts: BuildInstanceActionsOptions): Manager
           out.push({
             backupId: manifest.backupId,
             createdAt: manifest.createdAt,
+            origin: manifest.origin ?? 'manual',
             selfhelpVersion: manifest.selfhelpVersion,
             migrationVersion: manifest.migrationVersion,
             includedAreas: manifest.includedAreas,
@@ -402,7 +430,7 @@ export function buildInstanceActions(opts: BuildInstanceActionsOptions): Manager
       // Safety net first: an automatic pre-restore backup so the operator can
       // undo a restore that targeted the wrong snapshot.
       await ctx.setPhase('pre-restore backup');
-      const pre = await instanceBackup(deps, instanceId, {});
+      const pre = await instanceBackup(deps, instanceId, { origin: 'pre_restore' });
       await ctx.log(`Pre-restore backup ${pre.backupId} written to ${pre.backupDir}.`);
 
       await ctx.setPhase('restore');
@@ -529,6 +557,38 @@ export function buildInstanceActions(opts: BuildInstanceActionsOptions): Manager
         await ctx.log('Symfony services restarted with the updated plugin state.');
       }
       return { processed: lines.length, outcomes: lines };
+    },
+
+    async backupSchedule(instanceId) {
+      return instanceBackupScheduleGet(deps, instanceId);
+    },
+
+    async setBackupSchedule(instanceId, policy) {
+      return instanceBackupScheduleSet(deps, instanceId, policy);
+    },
+
+    async backupPrunePlan(instanceId) {
+      return instanceBackupPrune(deps, instanceId, { dryRun: true });
+    },
+
+    async backupPrune(instanceId, ctx) {
+      await ctx.setPhase('prune backups');
+      const res = await instanceBackupPrune(deps, instanceId, {});
+      for (const d of res.plan.prune) await ctx.log(`prune ${d.backupId}: ${d.reasons.join(', ')}`);
+      for (const s of res.skipped) await ctx.log(`skipped ${s.name}: ${s.reason}`);
+      await ctx.log(`Deleted ${res.deleted.length} backup(s); kept ${res.plan.keep.length}.`);
+      return { deleted: res.deleted, kept: res.plan.keep.length };
+    },
+
+    async hasDueScheduledBackup(instanceId) {
+      return instanceHasDueScheduledBackup(deps, instanceId);
+    },
+
+    async runScheduledBackup(instanceId, ctx) {
+      await ctx.setPhase('scheduled backup');
+      const entry = await instanceRunScheduledBackup(deps, instanceId, { log: (l) => void ctx.log(l) });
+      if (entry.action === 'failed') throw new Error(entry.detail ?? 'Scheduled backup failed.');
+      return entry;
     },
   };
 }

@@ -3,7 +3,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import { createOperator, emptyOperatorTable, InMemoryOperatorStore, type OperatorStore } from '@shm/auth';
 import { browseUrl, createManagerServer, isLoopbackHost, type ManagerServerHandle } from './server.js';
 import type { BootstrapActions } from './actions.js';
@@ -312,6 +312,12 @@ describe('authenticated manager endpoints', () => {
 });
 
 describe('instance management APIs', () => {
+  /** PUT /backup-schedule calls captured by the fake (asserted per test). */
+  let setSchedules: { instanceId: string; policy: unknown }[] = [];
+  beforeEach(() => {
+    setSchedules = [];
+  });
+
   function fakeInstanceActions(): ManagerInstanceActions {
     return {
       async list() {
@@ -382,6 +388,43 @@ describe('instance management APIs', () => {
       },
       async drainCmsOperations() {
         return { processed: 0, outcomes: [] };
+      },
+      async backupSchedule(id) {
+        return {
+          instanceId: id,
+          policy: { enabled: true, time: '02:00', retention: { daily: 7, weekly: 5, monthly: 12, maxAgeDays: 365 } },
+          lastRunAt: null,
+          lastResult: null,
+          lastBackupId: null,
+          lastDetail: null,
+          nextRunAt: '2026-06-13T02:00:00.000Z',
+          backups: { count: 2, totalBytes: 2048 },
+          footprint: { slots: 24, averageBackupBytes: 1024, steadyStateBytes: 24576, requiredFreeBytes: 2048 },
+        };
+      },
+      async setBackupSchedule(id, policy) {
+        setSchedules.push({ instanceId: id, policy });
+        return { ...(await this.backupSchedule(id)), policy };
+      },
+      async backupPrunePlan() {
+        return {
+          plan: {
+            keep: [{ backupId: 'backup-20260612-clinic-a-001', origin: 'scheduled', createdAt: '2026-06-12T02:00:00Z', action: 'keep', reasons: ['daily'] }],
+            prune: [{ backupId: 'backup-20250101-clinic-a-001', origin: 'scheduled', createdAt: '2025-01-01T02:00:00Z', action: 'prune', reasons: ['older-than-max-age'] }],
+          },
+          deleted: [],
+          skipped: [],
+          dryRun: true,
+        };
+      },
+      async backupPrune() {
+        return { deleted: ['backup-20250101-clinic-a-001'], kept: 1 };
+      },
+      async hasDueScheduledBackup() {
+        return false;
+      },
+      async runScheduledBackup(id) {
+        return { instanceId: id, action: 'backup_taken', backupId: 'backup-20260612-clinic-a-002' };
       },
     };
   }
@@ -499,6 +542,75 @@ describe('instance management APIs', () => {
 
       await fetch(base + '/api/server/preflight', { method: 'POST', headers: mutating, body: JSON.stringify({ mode: 'local' }) });
       expect(seenPorts[1]).toEqual([]);
+    } finally {
+      await rm(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('reads and sets the backup schedule (server-side validation) and serves the prune preview', async () => {
+    const tmpRoot = await mkdtemp(path.join(tmpdir(), 'shm-mgmt-'));
+    try {
+      const { base, cookie, csrfToken } = await managementBase(tmpRoot);
+      const mutating = { cookie, 'Content-Type': 'application/json', 'x-shm-csrf': csrfToken };
+
+      const get = await fetch(base + '/api/instances/clinic-a/backup-schedule', { headers: { cookie } });
+      expect(get.status).toBe(200);
+      const status = (await get.json()) as { policy: { time: string }; footprint: { steadyStateBytes: number } };
+      expect(status.policy.time).toBe('02:00');
+      expect(status.footprint.steadyStateBytes).toBeGreaterThan(0);
+
+      // Malformed policies are rejected with the exact problems (server-authoritative).
+      const bad = await fetch(base + '/api/instances/clinic-a/backup-schedule', {
+        method: 'PUT',
+        headers: mutating,
+        body: JSON.stringify({ enabled: true, time: '24:00', retention: { daily: 0, weekly: 5, monthly: 12, maxAgeDays: 365 } }),
+      });
+      expect(bad.status).toBe(400);
+      const badBody = (await bad.json()) as { error: string };
+      expect(badBody.error).toMatch(/HH:MM/);
+      expect(badBody.error).toMatch(/retention\.daily/);
+      expect(setSchedules).toHaveLength(0);
+
+      // CSRF applies to the schedule write too.
+      const noCsrf = await fetch(base + '/api/instances/clinic-a/backup-schedule', {
+        method: 'PUT',
+        headers: { cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: true, time: '03:30', retention: { daily: 7, weekly: 5, monthly: 12, maxAgeDays: 365 } }),
+      });
+      expect(noCsrf.status).toBe(403);
+
+      const ok = await fetch(base + '/api/instances/clinic-a/backup-schedule', {
+        method: 'PUT',
+        headers: mutating,
+        body: JSON.stringify({ enabled: true, time: '03:30', retention: { daily: 7, weekly: 5, monthly: 12, maxAgeDays: 365 } }),
+      });
+      expect(ok.status).toBe(200);
+      expect(setSchedules).toHaveLength(1);
+      expect((setSchedules[0]!.policy as { time: string }).time).toBe('03:30');
+
+      // Dry-run prune answers synchronously and deletes nothing.
+      const dry = await fetch(base + '/api/instances/clinic-a/backup-prune', {
+        method: 'POST',
+        headers: mutating,
+        body: JSON.stringify({ dryRun: true }),
+      });
+      expect(dry.status).toBe(200);
+      const dryBody = (await dry.json()) as { dryRun: boolean; deleted: string[]; plan: { prune: unknown[] } };
+      expect(dryBody.dryRun).toBe(true);
+      expect(dryBody.deleted).toHaveLength(0);
+      expect(dryBody.plan.prune).toHaveLength(1);
+
+      // The real prune runs as a journaled 202 operation.
+      const prune = await fetch(base + '/api/instances/clinic-a/backup-prune', {
+        method: 'POST',
+        headers: mutating,
+        body: JSON.stringify({}),
+      });
+      expect(prune.status).toBe(202);
+      const { operationId } = (await prune.json()) as { operationId: string };
+      expect(await waitForOperation(base, cookie, operationId)).toBe('succeeded');
+      const op = await fetch(`${base}/api/operations/${operationId}`, { headers: { cookie } });
+      expect(((await op.json()) as { kind: string }).kind).toBe('instance_backup_prune');
     } finally {
       await rm(tmpRoot, { recursive: true, force: true });
     }

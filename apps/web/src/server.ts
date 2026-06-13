@@ -24,6 +24,8 @@ import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { extname, normalize, resolve } from 'node:path';
+import type { BackupSchedulePolicy } from '@shm/schemas';
+import { validateSchedulePolicy } from '@shm/backup';
 import type { OperatorStore } from '@shm/auth';
 import {
   authenticateLocal,
@@ -387,6 +389,39 @@ export function createManagerServer(options: ManagerServerOptions): ManagerServe
     }
     if (rest === '/backups' && ctx.method === 'GET') {
       sendJson(res, 200, { backups: await im.instances.backups(instanceId) });
+      return true;
+    }
+    if (rest === '/backup-schedule' && ctx.method === 'GET') {
+      sendJson(res, 200, await im.instances.backupSchedule(instanceId));
+      return true;
+    }
+    if (rest === '/backup-schedule' && ctx.method === 'PUT') {
+      // Server-authoritative validation: the client must send a complete,
+      // well-formed policy; anything else is rejected with the exact problems.
+      const raw = (ctx.body ?? {}) as Partial<BackupSchedulePolicy>;
+      const policy: BackupSchedulePolicy = {
+        enabled: raw.enabled as boolean,
+        time: raw.time as string,
+        retention: {
+          daily: raw.retention?.daily as number,
+          weekly: raw.retention?.weekly as number,
+          monthly: raw.retention?.monthly as number,
+          maxAgeDays: raw.retention?.maxAgeDays as number,
+        },
+      };
+      const problems = validateSchedulePolicy(policy);
+      if (problems.length > 0) throw new HttpError(400, problems.join(' '));
+      sendJson(res, 200, await im.instances.setBackupSchedule(instanceId, policy));
+      return true;
+    }
+    if (rest === '/backup-prune' && ctx.method === 'POST') {
+      const body = (ctx.body ?? {}) as { dryRun?: boolean };
+      if (body.dryRun === true) {
+        // Read-only preview: plan without deleting anything.
+        sendJson(res, 200, await im.instances.backupPrunePlan(instanceId));
+        return true;
+      }
+      await start('instance_backup_prune', instanceId, (opCtx) => im.instances.backupPrune(instanceId, opCtx));
       return true;
     }
     if (rest === '/health' && ctx.method === 'POST') {

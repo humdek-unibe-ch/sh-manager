@@ -65,6 +65,12 @@ function fakeInstances(b: FakeBehaviour): ManagerInstanceActions {
       await ctx.log(`drained ${id}`);
       return { processed: 1, outcomes: [`Operation op_1 finished: succeeded.`] };
     },
+    backupSchedule: unsupported,
+    setBackupSchedule: unsupported,
+    backupPrunePlan: unsupported,
+    backupPrune: unsupported,
+    hasDueScheduledBackup: async () => false,
+    runScheduledBackup: unsupported,
   };
 }
 
