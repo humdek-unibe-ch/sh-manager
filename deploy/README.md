@@ -1,10 +1,10 @@
-# Deploy: manager update-operations trigger
+# Deploy: manager update-operations + scheduled-backups triggers
 
 Audience: Operators / release engineers
 Status: Active
-Applies to: `sh-manager` (manager tool `0.1.6+`)
+Applies to: `sh-manager` (manager tool `0.1.6+`; scheduled backups `1.4.0+`)
 Last verified: 2026-06-12
-Source of truth: `apps/cli/src/bin.ts` (`instance process-operations`), `packages/core/src/operations.ts`
+Source of truth: `apps/cli/src/bin.ts` (`instance process-operations`, `server run-scheduled-backups`), `packages/core/src/operations.ts`, `packages/backup/src/schedule.ts`
 
 The CMS only ever **records** an instance-scoped update request; the manager is
 the only component that touches Docker. Something has to run the manager's
@@ -74,6 +74,38 @@ sudo crontab -u sh-manager deploy/cron/sh-manager-operations.crontab.example
 
 The example sources the same optional `0600` env file as Option A so a token
 (HTTP transport only) never appears in the crontab or the process list.
+
+## Scheduled backups (headless servers)
+
+Instances opt in to nightly backups with GFS retention via
+`sh-manager instance backup-schedule <id> --enable --time 02:00 ...` or the web
+UI. **Something must tick the due-check**: the persistent web UI does it with a
+built-in scheduler loop; on headless servers wire ONE of the following (never
+both, and never alongside a resident web UI for the same root):
+
+### systemd timer (recommended)
+
+```bash
+sudo cp deploy/systemd/sh-manager-scheduled-backups.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now sh-manager-scheduled-backups.timer
+systemctl list-timers sh-manager-scheduled-backups.timer
+journalctl -u sh-manager-scheduled-backups.service -f
+```
+
+### cron
+
+```bash
+sudo install -d -m 0750 /var/log/sh-manager
+crontab -u sh-manager deploy/cron/sh-manager-scheduled-backups.crontab.example
+```
+
+Both run `sh-manager server run-scheduled-backups` (one shot, all instances):
+each tick takes the backups whose per-instance run time has passed, prunes old
+scheduled backups per the retention policy, and exits non-zero if any instance
+failed. Ticks where nothing is due are cheap no-ops, and catch-up after
+downtime is bounded to one run per instance — so a 15-minute cadence is safe.
+Details: `docs/operator/scheduled-backups.md`.
 
 ## Security notes
 

@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: 2026 Humdek, University of Bern
+# SPDX-License-Identifier: MPL-2.0
+#
+# Timer for sh-manager-scheduled-backups.service. Fires every 15 minutes; the
+# manager's own due-check decides which instances actually get a backup (each
+# instance configures its own HH:MM run time + retention via
+# `sh-manager instance backup-schedule <id> ...` or the web UI), so frequent
+# ticks are cheap no-ops. Persistent=true catches up after a reboot or
+# downtime with at most ONE run per instance — never a storm.
+#
+#   sudo cp deploy/systemd/sh-manager-scheduled-backups.{service,timer} /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now sh-manager-scheduled-backups.timer
+
+[Unit]
+Description=Run SelfHelp Manager scheduled backups every 15 minutes
+
+[Timer]
+OnCalendar=*:0/15
+Persistent=true
+# Spread load a little when many timers share the host.
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

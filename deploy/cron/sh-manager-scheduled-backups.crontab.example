@@ -1,0 +1,21 @@
+# SPDX-FileCopyrightText: 2026 Humdek, University of Bern
+# SPDX-License-Identifier: MPL-2.0
+#
+# Cron alternative to the sh-manager-scheduled-backups systemd timer for hosts
+# without systemd. Only needed on HEADLESS servers: when the persistent web UI
+# is running, its built-in scheduler loop already takes due backups — do not
+# run both for the same manager root.
+#
+# One line covers ALL instances: `server run-scheduled-backups` walks every
+# instance, takes the backups whose per-instance `backupSchedule` window has
+# passed (catch-up after downtime: at most one run per instance), prunes old
+# scheduled backups by the GFS retention policy, then exits. Ticking every
+# 15 minutes is cheap — instances whose run time has not passed are skipped.
+#
+# Install for the manager service account:
+#   crontab -u sh-manager deploy/cron/sh-manager-scheduled-backups.crontab.example
+
+SHELL=/bin/bash
+SELFHELP_MANAGER_ROOT=/var/lib/sh-manager
+
+*/15 * * * * /usr/bin/sh-manager --root "$SELFHELP_MANAGER_ROOT" server run-scheduled-backups >> /var/log/sh-manager/scheduled-backups.log 2>&1

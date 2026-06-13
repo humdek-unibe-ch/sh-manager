@@ -1,0 +1,36 @@
+# SPDX-FileCopyrightText: 2026 Humdek, University of Bern
+# SPDX-License-Identifier: MPL-2.0
+#
+# One-shot scheduled-backup run for ALL instances on this server (paired with
+# sh-manager-scheduled-backups.timer). Only needed on HEADLESS servers: when
+# the persistent web UI is running, its built-in scheduler loop already takes
+# due backups and prunes by retention, and this unit must NOT be enabled
+# alongside it (the due-check makes a double run a no-op, but one trigger is
+# the supported setup).
+#
+# `sh-manager server run-scheduled-backups` walks every instance, takes the
+# backups whose `backupSchedule` window has passed (catch-up: at most one run
+# per missed window), prunes old scheduled backups by the per-instance GFS
+# retention policy, and exits non-zero if any instance failed.
+
+[Unit]
+Description=SelfHelp Manager scheduled backups (all instances, one-shot)
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+# Manager state root (inventory + per-instance manifests/backups).
+Environment=SELFHELP_MANAGER_ROOT=/var/lib/sh-manager
+ExecStart=/usr/bin/sh-manager --root ${SELFHELP_MANAGER_ROOT} server run-scheduled-backups
+# Backups of large instances can take a while; do not let systemd kill a dump.
+TimeoutStartSec=4h
+# Hardening: needs the manager root + Docker socket only.
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
