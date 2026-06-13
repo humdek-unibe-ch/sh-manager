@@ -60,6 +60,9 @@ A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instanc
   `instance backup` on the same day silently reused sequence `001` and
   clobbered the first backup's directory; the next free sequence is now
   picked automatically (`--seq` still wins for explicit control).
+- **Operation journal records are written atomically** (temp file + rename),
+  so a console poll that lands while an operation is completing can no longer
+  read a half-written file and momentarily report the operation as missing.
 
 ## [1.3.0] - 2026-06-12
 

@@ -19,7 +19,7 @@
  * bundle, so every log line / result / error passes through `@shm/support`
  * redaction before touching disk.
  */
-import { mkdir, readdir, readFile, rm, writeFile, appendFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rename, rm, writeFile, appendFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { redactObject, redactString } from '@shm/support';
@@ -93,6 +93,18 @@ export class OperationJournal {
     return path.join(this.dir, `${id}.json`);
   }
 
+  /**
+   * Atomic write (temp file + rename) so a concurrent reader — the GUI polling
+   * `get()`/`list()` while an operation completes — never observes a truncated,
+   * half-written record. A plain `writeFile` truncates first, and a poll that
+   * lands in that window parses an empty file and 404s the operation.
+   */
+  private async writeRecordAtomic(file: string, data: string): Promise<void> {
+    const tmp = `${file}.${randomBytes(6).toString('hex')}.tmp`;
+    await writeFile(tmp, data, 'utf8');
+    await rename(tmp, file);
+  }
+
   private chain(id: string, work: () => Promise<void>): Promise<void> {
     const prev = this.chains.get(id) ?? Promise.resolve();
     const next = prev.then(work, work);
@@ -116,7 +128,7 @@ export class OperationJournal {
       result: null,
       error: null,
     };
-    await writeFile(this.file(record.id), JSON.stringify(record, null, 2), 'utf8');
+    await this.writeRecordAtomic(this.file(record.id), JSON.stringify(record, null, 2));
     return record;
   }
 
@@ -125,7 +137,7 @@ export class OperationJournal {
       const raw = await readFile(this.file(id), 'utf8');
       const record = JSON.parse(raw) as OperationRecord;
       fn(record);
-      await writeFile(this.file(id), JSON.stringify(record, null, 2), 'utf8');
+      await this.writeRecordAtomic(this.file(id), JSON.stringify(record, null, 2));
     });
   }
 
