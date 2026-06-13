@@ -14,9 +14,11 @@ import {
   generateInstanceSecrets,
   instanceSecretFiles,
   readInstanceSecrets,
+  redactMailerDsn,
   renderSecretsEnv,
   secretEnvMap,
   secretsForRestore,
+  withMailerDsn,
   writeInstanceSecrets,
   type InstanceSecrets,
   type SecretIO,
@@ -231,5 +233,54 @@ describe('secretEnvMap', () => {
     const env = secretEnvMap(secrets);
     expect(env.SELFHELP_MANAGER_TOKEN).toBe(secrets.managerToken);
     expect(secrets.managerToken.length).toBeGreaterThan(0);
+  });
+});
+
+describe('mailer DSN override (operator SMTP)', () => {
+  const DSN = 'smtp://mailuser:s3cret-pw@mail.example.org:587';
+
+  it('is never part of a generated secret set (opt-in only)', () => {
+    expect(generateInstanceSecrets(opts).mailerDsn).toBeUndefined();
+  });
+
+  it('withMailerDsn sets, keeps and clears the override (empty string = back to Mailpit)', () => {
+    const base = generateInstanceSecrets(opts);
+    const set = withMailerDsn(base, DSN);
+    expect(set.mailerDsn).toBe(DSN);
+    // undefined leaves whatever is configured untouched.
+    expect(withMailerDsn(set, undefined).mailerDsn).toBe(DSN);
+    // empty string REMOVES the key entirely, so secrets.env carries no
+    // MAILER_DSN line and the non-secret Mailpit default applies again.
+    const cleared = withMailerDsn(set, '');
+    expect('mailerDsn' in cleared).toBe(false);
+    expect(secretEnvMap(cleared)).not.toHaveProperty('MAILER_DSN');
+  });
+
+  it('lands in the 0600 secrets.env (it may carry SMTP credentials), overriding Mailpit', () => {
+    const secrets = withMailerDsn(generateInstanceSecrets(opts), DSN);
+    expect(secretEnvMap(secrets).MAILER_DSN).toBe(DSN);
+    const envFile = instanceSecretFiles(secrets).find((f) => f.relPath === 'secrets.env');
+    expect(envFile?.mode).toBe(SECRET_FILE_MODE);
+    expect(envFile?.contents).toContain(`MAILER_DSN=${DSN}`);
+  });
+
+  it('survives the write -> read round-trip (preserved across retries/updates)', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'shm-mailer-'));
+    try {
+      const secretsDir = path.join(dir, 'secrets');
+      await writeInstanceSecrets(secretsDir, withMailerDsn(generateInstanceSecrets(opts), DSN));
+      const read = await readInstanceSecrets(secretsDir);
+      expect(read?.mailerDsn).toBe(DSN);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('redactMailerDsn masks credentials but keeps scheme/host/port for display', () => {
+    expect(redactMailerDsn(DSN)).toBe('smtp://***@mail.example.org:587');
+    expect(redactMailerDsn(DSN)).not.toContain('s3cret-pw');
+    expect(redactMailerDsn(DSN)).not.toContain('mailuser');
+    // A DSN without userinfo has nothing to hide.
+    expect(redactMailerDsn('smtp://mail.example.org:587')).toBe('smtp://mail.example.org:587');
   });
 });

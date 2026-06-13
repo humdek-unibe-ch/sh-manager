@@ -87,3 +87,36 @@ describe('BFF URL invariant', () => {
     expect(dotenv).toContain("CORS_ALLOW_ORIGIN='^https?://(localhost|127\\.0\\.0\\.1)(:[0-9]+)?$'");
   });
 });
+
+describe('plugin trust env (verification chain, security)', () => {
+  const trusted = 'shm-release-1=BASE64PUBKEYAAAA;shm-release-2=BASE64PUBKEYBBBB';
+  const registry = 'https://humdek-unibe-ch.github.io/sh2-plugin-registry/';
+
+  it('hands the backend exactly the trusted plugin-signing keys and the install registry', () => {
+    const env = buildInstanceEnv({ ...input, pluginTrustedKeys: trusted, registryUrl: registry });
+    // Exactly the manager's active trusted keys — never more, never rewritten.
+    expect(env.SELFHELP_PLUGIN_TRUSTED_KEYS).toBe(trusted);
+    // The CMS lists plugins from the SAME registry the manager installs from.
+    expect(env.SELFHELP_PLUGIN_DEFAULT_REGISTRY_URL).toBe(registry);
+  });
+
+  it('always requires plugin signatures — strictness is hardcoded, not configurable', () => {
+    // With and without keys, the generated env NEVER weakens verification.
+    expect(buildInstanceEnv(input).SELFHELP_PLUGIN_REQUIRE_SIGNATURE).toBe('true');
+    expect(
+      buildInstanceEnv({ ...input, pluginTrustedKeys: trusted, registryUrl: registry })
+        .SELFHELP_PLUGIN_REQUIRE_SIGNATURE,
+    ).toBe('true');
+  });
+
+  it('failure path: no trusted keys -> no key var at all (backend trusts NOTHING, not anything)', () => {
+    // An empty SELFHELP_PLUGIN_TRUSTED_KEYS= line must never be emitted: with
+    // signatures required and no keys, the backend's verifier rejects every
+    // plugin — fail closed. The variable is simply absent.
+    const env = buildInstanceEnv(input);
+    expect(env).not.toHaveProperty('SELFHELP_PLUGIN_TRUSTED_KEYS');
+    const dotenv = renderDotEnv(env);
+    expect(dotenv).not.toContain('SELFHELP_PLUGIN_TRUSTED_KEYS');
+    expect(dotenv).toContain('SELFHELP_PLUGIN_REQUIRE_SIGNATURE=true');
+  });
+});
