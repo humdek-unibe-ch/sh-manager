@@ -6,9 +6,11 @@
  * production BFF enforces — so component/flow tests can never pass a request
  * the server would reject.
  */
+import { validateSchedulePolicy } from '@shm/backup';
 import { validateAddressChange, validateCloneInstance, validateCreateInstance } from '../../instance-validation';
 import { ApiError, type ApiClient, type InstanceHealthReport } from '../lib/api-client';
 import type {
+  BackupScheduleStatus,
   BackupSummary,
   CheckResult,
   InstanceDetail,
@@ -16,6 +18,7 @@ import type {
   MailerStatus,
   OperationRecord,
   PreflightResult,
+  PruneExecutionReport,
   ServerStatus,
   Snapshot,
 } from '../lib/types';
@@ -43,6 +46,10 @@ export interface FakeClientOptions {
   preflight?: Partial<Record<'docker' | 'internet' | 'registry' | 'resources', CheckResult>>;
   /** Mailer status per instance id (default: not configured). */
   mailers?: Record<string, MailerStatus>;
+  /** Backup schedule status per instance id (default: nothing configured). */
+  backupSchedules?: Record<string, BackupScheduleStatus>;
+  /** Retention preview served by previewBackupPrune (default: keep everything). */
+  prunePreview?: PruneExecutionReport;
 }
 
 export function fakeInstance(overrides: Partial<InstanceSummary> = {}): InstanceSummary {
@@ -64,6 +71,7 @@ export function fakeBackup(overrides: Partial<BackupSummary> = {}): BackupSummar
   return {
     backupId: 'bk-20260601-1000',
     createdAt: '2026-06-01T10:00:00.000Z',
+    origin: 'manual',
     selfhelpVersion: '0.1.0',
     migrationVersion: 'Version20260501000400',
     includedAreas: ['db', 'uploads', 'config'],
@@ -86,6 +94,21 @@ export function fakeOperation(overrides: Partial<OperationRecord> = {}): Operati
     log: ['Backup bk-20260601-1000 written.'],
     result: { backupId: 'bk-20260601-1000' },
     error: null,
+    ...overrides,
+  };
+}
+
+export function fakeScheduleStatus(overrides: Partial<BackupScheduleStatus> = {}): BackupScheduleStatus {
+  return {
+    instanceId: 'clinic-a',
+    policy: { enabled: true, time: '02:00', retention: { daily: 7, weekly: 5, monthly: 12, maxAgeDays: 365 } },
+    lastRunAt: '2026-06-01T02:00:05.000Z',
+    lastResult: 'succeeded',
+    lastBackupId: 'backup-20260601-clinic-a-001',
+    lastDetail: null,
+    nextRunAt: '2026-06-02T02:00:00.000Z',
+    backups: { count: 3, totalBytes: 37_748_736 },
+    footprint: { slots: 24, averageBackupBytes: 12_582_912, steadyStateBytes: 301_989_888, requiredFreeBytes: 25_165_824 },
     ...overrides,
   };
 }
@@ -118,6 +141,7 @@ export function makeFakeClient(opts: FakeClientOptions = {}): ApiClient {
   const backups: Record<string, BackupSummary[]> = opts.backups ?? { 'clinic-a': [fakeBackup()] };
   const operations: OperationRecord[] = [...(opts.operations ?? [])];
   const mailers: Record<string, MailerStatus> = { ...(opts.mailers ?? {}) };
+  const schedules: Record<string, BackupScheduleStatus> = { ...(opts.backupSchedules ?? {}) };
   let opCounter = operations.length;
   let operatorsConfigured = opts.operatorsConfigured ?? true;
   let signedIn = false;
@@ -213,6 +237,59 @@ export function makeFakeClient(opts: FakeClientOptions = {}): ApiClient {
     },
     async listBackups(instanceId) {
       return backups[instanceId] ?? [];
+    },
+    async getBackupSchedule(instanceId) {
+      if (!instances.some((i) => i.instanceId === instanceId)) {
+        throw new ApiError(404, `Instance "${instanceId}" not found.`);
+      }
+      return (
+        schedules[instanceId] ??
+        fakeScheduleStatus({
+          instanceId,
+          policy: null,
+          lastRunAt: null,
+          lastResult: null,
+          lastBackupId: null,
+          nextRunAt: null,
+          backups: { count: (backups[instanceId] ?? []).length, totalBytes: 0 },
+          footprint: { slots: 24, averageBackupBytes: 0, steadyStateBytes: 0, requiredFreeBytes: 0 },
+        })
+      );
+    },
+    async setBackupSchedule(instanceId, policy) {
+      if (opts.failMutations) throw opts.failMutations;
+      // Same validation the BFF route runs (@shm/backup validateSchedulePolicy).
+      const problems = validateSchedulePolicy(policy);
+      if (problems.length > 0) throw new ApiError(400, problems.join(' '));
+      const status = fakeScheduleStatus({
+        instanceId,
+        policy,
+        nextRunAt: policy.enabled ? '2026-06-02T02:00:00.000Z' : null,
+      });
+      schedules[instanceId] = status;
+      return status;
+    },
+    async previewBackupPrune(instanceId) {
+      return (
+        opts.prunePreview ?? {
+          plan: {
+            keep: (backups[instanceId] ?? []).map((b) => ({
+              backupId: b.backupId,
+              origin: b.origin,
+              createdAt: b.createdAt,
+              action: 'keep' as const,
+              reasons: ['manual' as const],
+            })),
+            prune: [],
+          },
+          deleted: [],
+          skipped: [],
+          dryRun: true,
+        }
+      );
+    },
+    async pruneBackups(instanceId) {
+      return startFakeOperation('instance_backup_prune', instanceId);
     },
     async runInstanceHealth(instanceId): Promise<InstanceHealthReport> {
       return {

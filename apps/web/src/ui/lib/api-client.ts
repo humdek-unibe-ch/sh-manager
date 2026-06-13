@@ -12,6 +12,8 @@
  * - `fetch` is injectable so the client is unit-testable without a network.
  */
 import type {
+  BackupSchedulePolicy,
+  BackupScheduleStatus,
   BackupSummary,
   CloneInstanceRequest,
   CreateInstanceRequest,
@@ -22,6 +24,7 @@ import type {
   ManagerUpdateCheck,
   OperationRecord,
   PreflightResult,
+  PruneExecutionReport,
   RegistryVersions,
   RemoveInstanceRequest,
   ServerStatus,
@@ -89,6 +92,14 @@ export interface ApiClient {
   listInstances(): Promise<InstanceSummary[]>;
   getInstance(instanceId: string): Promise<InstanceDetail>;
   listBackups(instanceId: string): Promise<BackupSummary[]>;
+  /** Schedule policy + run state + footprint estimate. */
+  getBackupSchedule(instanceId: string): Promise<BackupScheduleStatus>;
+  /** Persist the (complete) schedule policy; the server validates it. */
+  setBackupSchedule(instanceId: string, policy: BackupSchedulePolicy): Promise<BackupScheduleStatus>;
+  /** Read-only retention preview: what would be kept/deleted, deletes nothing. */
+  previewBackupPrune(instanceId: string): Promise<PruneExecutionReport>;
+  /** Apply the retention policy now (journaled operation). */
+  pruneBackups(instanceId: string): Promise<StartedOperation>;
   runInstanceHealth(instanceId: string): Promise<InstanceHealthReport>;
   getMailer(instanceId: string): Promise<MailerStatus>;
   updateDryRun(instanceId: string, req: UpdateInstanceRequest): Promise<{ plan: unknown }>;
@@ -120,7 +131,7 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
   const doFetch: FetchLike = options.fetchImpl ?? ((input, init) => fetch(input, init));
   let csrfToken: string | null = null;
 
-  async function request<T>(path: string, method: 'GET' | 'POST', body?: unknown): Promise<T> {
+  async function request<T>(path: string, method: 'GET' | 'POST' | 'PUT', body?: unknown): Promise<T> {
     const headers: Record<string, string> = {};
     if (body !== undefined) headers['content-type'] = 'application/json';
     if (csrfToken && method !== 'GET') headers['x-shm-csrf'] = csrfToken;
@@ -191,6 +202,14 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     listBackups: async (instanceId) =>
       (await request<{ backups: BackupSummary[] }>(`/api/instances/${encodeURIComponent(instanceId)}/backups`, 'GET'))
         .backups,
+    getBackupSchedule: (instanceId) =>
+      request<BackupScheduleStatus>(`/api/instances/${encodeURIComponent(instanceId)}/backup-schedule`, 'GET'),
+    setBackupSchedule: (instanceId, policy) =>
+      request<BackupScheduleStatus>(`/api/instances/${encodeURIComponent(instanceId)}/backup-schedule`, 'PUT', policy),
+    previewBackupPrune: (instanceId) =>
+      request<PruneExecutionReport>(`/api/instances/${encodeURIComponent(instanceId)}/backup-prune`, 'POST', { dryRun: true }),
+    pruneBackups: (instanceId) =>
+      request<StartedOperation>(`/api/instances/${encodeURIComponent(instanceId)}/backup-prune`, 'POST', {}),
     runInstanceHealth: (instanceId) =>
       request<InstanceHealthReport>(`/api/instances/${encodeURIComponent(instanceId)}/health`, 'POST'),
     getMailer: (instanceId) => request<MailerStatus>(`/api/instances/${encodeURIComponent(instanceId)}/mailer`, 'GET'),

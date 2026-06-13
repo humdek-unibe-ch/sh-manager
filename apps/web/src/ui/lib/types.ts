@@ -6,14 +6,16 @@
  * is a single source of truth — the UI never redefines validation or wire
  * contracts.
  */
-import type { InstanceMode, ReleaseChannel } from '@shm/schemas';
+import type { BackupOrigin, BackupRetentionPolicy, BackupSchedulePolicy, InstanceMode, ReleaseChannel } from '@shm/schemas';
 import type { CheckResult, CheckSeverity, ManagerUpdateCheck, RegistryVersions } from '../../actions';
 import type {
+  BackupScheduleStatus,
   BackupSummary,
   CloneInstanceRequest,
   CreateInstanceRequest,
   InstanceDetail,
   InstanceSummary,
+  PruneExecutionReport,
   RemoveInstanceRequest,
   ServerStatus,
   SetAddressRequest,
@@ -23,6 +25,10 @@ import type {
 import type { OperationRecord, OperationStatus } from '../../jobs';
 
 export type {
+  BackupOrigin,
+  BackupRetentionPolicy,
+  BackupSchedulePolicy,
+  BackupScheduleStatus,
   BackupSummary,
   CheckResult,
   CheckSeverity,
@@ -30,6 +36,7 @@ export type {
   CreateInstanceRequest,
   InstanceDetail,
   InstanceSummary,
+  PruneExecutionReport,
   RemoveInstanceRequest,
   ServerStatus,
   SetAddressRequest,
