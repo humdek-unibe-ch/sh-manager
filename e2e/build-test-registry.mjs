@@ -114,6 +114,29 @@ export function ref(svc, version) {
   return { id: `selfhelp-${svc}-${version}`, version, channel: 'test', releaseUrl: `releases/${svc}/selfhelp-${svc}-${version}.json` };
 }
 
+/** Identity of the dev-signed placeholder plugin published on the test channel. */
+export const TEST_PLUGIN = { id: 'qa-e2e-noop', version: '0.1.0' };
+
+/**
+ * Unsigned plugin-release document for the test plugin (same unified shape the
+ * production registry publishes and both the manager and the CMS verify).
+ */
+export function testPluginRelease(archiveSha256) {
+  return {
+    kind: 'selfhelp-plugin-release',
+    id: TEST_PLUGIN.id,
+    version: TEST_PLUGIN.version,
+    channel: 'test',
+    official: true,
+    compatibility: { core: COMPAT_RANGE, pluginApi: '0.1.0' },
+    artifacts: {
+      manifestUrl: `releases/plugins/${TEST_PLUGIN.id}-${TEST_PLUGIN.version}.manifest.json`,
+      archiveUrl: `releases/plugins/${TEST_PLUGIN.id}-${TEST_PLUGIN.version}.shplugin`,
+      sha256: archiveSha256,
+    },
+  };
+}
+
 function writeJson(file, obj) {
   mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(file, JSON.stringify(obj, null, 2) + '\n', 'utf8');
@@ -148,6 +171,33 @@ export function buildTestRegistry(opts) {
     writeJson(path.join(outDir, 'releases', 'worker', `selfhelp-worker-${v}.json`), { ...worker, security: sign(worker) });
   }
 
+  // One minimal dev-signed TEST plugin release so `plugins` mirrors the real
+  // registry shape (CMS catalogue / manager resolver surfaces see a non-empty
+  // list whose signature verifies against the SAME e2e key). The archive is a
+  // small placeholder with a correct sha256 — release-level verification is
+  // what this exercises; the full install pipeline stays covered by the
+  // backend's own suite + the manager's plugin-state unit tests.
+  const pluginId = TEST_PLUGIN.id;
+  const pluginVersion = TEST_PLUGIN.version;
+  writeJson(path.join(outDir, 'releases', 'plugins', `${pluginId}-${pluginVersion}.manifest.json`), {
+    id: pluginId,
+    name: 'QA E2E No-op Plugin',
+    description: 'Placeholder plugin for manager e2e registry verification. Never installable.',
+    version: pluginVersion,
+    pluginApiVersion: '0.1.0',
+    license: 'MPL-2.0',
+    compatibility: { selfhelp: COMPAT_RANGE, php: '^8.4' },
+  });
+  const archiveBytes = Buffer.from(`qa-e2e-noop placeholder archive ${pluginVersion}\n`, 'utf8');
+  const pluginRelease = testPluginRelease(`sha256:${createHash('sha256').update(archiveBytes).digest('hex')}`);
+  const archiveAbs = path.join(outDir, pluginRelease.artifacts.archiveUrl);
+  mkdirSync(path.dirname(archiveAbs), { recursive: true });
+  writeFileSync(archiveAbs, archiveBytes);
+  writeJson(path.join(outDir, 'releases', 'plugins', `${pluginId}-${pluginVersion}.json`), {
+    ...pluginRelease,
+    security: sign(pluginRelease),
+  });
+
   const registry = {
     schemaVersion: '1.0',
     requiresManager: '>=0.1.0 <2.0.0',
@@ -159,7 +209,9 @@ export function buildTestRegistry(opts) {
     frontend: versions.map((v) => ref('frontend', v)),
     scheduler: versions.map((v) => ref('scheduler', v)),
     worker: versions.map((v) => ref('worker', v)),
-    plugins: [],
+    plugins: [
+      { id: pluginId, version: pluginVersion, channel: 'test', releaseUrl: `releases/plugins/${pluginId}-${pluginVersion}.json` },
+    ],
   };
   writeJson(path.join(outDir, 'registry.json'), registry);
 
@@ -170,7 +222,7 @@ export function buildTestRegistry(opts) {
     keys: [{ keyId: E2E_KEY_ID, publicKey: Buffer.from(kp.publicKey).toString('base64'), algorithm: 'ed25519', status: 'active' }],
   });
 
-  return { dir: outDir, trustedKeysPath, base: baseVersion, next: nextVersion };
+  return { dir: outDir, trustedKeysPath, base: baseVersion, next: nextVersion, pluginId, pluginVersion };
 }
 
 function parseFlags(rest) {

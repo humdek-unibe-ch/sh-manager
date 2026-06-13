@@ -12,6 +12,7 @@ import path from 'node:path';
 import {
   validateCoreRelease,
   validateFrontendRelease,
+  validateRegistryIndex,
   validateSchedulerRelease,
   validateWorkerRelease,
 } from '@shm/schemas';
@@ -21,12 +22,15 @@ import { imageTags } from './build-images.mjs';
 import { serveRegistry } from './serve-registry.mjs';
 import {
   E2E_KEY_ID,
+  TEST_PLUGIN,
   canonicalStringify,
   coreRelease,
   devKeyPair,
   frontendRelease,
+  ref,
   serviceRelease,
   sign,
+  testPluginRelease,
 } from './build-test-registry.mjs';
 
 const FAKE_DIGEST = `sha256:${'a'.repeat(64)}`;
@@ -71,6 +75,61 @@ describe('e2e harness: test-registry release builders match the manager schemas'
 
     const worker = serviceRelease('selfhelp-worker-release', 'worker', '0.1.0', tags.worker, FAKE_DIGEST);
     expect(validateWorkerRelease({ ...worker, security: sign(worker) }).valid).toBe(true);
+  });
+
+  it('publishes a non-empty plugins catalogue whose index entry passes the manager registry schema', () => {
+    const index = {
+      schemaVersion: '1.0',
+      requiresManager: '>=0.1.0 <2.0.0',
+      publishedAt: '2026-06-09T00:00:00Z',
+      baseUrl: 'http://127.0.0.1/',
+      publisher: { name: 'selfhelp-e2e', url: 'http://127.0.0.1' },
+      trustedKeysUrl: 'keys/trusted-keys.json',
+      core: [ref('core', '0.1.0')],
+      frontend: [ref('frontend', '0.1.0')],
+      scheduler: [ref('scheduler', '0.1.0')],
+      worker: [ref('worker', '0.1.0')],
+      plugins: [
+        {
+          id: TEST_PLUGIN.id,
+          version: TEST_PLUGIN.version,
+          channel: 'test',
+          releaseUrl: `releases/plugins/${TEST_PLUGIN.id}-${TEST_PLUGIN.version}.json`,
+        },
+      ],
+    };
+    const result = validateRegistryIndex(index);
+    expect(result.valid).toBe(true);
+    expect(result.value?.plugins?.[0]?.id).toBe(TEST_PLUGIN.id);
+  });
+
+  it('dev-signs the plugin release so the unified verification chain accepts it (and tampering breaks it)', () => {
+    const release = testPluginRelease(FAKE_DIGEST);
+    const security = sign(release);
+    const kp = devKeyPair();
+
+    const payload = canonicalStringify(release);
+    expect(security.signedPayloadSha256).toBe(
+      `sha256:${createHash('sha256').update(payload, 'utf8').digest('hex')}`,
+    );
+    expect(
+      nacl.sign.detached.verify(
+        new Uint8Array(Buffer.from(payload, 'utf8')),
+        new Uint8Array(Buffer.from(security.signature, 'base64')),
+        kp.publicKey,
+      ),
+    ).toBe(true);
+
+    // Security regression: any payload tamper (e.g. swapped archive hash) must
+    // fail verification under the same signature.
+    const tampered = canonicalStringify({ ...release, artifacts: { ...release.artifacts, sha256: `sha256:${'b'.repeat(64)}` } });
+    expect(
+      nacl.sign.detached.verify(
+        new Uint8Array(Buffer.from(tampered, 'utf8')),
+        new Uint8Array(Buffer.from(security.signature, 'base64')),
+        kp.publicKey,
+      ),
+    ).toBe(false);
   });
 });
 
