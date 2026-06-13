@@ -94,6 +94,30 @@ export interface InstalledPlugin {
   version: string;
 }
 
+/**
+ * GFS (grandfather-father-son) retention numbers for SCHEDULED backups.
+ * Safety backups (pre_update/pre_restore) are pruned only by `maxAgeDays`;
+ * manual backups are never auto-pruned.
+ */
+export interface BackupRetentionPolicy {
+  /** Keep all scheduled backups from the most recent N distinct days. */
+  daily: number;
+  /** Keep the newest backup of the most recent N distinct Mondays. */
+  weekly: number;
+  /** Keep the newest backup of the most recent N distinct 1st-of-month days. */
+  monthly: number;
+  /** Hard cap: prunable backups older than this are always deleted. */
+  maxAgeDays: number;
+}
+
+/** Per-instance nightly backup schedule (stored in the instance manifest). */
+export interface BackupSchedulePolicy {
+  enabled: boolean;
+  /** Daily run time as `HH:MM` in the manager server's local time. */
+  time: string;
+  retention: BackupRetentionPolicy;
+}
+
 export interface InstanceManifest {
   manifestVersion: number;
   instanceId: string;
@@ -113,6 +137,8 @@ export interface InstanceManifest {
   installedPlugins: InstalledPlugin[];
   /** Operator-facing resource configuration (best-effort estimate inputs). */
   resources?: InstanceResourceConfig;
+  /** Optional scheduled-backup policy; absent = no scheduled backups. */
+  backupSchedule?: BackupSchedulePolicy;
 }
 
 export interface InstanceResourceConfig {
@@ -422,12 +448,20 @@ export interface UpdatePreflightResult {
 // Backup manifest
 // ---------------------------------------------------------------------------
 
+/**
+ * Why a backup exists. Drives retention: scheduled backups are pruned by the
+ * GFS policy, safety backups (pre_update/pre_restore) only by max age, and
+ * manual backups are never auto-pruned. Absent on legacy manifests = manual.
+ */
+export type BackupOrigin = 'manual' | 'scheduled' | 'pre_update' | 'pre_restore';
+
 export interface BackupManifest {
   backupManifestVersion: number;
   backupId: string;
   instanceId: string;
   createdAt: string;
   mode: 'maintenance' | 'online';
+  origin?: BackupOrigin;
   selfhelpVersion: string;
   migrationVersion: string;
   plugins: InstalledPlugin[];

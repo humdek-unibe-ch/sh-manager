@@ -39,5 +39,15 @@
       "id": "survey-js",
       "version": "0.1.0"
     }
-  ]
+  ],
+  "backupSchedule": {
+    "enabled": true,
+    "time": "02:00",
+    "retention": {
+      "daily": 7,
+      "weekly": 5,
+      "monthly": 12,
+      "maxAgeDays": 365
+    }
+  }
 }

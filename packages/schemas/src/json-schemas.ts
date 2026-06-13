@@ -135,6 +135,25 @@ export const instanceManifestSchema: JsonSchema = {
         properties: { id: { type: 'string' }, version: semverField },
       },
     },
+    // Optional + additive: instances without a schedule stay valid.
+    backupSchedule: {
+      type: 'object',
+      required: ['enabled', 'time', 'retention'],
+      properties: {
+        enabled: { type: 'boolean' },
+        time: { type: 'string', pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$' },
+        retention: {
+          type: 'object',
+          required: ['daily', 'weekly', 'monthly', 'maxAgeDays'],
+          properties: {
+            daily: { type: 'integer', minimum: 1, maximum: 90 },
+            weekly: { type: 'integer', minimum: 0, maximum: 52 },
+            monthly: { type: 'integer', minimum: 0, maximum: 60 },
+            maxAgeDays: { type: 'integer', minimum: 7, maximum: 3650 },
+          },
+        },
+      },
+    },
   },
 };
 
@@ -487,6 +506,8 @@ export const backupManifestSchema: JsonSchema = {
     instanceId: { type: 'string', minLength: 1 },
     createdAt: { type: 'string' },
     mode: { enum: ['maintenance', 'online'] },
+    // Optional + additive: legacy manifests without an origin remain valid.
+    origin: { enum: ['manual', 'scheduled', 'pre_update', 'pre_restore'] },
     selfhelpVersion: semverField,
     migrationVersion: { type: 'string', minLength: 1 },
     plugins: { type: 'array' },

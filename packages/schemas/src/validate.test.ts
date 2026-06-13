@@ -1,14 +1,18 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
 import { describe, expect, it } from 'vitest';
+import { formatTrustedKeysEnv } from './types.js';
 import type {
+  BackupManifest,
   InstanceLock,
   InstanceManifest,
   RegistryIndex,
   SchedulerRelease,
+  TrustedKeysFile,
   WorkerRelease,
 } from './types.js';
 import {
+  validateBackupManifest,
   validateInstanceLock,
   validateInstanceManifest,
   validateRegistryIndex,
@@ -140,6 +144,31 @@ describe('validateInstanceManifest', () => {
     const r = validateInstanceManifest({ ...validManifest, futureField: 42 });
     expect(r.valid).toBe(true);
   });
+
+  it('accepts a manifest with a valid backupSchedule policy', () => {
+    const r = validateInstanceManifest({
+      ...validManifest,
+      backupSchedule: {
+        enabled: true,
+        time: '02:00',
+        retention: { daily: 7, weekly: 5, monthly: 12, maxAgeDays: 365 },
+      },
+    });
+    expect(r.valid).toBe(true);
+  });
+
+  it('rejects a backupSchedule with a malformed time or out-of-range retention', () => {
+    const badTime = validateInstanceManifest({
+      ...validManifest,
+      backupSchedule: { enabled: true, time: '24:00', retention: { daily: 7, weekly: 5, monthly: 12, maxAgeDays: 365 } },
+    });
+    expect(badTime.valid).toBe(false);
+    const badRetention = validateInstanceManifest({
+      ...validManifest,
+      backupSchedule: { enabled: true, time: '02:00', retention: { daily: 0, weekly: 5, monthly: 12, maxAgeDays: 365 } },
+    });
+    expect(badRetention.valid).toBe(false);
+  });
 });
 
 describe('validateInstanceLock', () => {
@@ -204,6 +233,62 @@ const validWorker: WorkerRelease = {
   image: 'ghcr.io/humdek-unibe-ch/selfhelp-worker:0.1.0',
   digest: 'sha256:2222222222222222222222222222222222222222222222222222222222222222',
 };
+
+const validBackup: BackupManifest = {
+  backupManifestVersion: 1,
+  backupId: 'backup-20260605-website1-001',
+  instanceId: 'website1',
+  createdAt: '2026-06-05T10:00:00Z',
+  mode: 'maintenance',
+  origin: 'scheduled',
+  selfhelpVersion: '0.1.0',
+  migrationVersion: 'Version20260605081254',
+  plugins: [],
+  includedAreas: ['database', 'uploads', 'plugin_artifacts', 'manifest', 'lock'],
+  files: [{ path: 'database.sql', sha256: `sha256:${'a'.repeat(64)}`, bytes: 10 }],
+};
+
+describe('validateBackupManifest', () => {
+  it('accepts a manifest with a backup origin', () => {
+    expect(validateBackupManifest(validBackup).valid).toBe(true);
+  });
+
+  it('accepts a legacy manifest without an origin (additive field)', () => {
+    const legacy = { ...validBackup } as Record<string, unknown>;
+    delete legacy.origin;
+    expect(validateBackupManifest(legacy).valid).toBe(true);
+  });
+
+  it('rejects an unknown origin value', () => {
+    expect(validateBackupManifest({ ...validBackup, origin: 'nightly' }).valid).toBe(false);
+  });
+});
+
+describe('formatTrustedKeysEnv (plugin verification chain, security)', () => {
+  const keys: TrustedKeysFile = {
+    schemaVersion: '1',
+    keys: [
+      { keyId: 'release-2026', publicKey: 'AAAA', algorithm: 'ed25519', status: 'active' },
+      { keyId: 'release-2024', publicKey: 'BBBB', algorithm: 'ed25519', status: 'revoked' },
+      { keyId: 'release-2027', publicKey: 'CCCC', algorithm: 'ed25519', status: 'active' },
+    ],
+  };
+
+  it('exports exactly the ACTIVE keys in keyId=publicKey;… form', () => {
+    expect(formatTrustedKeysEnv(keys)).toBe('release-2026=AAAA;release-2027=CCCC');
+  });
+
+  it('failure path: a revoked key is NEVER handed to an instance', () => {
+    expect(formatTrustedKeysEnv(keys)).not.toContain('BBBB');
+    // All keys revoked -> empty string -> the env builder omits the variable
+    // entirely and the backend (signatures required) trusts nothing.
+    const allRevoked: TrustedKeysFile = {
+      schemaVersion: '1',
+      keys: keys.keys.map((k) => ({ ...k, status: 'revoked' as const })),
+    };
+    expect(formatTrustedKeysEnv(allRevoked)).toBe('');
+  });
+});
 
 describe('validateSchedulerRelease / validateWorkerRelease', () => {
   it('accepts valid scheduler and worker releases', () => {
