@@ -8,13 +8,20 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `1.4.0`). Registry releases
+- **The manager tool** uses its own semver (currently `1.4.1`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
   **`0.x`** line (core, frontend, scheduler, worker — all `0.1.0`).
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
+
+## [1.4.1] - 2026-06-13
+
+### Fixed
+- **Operation journal records are written atomically** (temp file + rename),
+  so a console poll that lands while an operation is completing can no longer
+  read a half-written file and momentarily report the operation as missing.
 
 ## [1.4.0] - 2026-06-13
 
