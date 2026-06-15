@@ -8,13 +8,91 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `1.4.3`). Registry releases
+- **The manager tool** uses its own semver (currently `1.4.4`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
   **`0.x`** line (core, frontend, scheduler, worker — all `0.1.0`).
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
+
+## [1.4.4] - 2026-06-15
+
+### Added
+- **One combined Update dialog.** The separate "Update…" and "Update
+  frontend…" buttons on the instance detail page are now a single **Update…**
+  dialog with a mode switch: **SelfHelp core (+ matching frontend)** or
+  **Frontend only (keep core)**. Each mode explains what moves and what stays —
+  updating the core moves the frontend to a release the new core supports in the
+  *same* operation (the dry-run shows both exact versions before anything
+  changes), while frontend-only swaps just the stateless frontend container. The
+  core dry-run plan now also shows the compatible frontend version that ships
+  with the core update.
+- **Rename an instance.** A new **Rename…** dialog (and CLI
+  `instance rename <id> <displayName>` + `POST /api/instances/:id/name`) changes
+  an instance's friendly display name without touching the immutable technical
+  id, containers, volumes or routing — handy after a clone or a domain change.
+  No restart, no downtime: it only rewrites the manifest + README.
+- **Email dialog shows the current address.** The outbound-email dialog now
+  shows the address mail is currently sent through (credentials masked) and
+  documents how to point an instance at an institutional/relay SMTP that accepts
+  mail from the server's network **without a password** (e.g. a university
+  smarthost).
+- **Operations: refresh + completion notifications.** The operations list has a
+  manual **Refresh** button, and finishing any background operation now raises a
+  toast and invalidates the instance/backups/operations queries so the whole UI
+  reflects the new state immediately (no stale "watch operations" guesswork
+  after a plugin install).
+- **Cleaner environment-variable editor.** Newly added custom variables now
+  appear in a clear, pinned "added" section at the bottom of the Environment
+  dialog instead of being lost among the managed defaults.
+
+### Changed
+- **Frontend version picker loads frontend releases.** The frontend-update
+  version dropdown now lists registry **frontend** versions (it previously fed
+  from the core feed), so the offered targets match what the frontend channel
+  actually publishes.
+
+### Fixed
+- **Installing a plugin now makes it work immediately — no more "No route found
+  for `…/admin/plugins/<id>/…`" 404 after install.** The production backend
+  images bake an empty Symfony cache and warm it lazily on first boot, and the
+  managed-install drain finishes with `docker compose restart` (which keeps the
+  container's writable layer). So the kernel that came back up reused the
+  compiled DI container + dumped router matcher from **before** the plugin
+  existed: the plugin's Symfony bundle was never registered and its DB-synced
+  `api_routes` rows never entered the router — the admin API 404'd and the host
+  reported *"plugin could not be mounted"* even though the row, vendor and
+  bundles file were all present (seen with SurveyJS's `surveys` admin route).
+  The drain now recompiles each Symfony service's cache (`cache:clear`, with a
+  delete-and-lazy-rewarm fallback) **after** the bundles file is in place and
+  **before** the restart, across install/update/uninstall, post-core-update
+  reinstall, and snapshot restore. The SurveyJS plugin itself needed no change.
+- **Restoring a backup that had plugins no longer leaves a half-restored
+  instance.** A restore repopulates the database (plugins recorded as installed)
+  and the plugin volumes, but the freshly recreated Symfony containers started
+  **without** the composer-installed bundles — so the host reported *"plugin
+  could not be mounted / runtime import failed"* and the public plugin ESM
+  artifacts 404'd. The restore now re-extracts the composer-state snapshot from
+  the restored plugin volume into backend/worker/scheduler and restarts them
+  (exactly like an address/mailer/env recreate), so the plugin runtime and its
+  public artifacts are served again. `instanceRestore` reports the new
+  `pluginsRemounted` flag.
+
+### Removed
+- **Campus/OIDC (UniBE login) auth leftovers.** The unused OpenID-Connect /
+  campus-account sign-in scaffolding has been removed: operator authentication
+  is **local only** (email + password), and remote access is via an SSH tunnel
+  to the localhost-bound web UI as documented. The `admin allow-email` CLI
+  command and the OIDC email allow-list were dropped (old operator stores still
+  load — the obsolete `allowedEmails` field is ignored and dropped on next
+  save).
+
+### Security
+- **Outbound-email DSN never reveals stored credentials.** The Email dialog
+  redacts the configured mailer DSN (user/password masked) while still showing
+  the active sender, so a saved SMTP password is never echoed back to the
+  browser.
 
 ## [1.4.3] - 2026-06-15
 
