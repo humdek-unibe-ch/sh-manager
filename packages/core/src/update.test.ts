@@ -403,25 +403,42 @@ describe('executeFrontendUpdate', () => {
   const healthy: HealthReport = { instanceId: 'website1', overall: 'healthy', services: [], checkedAt: 'now' };
   const unhealthy: HealthReport = { instanceId: 'website1', overall: 'unhealthy', services: [], checkedAt: 'now' };
 
-  it('runs snapshot -> apply -> pull frontend -> up frontend -> health, recreating only the frontend', async () => {
+  it('runs snapshot -> apply -> pull frontend -> up -> restore plugins -> health', async () => {
     const runner = new RecordingComposeRunner();
     const order: string[] = [];
     const report = await executeFrontendUpdate(okPlan(), {
       runner, instanceDir: '/tmp/website1',
       snapshot: async () => { order.push('snapshot'); },
       applyArtifacts: async () => { order.push('apply'); },
+      restorePluginState: async () => { order.push('plugins'); },
       checkHealth: async () => { order.push('health'); return healthy; },
       rollback: async () => { order.push('rollback'); },
     });
     expect(report.ok).toBe(true);
     expect(report.rolledBack).toBe(false);
     expect(report.targetFrontendVersion).toBe('1.5.3');
-    expect(order).toEqual(['snapshot', 'apply', 'health']);
-    // Only the frontend service is pulled and recreated; never the whole stack.
+    // Plugins are re-mounted AFTER the recreate and BEFORE the health verdict.
+    expect(order).toEqual(['snapshot', 'apply', 'plugins', 'health']);
+    // Only the frontend image is pulled, but `up -d` recreates the app services
+    // too so the backend re-reads SELFHELP_FRONTEND_VERSION and the CMS reports
+    // the new frontend version instead of the stale one.
     expect(runner.calls.map((c) => c.args)).toEqual([
       ['pull', 'frontend'],
-      ['up', '-d', '--no-deps', 'frontend'],
+      ['up', '-d'],
     ]);
+  });
+
+  it('skips the plugin-restore step when no restorePluginState dep is provided', async () => {
+    const runner = new RecordingComposeRunner();
+    const report = await executeFrontendUpdate(okPlan(), {
+      runner, instanceDir: '/tmp/website1',
+      snapshot: async () => undefined,
+      applyArtifacts: async () => undefined,
+      checkHealth: async () => healthy,
+      rollback: async () => undefined,
+    });
+    expect(report.ok).toBe(true);
+    expect(report.steps.some((s) => s.name === 'plugins')).toBe(false);
   });
 
   it('aborts before any mutation when the snapshot fails', async () => {

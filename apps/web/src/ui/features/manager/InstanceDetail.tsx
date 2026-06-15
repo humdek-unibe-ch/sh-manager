@@ -20,15 +20,16 @@ import type { OperationRecord } from '../../lib/types';
 import { BackupManager } from './BackupManager';
 import { CloneInstanceDialog } from './CloneInstanceDialog';
 import { EnvDialog } from './EnvDialog';
+import { LogsDialog } from './LogsDialog';
 import { UpdateDialog } from './UpdateDialog';
 import { MailerDialog } from './MailerDialog';
 import { OperationLog, operationTone } from './OperationLog';
 import { RemoveInstanceDialog } from './RemoveInstanceDialog';
 import { RenameInstanceDialog } from './RenameInstanceDialog';
 import { SetAddressDialog } from './SetAddressDialog';
-import { instanceStatusTone } from './InstancesList';
+import { INSTANCES_KEY, instanceStatusTone } from './InstancesList';
 
-type DialogKind = 'update' | 'clone' | 'rename' | 'address' | 'mailer' | 'env' | 'remove' | null;
+type DialogKind = 'update' | 'clone' | 'rename' | 'address' | 'mailer' | 'env' | 'logs' | 'remove' | null;
 
 function healthTone(overall: InstanceHealthReport['overall']): 'ok' | 'warning' | 'error' | 'neutral' {
   switch (overall) {
@@ -78,7 +79,13 @@ export function InstanceDetail({ client, instanceId }: InstanceDetailProps): JSX
   });
 
   const refreshInstance = (): void => {
+    // Prefix-invalidate the detail AND every sub-query (operations/backups/
+    // schedule/mailer/env all share this prefix)…
     void queryClient.invalidateQueries({ queryKey: ['manager', 'instance', instanceId] });
+    // …and the left-hand instances list, whose display name / version / status
+    // this view changes (rename, update, address, remove) — otherwise the list
+    // stays stale until a full page reload.
+    void queryClient.invalidateQueries({ queryKey: INSTANCES_KEY });
   };
 
   const notifiedOpRef = useRef<string | null>(null);
@@ -88,6 +95,9 @@ export function InstanceDetail({ client, instanceId }: InstanceDetailProps): JSX
     if (notifiedOpRef.current === op.id) return;
     notifiedOpRef.current = op.id;
     void queryClient.invalidateQueries({ queryKey: ['manager', 'instance', instanceId] });
+    // Refresh the left-hand list too: a finished rename/update/address change is
+    // visible there (name, version, status), not just on this detail page.
+    void queryClient.invalidateQueries({ queryKey: INSTANCES_KEY });
     const label = op.kind.replace(/_/g, ' ');
     if (op.status === 'succeeded') {
       notifications.show({ color: 'teal', title: 'Operation finished', message: `${label} completed.` });
@@ -165,6 +175,10 @@ export function InstanceDetail({ client, instanceId }: InstanceDetailProps): JSX
           </Button>
           <Button variant="secondary" disabled={busy} onClick={() => setDialog('env')}>
             Environment…
+          </Button>
+          {/* Read-only — useful even while an operation runs, so never disabled. */}
+          <Button variant="secondary" onClick={() => setDialog('logs')}>
+            Logs…
           </Button>
           <Button variant="danger" disabled={busy} onClick={() => setDialog('remove')}>
             Remove…
@@ -350,6 +364,12 @@ export function InstanceDetail({ client, instanceId }: InstanceDetailProps): JSX
         opened={dialog === 'env'}
         onClose={() => setDialog(null)}
         onStarted={onStarted}
+      />
+      <LogsDialog
+        client={client}
+        instanceId={instanceId}
+        opened={dialog === 'logs'}
+        onClose={() => setDialog(null)}
       />
       <RemoveInstanceDialog
         client={client}

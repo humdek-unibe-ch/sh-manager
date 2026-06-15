@@ -60,6 +60,7 @@ function fakeInstances(b: FakeBehaviour): ManagerInstanceActions {
     serverStatus: unsupported,
     mailer: unsupported,
     envConfig: unsupported,
+    logs: unsupported,
     updateDryRun: unsupported,
     frontendUpdateDryRun: unsupported,
     create: unsupported,

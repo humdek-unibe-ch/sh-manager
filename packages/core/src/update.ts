@@ -580,9 +580,10 @@ function buildFrontendSteps(current: string, frontend: FrontendRelease): string[
     'snapshot the current compose/manifest/lock/.env (for rollback)',
     `write new manifest + lock + .env + compose (frontend ${current} -> ${frontend.version})`,
     `pull frontend image (${frontend.version})`,
-    `recreate only the frontend container (docker compose up -d --no-deps ${FRONTEND_UPDATE_SERVICE})`,
+    'recreate the frontend (new image) + refresh the app services so the CMS reports the new frontend version (docker compose up -d)',
+    're-mount any installed plugins lost to the container recreate (no-op when none are installed)',
     'run health checks',
-    'on failure: restore the previous config and recreate the previous frontend container',
+    'on failure: restore the previous config, recreate the previous containers, and re-mount plugins',
   ];
 }
 
@@ -597,6 +598,13 @@ export interface FrontendUpdateExecutionDeps {
   snapshot: () => Promise<void>;
   /** Rewrite the instance artifacts with the new frontend image + version. */
   applyArtifacts: () => Promise<void>;
+  /**
+   * Re-mount composer-installed plugins after the container recreate dropped
+   * their vendor/ from the writable layer. No-op when no plugins are installed.
+   * Runs after the `up` and before the health check so the verdict reflects the
+   * final (plugins re-mounted) state.
+   */
+  restorePluginState?: () => Promise<void>;
   checkHealth: () => Promise<HealthReport>;
   /** Restore the snapshot config and recreate the previous frontend container. */
   rollback: (reason: string) => Promise<void>;
@@ -651,8 +659,20 @@ export async function executeFrontendUpdate(
     await deps.runner.run(deps.instanceDir, composeCommands.pullService(FRONTEND_UPDATE_SERVICE));
     steps.push({ name: 'pull', status: 'done', detail: plan.targetFrontendVersion });
 
-    await deps.runner.run(deps.instanceDir, composeCommands.upService(FRONTEND_UPDATE_SERVICE));
+    // `up -d` recreates the frontend (new image) AND any app service whose env
+    // changed — notably the backend, which reads SELFHELP_FRONTEND_VERSION. A
+    // `--no-deps frontend` swap leaves the backend on the old version env, so
+    // the CMS system page keeps reporting the previous frontend version even
+    // though the container was swapped. Recreating refreshes that stamp.
+    await deps.runner.run(deps.instanceDir, composeCommands.upDetached());
     steps.push({ name: 'up', status: 'done', detail: FRONTEND_UPDATE_SERVICE });
+
+    // Recreating the Symfony containers drops composer-installed plugin vendor/
+    // from their writable layer; re-extract the snapshot before health-checking.
+    if (deps.restorePluginState) {
+      await deps.restorePluginState();
+      steps.push({ name: 'plugins', status: 'done' });
+    }
 
     const health = await deps.checkHealth();
     if (!isHealthy(health)) {

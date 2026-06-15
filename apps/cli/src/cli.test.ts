@@ -29,6 +29,7 @@ import {
   instanceHealth,
   instanceInstall,
   instanceList,
+  instanceLogs,
   instanceRemove,
   instanceRepair,
   instanceRestore,
@@ -978,6 +979,96 @@ describe('instance lifecycle (offline)', () => {
     const compose = await readFile(instancePaths('localtest-copy', root).composePath, 'utf8');
     expect(compose).toContain('127.0.0.1:9124:3000');
     expect(compose).not.toContain('127.0.0.1:9123:3000');
+  });
+
+  it('carries the source admin password (the "admin sector") into the clone', async () => {
+    // Regression: a clone copies the source DATABASE (admin user + hash come
+    // along) but generates its own fresh secrets, so it had NO admin_password
+    // file — leaving the operator unable to retrieve the (valid) cloned admin
+    // login. The source's plaintext password must be copied so
+    // `instance admin-password <clone>` keeps working.
+    const { d } = await lifecycleDeps();
+    await serverInit(d, { serverId: 's1', mode: 'local' });
+    await instanceInstall(d, {
+      instanceId: 'localtest',
+      displayName: 'Local Test',
+      mode: 'local',
+      localPort: 9123,
+      registryUrl: 'https://humdek-unibe-ch.github.io/sh2-plugin-registry/',
+      version: 'latest',
+    });
+
+    // The source has a persisted admin bootstrap password (as provisioning would write).
+    const sourceFile = path.join(instancePaths('localtest', root).secretsDir, 'admin_password');
+    await writeFile(sourceFile, 'source-admin-secret\n');
+
+    const res = await instanceClone(d, 'localtest', 'localtest-copy', { targetLocalPort: 9124, apply: true });
+    expect(res.executed).toBe(true);
+
+    const cloneFile = path.join(instancePaths('localtest-copy', root).secretsDir, 'admin_password');
+    expect((await readFile(cloneFile, 'utf8')).trim()).toBe('source-admin-secret');
+    // Reported among the clone's written secrets.
+    expect(res.secretsWritten?.some((p) => p.replace(/\\/g, '/').endsWith('secrets/admin_password'))).toBe(true);
+  });
+
+  it('does not write an admin_password to the clone when the source has none', async () => {
+    // Operator-supplied passwords are never persisted; the clone must not invent
+    // a file (there is nothing valid to retrieve).
+    const { d } = await lifecycleDeps();
+    await serverInit(d, { serverId: 's1', mode: 'local' });
+    await instanceInstall(d, {
+      instanceId: 'localtest',
+      displayName: 'Local Test',
+      mode: 'local',
+      localPort: 9123,
+      registryUrl: 'https://humdek-unibe-ch.github.io/sh2-plugin-registry/',
+      version: 'latest',
+    });
+
+    const res = await instanceClone(d, 'localtest', 'localtest-copy', { targetLocalPort: 9124, apply: true });
+    expect(res.executed).toBe(true);
+
+    const cloneFile = path.join(instancePaths('localtest-copy', root).secretsDir, 'admin_password');
+    await expect(readFile(cloneFile, 'utf8')).rejects.toThrow();
+  });
+
+  it('reads recent container logs for a service and redacts secrets', async () => {
+    const { d } = await lifecycleDeps();
+    await installWebsite1(d);
+
+    // Swap in a runner that returns a log line carrying a secret-looking value.
+    const logRunner = new RecordingComposeRunner((args) =>
+      args[0] === 'logs'
+        ? {
+            stdout:
+              'backend-1  | DATABASE_URL=mysql://app:supersecret@mysql:3306/db\nbackend-1  | [OK] ready\n',
+            stderr: '',
+          }
+        : { stdout: '', stderr: '' },
+    );
+    d.runner = logRunner;
+
+    const res = await instanceLogs(d, 'website1', { service: 'backend', tail: 50 });
+    expect(res.service).toBe('backend');
+    expect(res.tail).toBe(50);
+    // Targeted the right service with the requested tail.
+    expect(logRunner.calls[0]?.args).toEqual(['logs', '--no-color', '--tail=50', 'backend']);
+    // Secrets never leave the server: the embedded DB password is redacted.
+    expect(res.text).not.toContain('supersecret');
+    expect(res.text).toContain('[OK] ready');
+  });
+
+  it('rejects an unknown log service and clamps the tail to the allowed range', async () => {
+    const { d } = await lifecycleDeps();
+    await installWebsite1(d);
+
+    await expect(instanceLogs(d, 'website1', { service: 'bogus' as never })).rejects.toThrow(/Unknown service/);
+
+    const logRunner = new RecordingComposeRunner(() => ({ stdout: 'line\n', stderr: '' }));
+    d.runner = logRunner;
+    const res = await instanceLogs(d, 'website1', { service: 'frontend', tail: 99999 });
+    expect(res.tail).toBe(2000);
+    expect(logRunner.calls[0]?.args).toEqual(['logs', '--no-color', '--tail=2000', 'frontend']);
   });
 
   it('clone retries the database import when MySQL drops the first connection', async () => {

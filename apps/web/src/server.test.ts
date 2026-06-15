@@ -370,6 +370,15 @@ describe('instance management APIs', () => {
           ],
         };
       },
+      async logs(id, opts) {
+        return {
+          instanceId: id,
+          service: opts.service ?? 'backend',
+          tail: opts.tail ?? 200,
+          text: `[${opts.service ?? 'backend'}] sample log line\n`,
+          readAt: '2026-06-01T12:00:00.000Z',
+        };
+      },
       async updateDryRun() {
         return { status: 'update_available' };
       },
@@ -742,6 +751,26 @@ describe('instance management APIs', () => {
       expect(ok.status).toBe(202);
       const { operationId } = (await ok.json()) as { operationId: string };
       expect(await waitForOperation(base, cookie, operationId)).toBe('succeeded');
+    } finally {
+      await rm(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('reads instance logs for a service and rejects an unknown service', async () => {
+    const tmpRoot = await mkdtemp(path.join(tmpdir(), 'shm-mgmt-'));
+    try {
+      const { base, cookie } = await managementBase(tmpRoot);
+
+      const ok = await fetch(base + '/api/instances/clinic-a/logs?service=backend&tail=50', { headers: { cookie } });
+      expect(ok.status).toBe(200);
+      const body = (await ok.json()) as { service: string; tail: number; text: string };
+      expect(body.service).toBe('backend');
+      expect(body.tail).toBe(50);
+      expect(body.text).toContain('sample log line');
+
+      // An unknown service is rejected at the BFF (clean 400, never a 500).
+      const bad = await fetch(base + '/api/instances/clinic-a/logs?service=bogus', { headers: { cookie } });
+      expect(bad.status).toBe(400);
     } finally {
       await rm(tmpRoot, { recursive: true, force: true });
     }

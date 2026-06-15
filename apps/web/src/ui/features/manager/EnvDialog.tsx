@@ -15,9 +15,9 @@
  * containers (BFF job layer: 202 + journaled log). Secrets are never shown.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Badge, Code, Divider, Group, Modal, Paper, ScrollArea, Stack, Text } from '@mantine/core';
+import { Badge, Code, Divider, Group, Paper, Stack, Text } from '@mantine/core';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { Alert, Button, TextField } from '../../components';
+import { Alert, Button, Dialog, TextField } from '../../components';
 import { ApiError, type ApiClient } from '../../lib/api-client';
 import type { InstanceEnvEntry } from '../../lib/types';
 
@@ -152,8 +152,24 @@ export function EnvDialog({ client, instanceId, opened, onClose, onStarted }: En
 
   const hasErrors = errors.size > 0;
 
+  const footer = (
+    <Group justify="flex-end" gap="sm">
+      <Button variant="ghost" onClick={onClose}>
+        Cancel
+      </Button>
+      <Button
+        variant="primary"
+        disabled={hasErrors || config.isPending || config.isError}
+        loading={save.isPending}
+        onClick={() => save.mutate()}
+      >
+        Apply &amp; restart
+      </Button>
+    </Group>
+  );
+
   return (
-    <Modal opened={opened} onClose={onClose} title={`Environment of ${instanceId}`} size="xl" centered>
+    <Dialog opened={opened} onClose={onClose} title={`Environment of ${instanceId}`} size="xl" footer={footer}>
       <Stack gap="md">
         <Text size="sm" c="dimmed">
           Edit the instance's non-secret runtime configuration. Changes are saved as overrides that
@@ -173,48 +189,46 @@ export function EnvDialog({ client, instanceId, opened, onClose, onStarted }: En
               <Text size="xs" fw={600} c="dimmed" tt="uppercase">
                 Editable settings
               </Text>
-              <ScrollArea.Autosize mah={300} type="auto">
-                <Stack gap="sm" pr="sm">
-                  {builtinEditable.length === 0 ? (
-                    <Text size="sm" c="dimmed">
-                      This instance exposes no editable defaults.
-                    </Text>
-                  ) : (
-                    builtinEditable.map((row) => {
-                      const changed = row.value !== row.defaultValue;
-                      return (
-                        <Group key={row.id} align="flex-end" gap="sm" wrap="nowrap">
-                          <div style={{ minWidth: 240 }}>
-                            <Group gap={6} mb={2}>
-                              <Code>{row.key}</Code>
-                              {changed ? (
-                                <Badge size="xs" color="yellow" variant="light">
-                                  modified
-                                </Badge>
-                              ) : null}
-                            </Group>
-                          </div>
-                          <div style={{ flex: 1 }}>
-                            <TextField
-                              label=""
-                              value={row.value}
-                              onChange={(v) => update(row.id, { value: v })}
-                              {...(errors.get(row.id) ? { error: errors.get(row.id)! } : {})}
-                            />
-                          </div>
-                          <Button
-                            variant="ghost"
-                            disabled={!changed}
-                            onClick={() => update(row.id, { value: row.defaultValue ?? '' })}
-                          >
-                            Reset
-                          </Button>
-                        </Group>
-                      );
-                    })
-                  )}
-                </Stack>
-              </ScrollArea.Autosize>
+              <Stack gap="sm">
+                {builtinEditable.length === 0 ? (
+                  <Text size="sm" c="dimmed">
+                    This instance exposes no editable defaults.
+                  </Text>
+                ) : (
+                  builtinEditable.map((row) => {
+                    const changed = row.value !== row.defaultValue;
+                    return (
+                      <Group key={row.id} align="flex-end" gap="sm" wrap="nowrap">
+                        <div style={{ minWidth: 240 }}>
+                          <Group gap={6} mb={2}>
+                            <Code>{row.key}</Code>
+                            {changed ? (
+                              <Badge size="xs" color="yellow" variant="light">
+                                modified
+                              </Badge>
+                            ) : null}
+                          </Group>
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <TextField
+                            label=""
+                            value={row.value}
+                            onChange={(v) => update(row.id, { value: v })}
+                            {...(errors.get(row.id) ? { error: errors.get(row.id)! } : {})}
+                          />
+                        </div>
+                        <Button
+                          variant="ghost"
+                          disabled={!changed}
+                          onClick={() => update(row.id, { value: row.defaultValue ?? '' })}
+                        >
+                          Reset
+                        </Button>
+                      </Group>
+                    );
+                  })
+                )}
+              </Stack>
             </Stack>
 
             <Divider
@@ -276,18 +290,16 @@ export function EnvDialog({ client, instanceId, opened, onClose, onStarted }: En
             {showManaged ? (
               <>
                 <Divider label="Managed by the manager (read-only)" labelPosition="center" />
-                <ScrollArea.Autosize mah={220} type="auto">
-                  <Stack gap="xs" pr="sm">
-                    {managed.map((row) => (
-                      <Group key={row.id} gap="sm" wrap="nowrap" justify="space-between">
-                        <Code>{row.key}</Code>
-                        <Text size="sm" c="dimmed" style={{ wordBreak: 'break-all' }}>
-                          {row.value}
-                        </Text>
-                      </Group>
-                    ))}
-                  </Stack>
-                </ScrollArea.Autosize>
+                <Stack gap="xs">
+                  {managed.map((row) => (
+                    <Group key={row.id} gap="sm" wrap="nowrap" justify="space-between">
+                      <Code>{row.key}</Code>
+                      <Text size="sm" c="dimmed" style={{ wordBreak: 'break-all' }}>
+                        {row.value}
+                      </Text>
+                    </Group>
+                  ))}
+                </Stack>
                 <Text size="xs" c="dimmed">
                   These keys are derived from the instance identity, internal networking, JWT key paths,
                   and plugin trust. They cannot be edited here.
@@ -305,18 +317,9 @@ export function EnvDialog({ client, instanceId, opened, onClose, onStarted }: En
                 {save.error instanceof ApiError ? save.error.message : 'The manager service did not answer.'}
               </Alert>
             ) : null}
-
-            <Group justify="flex-end" gap="sm">
-              <Button variant="ghost" onClick={onClose}>
-                Cancel
-              </Button>
-              <Button variant="primary" disabled={hasErrors} loading={save.isPending} onClick={() => save.mutate()}>
-                Apply &amp; restart
-              </Button>
-            </Group>
           </>
         )}
       </Stack>
-    </Modal>
+    </Dialog>
   );
 }

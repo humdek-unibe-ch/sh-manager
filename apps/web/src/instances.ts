@@ -41,6 +41,8 @@ import {
   instanceHealth,
   instanceInstall,
   instanceList,
+  instanceLogs,
+  LOG_SERVICES,
   instanceRemove,
   instanceRestore,
   instanceRunScheduledBackup,
@@ -56,11 +58,17 @@ import {
   type InstanceEnvConfig,
   type InstanceFrontendUpdateOptions,
   type InstanceInstallOptions,
+  type InstanceLogsResult,
   type InstanceUpdateOptions,
+  type LogService,
   type MailerStatus,
   type PruneExecutionReport,
 } from '../../cli/src/actions.js';
 import { ComposeExecBackendOperationsClient } from '../../cli/src/operations-client.js';
+
+/** Re-exported so the BFF can validate the `?service=` query without reaching into the CLI package. */
+export { LOG_SERVICES };
+export type { LogService, InstanceLogsResult };
 import type { InstanceLocks, OperationContext } from './jobs.js';
 
 export interface InstanceSummary {
@@ -192,6 +200,8 @@ export interface ManagerInstanceActions {
   mailer(instanceId: string): Promise<MailerStatus>;
   /** Effective non-secret environment of an instance (read-only view). */
   envConfig(instanceId: string): Promise<InstanceEnvConfig>;
+  /** Recent (redacted) container logs for one service of an instance. */
+  logs(instanceId: string, opts: { service?: LogService; tail?: number }): Promise<InstanceLogsResult>;
   /** Plan-only update preview (never mutates). */
   updateDryRun(instanceId: string, req: UpdateInstanceRequest): Promise<unknown>;
   /** Plan-only frontend-only update preview (never mutates). */
@@ -366,6 +376,10 @@ export function buildInstanceActions(opts: BuildInstanceActionsOptions): Manager
 
     async envConfig(instanceId) {
       return instanceGetEnv(deps, instanceId);
+    },
+
+    async logs(instanceId, opts) {
+      return instanceLogs(deps, instanceId, opts);
     },
 
     async updateDryRun(instanceId, req) {

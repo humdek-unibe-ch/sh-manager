@@ -39,6 +39,7 @@ docker compose -f <root>/instances/website1/compose.yaml logs --tail=200 backend
 | `table already exists` / `1050` on first boot | The worker created `messenger_messages` before migrations (fresh-provision race) | Harmless on current builds (idempotent create); re-run `instance install --provision` or the migrate step. |
 | `mysql` unhealthy / connection refused | DB still starting, or volume problem | Wait for the healthcheck; check `logs mysql`; ensure the `mysql_data` volume exists. |
 | backend up but `health` degraded | A dependency (Redis/Mercure/mailer) is down or not configured | See [Health reports a degraded component](#health-reports-a-degraded-component). |
+| `volume-init` shows `Exited (0)` / `Completed` | **Not a fault.** It is a one-shot init container that chowns the data volumes for the Symfony user and then exits; the long-running services gate on its success. The manager's own health verdict ignores it. | Nothing to do — leave it. It re-runs (idempotently) on every `compose up`. |
 
 3. **If it started failing right after a change you made by hand**, restore the
    pre-change backup: `sh-manager instance restore website1 <backupId> --apply`

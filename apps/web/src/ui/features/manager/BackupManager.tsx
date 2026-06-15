@@ -165,10 +165,11 @@ function ScheduleCard({ client, instanceId, busy, onStarted }: BackupManagerProp
                 onChange={(e) => edit({ enabled: e.currentTarget.checked })}
               />
               <TextField
-                label="Run time (server local, HH:MM)"
+                label="Run time (server local)"
+                type="time"
                 value={effective.time}
                 onChange={(v) => edit({ time: v })}
-                placeholder="02:00"
+                help="Pick the hour:minute the nightly backup runs."
               />
             </Group>
             <Group gap="md" wrap="wrap">
@@ -216,7 +217,7 @@ function ScheduleCard({ client, instanceId, busy, onStarted }: BackupManagerProp
               </Alert>
             ) : null}
 
-            <Group gap="sm">
+            <Group gap="sm" align="center">
               <Button
                 loading={save.isPending}
                 disabled={busy || draft === null}
@@ -224,6 +225,15 @@ function ScheduleCard({ client, instanceId, busy, onStarted }: BackupManagerProp
               >
                 Save schedule
               </Button>
+              {draft !== null ? (
+                <Badge color="yellow" variant="light">
+                  Unsaved changes
+                </Badge>
+              ) : save.isSuccess ? (
+                <Badge color="teal" variant="light">
+                  Saved
+                </Badge>
+              ) : null}
               <Button variant="ghost" loading={preview.isPending} onClick={() => preview.mutate()}>
                 Preview cleanup
               </Button>

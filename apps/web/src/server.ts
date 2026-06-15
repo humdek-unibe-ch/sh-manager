@@ -54,10 +54,12 @@ import {
   validateCloneInstance,
   validateCreateInstance,
 } from './instance-validation.js';
+import { LOG_SERVICES } from './instances.js';
 import type {
   CloneInstanceRequest,
   CreateInstanceRequest,
   FrontendUpdateInstanceRequest,
+  LogService,
   ManagerInstanceActions,
   RemoveInstanceRequest,
   SetAddressRequest,
@@ -456,6 +458,19 @@ export function createManagerServer(options: ManagerServerOptions): ManagerServe
     }
     if (rest === '/env' && ctx.method === 'GET') {
       sendJson(res, 200, await im.instances.envConfig(instanceId));
+      return true;
+    }
+    if (rest === '/logs' && ctx.method === 'GET') {
+      const serviceParam = ctx.url.searchParams.get('service') ?? 'backend';
+      if (!(LOG_SERVICES as readonly string[]).includes(serviceParam)) {
+        throw new HttpError(400, `Unknown service "${serviceParam}". Choose one of: ${LOG_SERVICES.join(', ')}.`);
+      }
+      const tailRaw = ctx.url.searchParams.get('tail');
+      const tail = tailRaw !== null && tailRaw !== '' ? Number(tailRaw) : undefined;
+      if (tail !== undefined && !Number.isFinite(tail)) {
+        throw new HttpError(400, 'tail must be a number.');
+      }
+      sendJson(res, 200, await im.instances.logs(instanceId, { service: serviceParam as LogService, tail }));
       return true;
     }
     if (rest === '/env' && ctx.method === 'POST') {

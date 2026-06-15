@@ -26,3 +26,5 @@ export { StepProgress, type StepProgressProps, type ProgressStep, type StepState
 
 export { WizardStepper, type WizardStepperProps } from './wizard/WizardStepper';
 export { WizardFrame, type WizardFrameProps } from './wizard/WizardFrame';
+
+export { Dialog, type DialogProps } from './overlays/Dialog';

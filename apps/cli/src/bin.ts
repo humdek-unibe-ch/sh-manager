@@ -39,6 +39,9 @@ import {
   instanceSafeMode,
   instanceSetMailer,
   instanceSupportBundle,
+  instanceLogs,
+  LOG_SERVICES,
+  type LogService,
   instanceUpdate,
   instanceFrontendUpdate,
   drainInstanceOperations,
@@ -892,6 +895,24 @@ instance
       const res = await instanceSupportBundle(await deps(program.opts().root as string), id);
       console.log(`Support bundle: ${res.dir}`);
       console.log(`Files: ${res.files.join(', ')}`);
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+instance
+  .command('logs <id>')
+  .description(`Show recent (redacted) container logs for a service [${LOG_SERVICES.join(', ')}]`)
+  .option('-s, --service <service>', 'service to read logs from', 'backend')
+  .option('-n, --tail <lines>', 'number of trailing lines (1-2000)', '200')
+  .action(async (id: string, opts: { service?: string; tail?: string }) => {
+    try {
+      const res = await instanceLogs(await deps(program.opts().root as string), id, {
+        service: opts.service as LogService | undefined,
+        tail: opts.tail !== undefined ? Number(opts.tail) : undefined,
+      });
+      console.log(`# ${res.service} logs (last ${res.tail} lines) — ${res.instanceId} @ ${res.readAt}`);
+      console.log(res.text.trimEnd());
     } catch (err) {
       fail(err);
     }

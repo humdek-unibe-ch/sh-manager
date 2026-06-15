@@ -32,13 +32,31 @@ Run against the instance's compose file (`<root>/instances/website1/compose.yaml
 | Task | Command |
 | --- | --- |
 | Show containers | `docker compose -f <root>/instances/website1/compose.yaml ps` |
+| Redacted logs (manager) | `sh-manager instance logs website1 --service backend --tail 200` |
 | Tail all logs | `docker compose -f <root>/instances/website1/compose.yaml logs -f --tail=200` |
 | Logs for one service | `docker compose -f <root>/instances/website1/compose.yaml logs -f backend` |
 | Restart one service | `docker compose -f <root>/instances/website1/compose.yaml restart backend` |
 | Run a backend console cmd | `docker compose -f <root>/instances/website1/compose.yaml exec backend php bin/console <cmd>` |
 
+`sh-manager instance logs` (also the GUI **Logs…** button) reads a service's
+recent logs with **secrets redacted** — handy when you cannot run raw
+`docker compose`. These are the running container's logs (reset when the
+container is recreated by an update); use a support bundle for a portable copy.
+
 Services: `frontend`, `backend`, `worker`, `scheduler`, `mysql`, `redis`,
-`mercure` (+ `mailpit` in local mode).
+`mercure` (+ `mailpit` in local mode). `volume-init` is a one-shot init
+container that chowns the data volumes and then exits — seeing it `Exited (0)` /
+`Completed` is normal, not a half-started stack.
+
+## Connect to the database (CLI / Workbench)
+
+The MySQL port is private (internal Docker network only). Inspect it server-side
+or via an SSH tunnel — see [Database access](database-access.md).
+
+| Task | Command |
+| --- | --- |
+| Open a MySQL shell (app user) | `docker compose -f <root>/instances/website1/compose.yaml exec mysql sh -lc 'mysql -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE"'` |
+| MySQL Workbench (Windows/Linux) | expose on the server loopback + SSH tunnel — full steps in [Database access](database-access.md) |
 
 ## Install / provision
 

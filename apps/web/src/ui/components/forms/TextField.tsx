@@ -11,7 +11,7 @@ export interface TextFieldProps {
   error?: string;
   required?: boolean;
   placeholder?: string;
-  type?: 'text' | 'email' | 'number';
+  type?: 'text' | 'email' | 'number' | 'time';
   inputMode?: 'text' | 'numeric' | 'email';
   autoComplete?: string;
   /** Visible but not editable (e.g. a value fixed by policy). */

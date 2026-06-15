@@ -130,7 +130,7 @@ import {
   type RestorePlan,
   type RestoreRequest,
 } from '@shm/backup';
-import { assembleSupportBundle, redactEnv } from '@shm/support';
+import { assembleSupportBundle, redactEnv, redactString } from '@shm/support';
 import { ComposeExecPluginStateClient, composePluginExecDeps, type PluginStateClient } from './plugin-state-client.js';
 
 export interface ActionDeps {
@@ -679,6 +679,35 @@ async function persistOrReuseAdminPassword(
 }
 
 /**
+ * Carries the SOURCE instance's generated admin bootstrap password into a fresh
+ * clone. A clone copies the source DATABASE (so the admin user row AND its
+ * password hash come along), but it deliberately generates its own fresh
+ * `secrets.env` as a separate security boundary — which means it has NO
+ * `admin_password` file of its own. Without this, `instance admin-password
+ * <clone>` returns nothing even though the cloned admin login is valid (it is the
+ * source's). Copying the 0600 plaintext file keeps the "retrieve the admin
+ * password from the server" flow working for the clone too.
+ *
+ * No-op when the source never persisted one (the operator supplied their own
+ * password at install, so they already hold it) — returns `undefined`.
+ */
+async function copyAdminPasswordToClone(
+  deps: ActionDeps,
+  sourceInstanceId: string,
+  targetInstanceId: string,
+): Promise<string | undefined> {
+  const sourceFile = path.join(instancePaths(sourceInstanceId, deps.root).secretsDir, ADMIN_PASSWORD_FILENAME);
+  const password = (await readFile(sourceFile, 'utf8').catch(() => '')).trim();
+  if (password === '') return undefined;
+  const targetPaths = instancePaths(targetInstanceId, deps.root);
+  const targetFile = path.join(targetPaths.secretsDir, ADMIN_PASSWORD_FILENAME);
+  const io = deps.secretIO ?? nodeSecretIO;
+  await io.ensureDir(targetPaths.secretsDir, SECRET_DIR_MODE);
+  await io.writeFile(targetFile, `${password}\n`, SECRET_FILE_MODE);
+  return targetFile;
+}
+
+/**
  * Duplicate-domain prevention + optional production DNS-binding check. Throws a
  * clear aggregated error when the domain cannot be installed; returns non-fatal
  * warnings (e.g. DNS not yet pointing here) for the caller to surface.
@@ -1213,6 +1242,13 @@ export async function instanceFrontendUpdate(
       });
       await lockStore.write(artifacts.lock);
     },
+    // The `up -d` recreate above drops composer-installed plugin vendor/ from the
+    // Symfony containers' writable layer; restore it from the snapshot so the
+    // CMS keeps its plugins (no-op when none are installed). The core version is
+    // unchanged by a frontend update, so the snapshot key stays the same.
+    restorePluginState: async () => {
+      await restorePluginStateAfterRecreate(deps, instanceId, manifest.versions.selfhelp);
+    },
     checkHealth: async () =>
       evaluateHealth(
         instanceId,
@@ -1228,8 +1264,10 @@ export async function instanceFrontendUpdate(
         await manifestStore.write(snap.manifest);
         await lockStore.write(snap.lock);
       }
-      // Recreate only the frontend from the restored (previous) compose.
-      await deps.runner.run(paths.dir, composeCommands.upService('frontend'));
+      // Recreate from the restored (previous) compose + .env so the backend
+      // reverts to the previous frontend version stamp too, then re-mount plugins.
+      await deps.runner.run(paths.dir, composeCommands.upDetached());
+      await restorePluginStateAfterRecreate(deps, instanceId, manifest.versions.selfhelp);
     },
   });
 
@@ -2290,6 +2328,11 @@ export async function instanceClone(
   // do not bring it up yet (we populate volumes + DB first).
   const secrets = generateCloneSecrets(secretGenOptions(deps));
   const secretsWritten = await writeInstanceSecrets(targetPaths.secretsDir, secrets, deps.secretIO);
+  // Carry the source's admin bootstrap password (the "admin sector") into the
+  // clone. The DB copy below brings the admin user + hash; this keeps the
+  // password retrievable for the clone via `instance admin-password`.
+  const clonedAdminPasswordFile = await copyAdminPasswordToClone(deps, sourceInstanceId, targetInstanceId);
+  if (clonedAdminPasswordFile) secretsWritten.push(clonedAdminPasswordFile);
   await installInstance(artifacts, {
     root: deps.root,
     runner: deps.runner,
@@ -3031,6 +3074,90 @@ export async function instanceSupportBundle(
   for (const f of bundle.files) await writeFile(path.join(dir, f.name), f.content);
 
   return { dir, files: bundle.files.map((f) => f.name) };
+}
+
+// ---------------------------------------------------------------------------
+// instance logs (read recent container logs on demand, redacted)
+// ---------------------------------------------------------------------------
+
+/**
+ * Services whose container logs an operator can read from the manager. Ordered
+ * for the UI picker; `volume-init` is intentionally excluded (a one-shot init
+ * container with no useful runtime log).
+ */
+export const LOG_SERVICES = [
+  'backend',
+  'frontend',
+  'worker',
+  'scheduler',
+  'mysql',
+  'redis',
+  'mercure',
+  'mailpit',
+] as const;
+export type LogService = (typeof LOG_SERVICES)[number];
+
+/** Bounds for the `--tail` line count (UI default: 200). */
+const LOG_TAIL_MIN = 1;
+const LOG_TAIL_MAX = 2000;
+const LOG_TAIL_DEFAULT = 200;
+
+export interface InstanceLogsResult {
+  instanceId: string;
+  service: LogService;
+  /** Number of trailing lines requested (after clamping). */
+  tail: number;
+  /** Redacted log text — the running container's stdout/stderr. */
+  text: string;
+  /** ISO timestamp the logs were read at (for the UI). */
+  readAt: string;
+}
+
+function clampLogTail(tail: number | undefined): number {
+  if (tail === undefined || !Number.isFinite(tail)) return LOG_TAIL_DEFAULT;
+  return Math.max(LOG_TAIL_MIN, Math.min(LOG_TAIL_MAX, Math.floor(tail)));
+}
+
+/**
+ * Reads the recent container logs for ONE service of an instance via
+ * `docker compose logs --tail=<n> <service>`, redacting any secret-looking
+ * content before returning.
+ *
+ * These are the running container's stdout/stderr — exactly what Symfony (backend)
+ * and Next.js (frontend) print on error — surfaced on demand so an operator can
+ * diagnose an instance from the manager without shelling into the server. It is
+ * the same source the support bundle captures.
+ *
+ * Note on persistence: Docker keeps these logs for the lifetime of the container,
+ * so they survive a restart but are reset when the container is recreated (e.g. by
+ * an update). For a portable, point-in-time copy use the support bundle before a
+ * risky change.
+ */
+export async function instanceLogs(
+  deps: ActionDeps,
+  instanceId: string,
+  opts: { service?: LogService; tail?: number } = {},
+): Promise<InstanceLogsResult> {
+  const service: LogService = opts.service ?? 'backend';
+  if (!LOG_SERVICES.includes(service)) {
+    throw new Error(`Unknown service "${service}". Choose one of: ${LOG_SERVICES.join(', ')}.`);
+  }
+  const tail = clampLogTail(opts.tail);
+  // Confirm the instance exists first, so a bad id is a clear error rather than a
+  // raw compose failure.
+  await readManifestFriendly(deps, instanceId);
+  const paths = instancePaths(instanceId, deps.root);
+  const raw = await deps.runner
+    .run(paths.dir, [...composeCommands.logs(tail), service])
+    .then((r) => r.stdout || r.stderr)
+    .catch((err: unknown) => `Could not read logs for "${service}": ${err instanceof Error ? err.message : String(err)}`);
+  return {
+    instanceId,
+    service,
+    tail,
+    text: redactString(raw),
+    readAt: deps.now?.() ?? new Date().toISOString(),
+  };
 }
 
 // ---------------------------------------------------------------------------

@@ -8,13 +8,58 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `1.4.4`). Registry releases
+- **The manager tool** uses its own semver (currently `1.4.5`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
   **`0.x`** line (core, frontend, scheduler, worker — all `0.1.0`).
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
+
+## [1.4.5] - 2026-06-15
+
+### Added
+- **Per-instance log viewer.** A new **Logs…** button on the instance detail
+  page (and CLI `instance logs <id> [--service <svc>] [--tail <n>]` +
+  `GET /api/instances/:id/logs`) reads a service's recent container logs
+  (backend, frontend, worker, scheduler, mysql, redis, mercure, mailpit) with
+  **secrets redacted** — diagnose an instance from the manager without SSHing in.
+  It is read-only, so it stays available while an operation runs. These are the
+  running container's logs (reset when the container is recreated by an update);
+  a support bundle still captures a portable point-in-time copy.
+
+### Fixed
+- **Clone now copies the admin "sector".** A clone copied the source database
+  (so the admin user + password hash came along) but not the source's
+  `admin_password` secret file, leaving the operator unable to retrieve the
+  (valid) cloned admin login via `instance admin-password`. The clone now carries
+  that 0600 file across (no-op when the source used an operator-supplied password
+  that was never persisted).
+- **Left instance list refreshes after rename and other actions.** The instance
+  detail view now also invalidates the instances list query when an operation
+  starts/finishes, so a rename/update/address change is visible in the left
+  sidebar immediately instead of after a full page reload.
+- **Frontend-only updates report the new version.** A frontend-only update now
+  recreates the app services (full `docker compose up -d`) and re-mounts any
+  installed plugins, so the backend picks up the new `SELFHELP_FRONTEND_VERSION`
+  and the CMS System page shows the version that was actually deployed.
+
+### Changed
+- **Environment dialog uses the standard modal wrapper.** The Environment editor
+  now renders through a shared header/body/footer `Dialog` with a single scroll
+  region (no more nested/double scrollbars), matching the CMS modal layout.
+- **Backup run time uses a time picker + clearer save state.** The schedule "Run
+  time" is now a native `HH:MM` time control, and the **Save schedule** button is
+  flanked by **Unsaved changes** / **Saved** badges so it is obvious when edits
+  are pending.
+
+### Documentation
+- New [Database access](docs/operator/database-access.md) runbook: connect to an
+  instance's MySQL from the CLI or MySQL Workbench (Windows + Linux) over an SSH
+  tunnel, with the credential locations and a temporary-exposure recipe.
+- Documented that the one-shot `volume-init` container exiting `Exited (0)` /
+  `Completed` is normal (not a half-started stack) in the quick reference and
+  troubleshooting guides.
 
 ## [1.4.4] - 2026-06-15
 

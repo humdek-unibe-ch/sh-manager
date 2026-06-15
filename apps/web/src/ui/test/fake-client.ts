@@ -16,7 +16,9 @@ import type {
   CheckResult,
   InstanceDetail,
   InstanceEnvConfig,
+  InstanceLogsResult,
   InstanceSummary,
+  LogService,
   MailerStatus,
   OperationRecord,
   PreflightResult,
@@ -54,6 +56,8 @@ export interface FakeClientOptions {
   mailers?: Record<string, MailerStatus>;
   /** Effective env per instance id (default: a small representative set). */
   envConfigs?: Record<string, InstanceEnvConfig>;
+  /** Log text per `${instanceId}:${service}` (default: a representative line). */
+  logs?: Record<string, string>;
   /** Backup schedule status per instance id (default: nothing configured). */
   backupSchedules?: Record<string, BackupScheduleStatus>;
   /** Retention preview served by previewBackupPrune (default: keep everything). */
@@ -374,6 +378,15 @@ export function makeFakeClient(opts: FakeClientOptions = {}): ApiClient {
         throw new ApiError(404, `Instance "${instanceId}" not found.`);
       }
       return envConfigs[instanceId] ?? fakeEnvConfig(instanceId);
+    },
+    async getInstanceLogs(instanceId, service: LogService, tail = 200): Promise<InstanceLogsResult> {
+      if (!instances.some((i) => i.instanceId === instanceId)) {
+        throw new ApiError(404, `Instance "${instanceId}" not found.`);
+      }
+      const text =
+        opts.logs?.[`${instanceId}:${service}`] ??
+        `${service}-1  | [${service}] sample log line for ${instanceId}\n`;
+      return { instanceId, service, tail, text, readAt: '2026-06-01T12:00:00.000Z' };
     },
     async updateDryRun() {
       return { plan: opts.dryRunPlan ?? FAKE_DRY_RUN_PLAN };

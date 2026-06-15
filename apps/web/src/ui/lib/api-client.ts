@@ -20,8 +20,10 @@ import type {
   FrontendUpdateInstanceRequest,
   InstanceDetail,
   InstanceEnvConfig,
+  InstanceLogsResult,
   InstanceSummary,
   LoginResult,
+  LogService,
   MailerStatus,
   ManagerUpdateCheck,
   OperationRecord,
@@ -112,6 +114,8 @@ export interface ApiClient {
   getMailer(instanceId: string): Promise<MailerStatus>;
   /** Effective non-secret environment of an instance (read-only). */
   getInstanceEnv(instanceId: string): Promise<InstanceEnvConfig>;
+  /** Recent (redacted) container logs for one service of an instance. */
+  getInstanceLogs(instanceId: string, service: LogService, tail?: number): Promise<InstanceLogsResult>;
   updateDryRun(instanceId: string, req: UpdateInstanceRequest): Promise<{ plan: unknown }>;
   /** Plan-only frontend-only update preview (never mutates). */
   frontendUpdateDryRun(instanceId: string, req: FrontendUpdateInstanceRequest): Promise<{ plan: unknown }>;
@@ -235,6 +239,14 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     getMailer: (instanceId) => request<MailerStatus>(`/api/instances/${encodeURIComponent(instanceId)}/mailer`, 'GET'),
     getInstanceEnv: (instanceId) =>
       request<InstanceEnvConfig>(`/api/instances/${encodeURIComponent(instanceId)}/env`, 'GET'),
+    getInstanceLogs: (instanceId, service, tail) => {
+      const params = new URLSearchParams({ service });
+      if (tail !== undefined) params.set('tail', String(tail));
+      return request<InstanceLogsResult>(
+        `/api/instances/${encodeURIComponent(instanceId)}/logs?${params.toString()}`,
+        'GET',
+      );
+    },
     updateDryRun: (instanceId, req) =>
       request<{ plan: unknown }>(`/api/instances/${encodeURIComponent(instanceId)}/update/dry-run`, 'POST', req),
     frontendUpdateDryRun: (instanceId, req) =>

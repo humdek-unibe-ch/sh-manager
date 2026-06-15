@@ -167,6 +167,17 @@ manager version + self-update status, and the **Instances** section.
   dialog (it is stored in the restricted `secrets.env`, never the plain `.env`).
   The editor never displays secrets. Applying recreates the containers. CLI
   equivalent: `sh-manager instance env <id> [--set KEY=VALUE …] [--unset KEY …]`.
+- **Logs (Logs… button)** — read a service's recent container logs (the running
+  container's stdout/stderr — exactly what Symfony on the **backend** and
+  Next.js on the **frontend** print on error) without SSHing into the server.
+  Pick the service (backend, frontend, worker, scheduler, mysql, redis,
+  mercure, mailpit) and how many lines to tail, then **Refresh** to re-read.
+  Secrets are **redacted** before the logs leave the server. It is read-only, so
+  it stays available even while an operation runs. These logs are the current
+  container's, so they survive a restart but reset when the container is
+  recreated by an update — take a **support bundle** for a portable point-in-time
+  copy. CLI equivalent:
+  `sh-manager instance logs <id> [--service <svc>] [--tail <n>]`.
 - **Remove** — three modes, same as the CLI: `disable` (reversible),
   `remove_containers_keep_data`, and `full_delete` (requires typing
   `delete <id>`).
@@ -231,6 +242,7 @@ the operation.
 | `POST /api/instances/:id/mailer` | Set or clear the SMTP DSN; restarts the instance. |
 | `GET /api/instances/:id/env` | Show the effective non-secret environment (managed keys flagged read-only). |
 | `POST /api/instances/:id/env` | Persist non-secret env overrides; restarts the instance. |
+| `GET /api/instances/:id/logs?service=&tail=` | Recent (redacted) container logs for one service. |
 | `POST /api/instances/:id/remove` | Disable / remove / full-delete. |
 | `GET /api/operations?instanceId=` | Operation history. |
 | `GET /api/operations/:id` | One operation incl. journaled log lines. |
