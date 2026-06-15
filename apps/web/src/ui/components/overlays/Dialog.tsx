@@ -13,6 +13,13 @@ export interface DialogProps {
   size?: number | string;
   /** Close when clicking the overlay (default true). */
   closeOnClickOutside?: boolean;
+  /**
+   * When `true` (default) the body itself is the single scroll region — the
+   * standard shell. Set `false` when the content needs to PIN something at the
+   * top (e.g. filter controls) and scroll only a sub-region: the body then
+   * becomes a non-scrolling flex column and the child owns the one scrollbar.
+   */
+  scrollBody?: boolean;
   children: ReactNode;
 }
 
@@ -21,7 +28,9 @@ export interface DialogProps {
  * an optional sticky footer — the same header / body / footer split the CMS
  * frontend uses. The body is the only scroll region, so a dialog never shows a
  * second (inner) scrollbar. Content placed inside must therefore NOT add its
- * own `ScrollArea`; just let the body scroll.
+ * own `ScrollArea` — unless it opts out with `scrollBody={false}` to pin a
+ * header and scroll just a sub-region (then it provides exactly one inner
+ * scroll, never two).
  */
 export function Dialog({
   opened,
@@ -30,6 +39,7 @@ export function Dialog({
   footer,
   size = 'lg',
   closeOnClickOutside = true,
+  scrollBody = true,
   children,
 }: DialogProps): JSX.Element {
   return (
@@ -42,7 +52,17 @@ export function Dialog({
           <Modal.Title>{title}</Modal.Title>
           <Modal.CloseButton />
         </Modal.Header>
-        <Modal.Body style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>{children}</Modal.Body>
+        <Modal.Body
+          style={
+            scrollBody
+              ? { flex: 1, minHeight: 0, overflowY: 'auto' }
+              : // Non-scrolling flex column: the child pins its header and owns
+                // the single inner scroll region (no nested/double scrollbar).
+                { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }
+          }
+        >
+          {children}
+        </Modal.Body>
         {footer ? (
           <div
             style={{

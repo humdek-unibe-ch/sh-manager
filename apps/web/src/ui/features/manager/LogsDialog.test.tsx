@@ -47,4 +47,38 @@ describe('LogsDialog', () => {
 
     expect(await screen.findByText(/No log output/i)).toBeInTheDocument();
   });
+
+  it('filters the visible log lines by the operator-typed substring', async () => {
+    const user = userEvent.setup();
+    const client = makeFakeClient({
+      logs: {
+        'clinic-a:backend':
+          'backend-1  | INFO request handled\n' +
+          'backend-1  | ERROR database connection refused\n' +
+          'backend-1  | INFO cache warmed\n',
+      },
+    });
+    render(<LogsDialog client={client} instanceId="clinic-a" opened onClose={() => {}} />);
+
+    expect(await screen.findByText(/cache warmed/)).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText('Filter'), 'ERROR');
+
+    // The matching line stays; the non-matching INFO lines drop out.
+    expect(screen.getByText(/database connection refused/)).toBeInTheDocument();
+    expect(screen.queryByText(/cache warmed/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/request handled/)).not.toBeInTheDocument();
+  });
+
+  it('shows a no-match notice when the filter excludes every line', async () => {
+    const user = userEvent.setup();
+    const client = makeFakeClient({ logs: { 'clinic-a:backend': 'backend-1  | only line\n' } });
+    render(<LogsDialog client={client} instanceId="clinic-a" opened onClose={() => {}} />);
+
+    expect(await screen.findByText(/only line/)).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText('Filter'), 'zzz-no-such-line');
+
+    expect(await screen.findByText(/No log lines contain/i)).toBeInTheDocument();
+  });
 });

@@ -14,10 +14,10 @@
  * by an update). For a portable point-in-time copy, take a support bundle before
  * a risky change.
  */
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Code, Group, ScrollArea, Stack, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
-import { Alert, Button, Dialog, SelectField, Spinner } from '../../components';
+import { Alert, Button, Dialog, SelectField, Spinner, TextField } from '../../components';
 import { ApiError, type ApiClient } from '../../lib/api-client';
 import type { LogService } from '../../lib/types';
 
@@ -55,6 +55,7 @@ const TAIL_OPTIONS = [
 export function LogsDialog({ client, instanceId, opened, onClose }: LogsDialogProps): JSX.Element {
   const [service, setService] = useState<LogService>('backend');
   const [tail, setTail] = useState(200);
+  const [filter, setFilter] = useState('');
 
   const logs = useQuery({
     queryKey: ['manager', 'instance', instanceId, 'logs', service, tail],
@@ -64,6 +65,18 @@ export function LogsDialog({ client, instanceId, opened, onClose }: LogsDialogPr
   });
 
   const text = logs.data?.text.trimEnd() ?? '';
+
+  // Client-side substring filter: keep only the lines that match what the
+  // operator typed (case-insensitive). Trimmed so a stray space is not treated
+  // as a filter. Memoised so re-renders (e.g. background refetch) do not rescan.
+  const filterTerm = filter.trim().toLowerCase();
+  const filteredText = useMemo(() => {
+    if (filterTerm === '') return text;
+    return text
+      .split('\n')
+      .filter((line) => line.toLowerCase().includes(filterTerm))
+      .join('\n');
+  }, [text, filterTerm]);
 
   const footer = (
     <Group justify="space-between" gap="sm">
@@ -82,8 +95,18 @@ export function LogsDialog({ client, instanceId, opened, onClose }: LogsDialogPr
   );
 
   return (
-    <Dialog opened={opened} onClose={onClose} title={`Logs — ${instanceId}`} size="xl" footer={footer}>
-      <Stack gap="md">
+    <Dialog
+      opened={opened}
+      onClose={onClose}
+      title={`Logs — ${instanceId}`}
+      size="xl"
+      footer={footer}
+      scrollBody={false}
+    >
+      {/* Flex column that fills the (non-scrolling) dialog body: the controls +
+          filter stay pinned at the top and ONLY the log region below scrolls —
+          one scrollbar, never two. */}
+      <Stack gap="md" style={{ flex: 1, minHeight: 0 }}>
         <Group align="flex-end" gap="sm" grow>
           <SelectField
             label="Service"
@@ -98,6 +121,13 @@ export function LogsDialog({ client, instanceId, opened, onClose }: LogsDialogPr
             onChange={(v) => setTail(Number(v))}
           />
         </Group>
+
+        <TextField
+          label="Filter"
+          placeholder="Filter log lines (substring match)…"
+          value={filter}
+          onChange={setFilter}
+        />
 
         <Text size="xs" c="dimmed">
           The current container&apos;s output (errors included), with secrets redacted. These reset when
@@ -116,12 +146,16 @@ export function LogsDialog({ client, instanceId, opened, onClose }: LogsDialogPr
           <Alert tone="info" title="No log output">
             This service has not written any log lines yet (it may not be running).
           </Alert>
+        ) : filteredText === '' ? (
+          <Alert tone="info" title="No matching lines">
+            No log lines contain &ldquo;{filter.trim()}&rdquo;. Clear the filter to see all output.
+          </Alert>
         ) : (
-          <ScrollArea.Autosize mah={460} type="auto">
+          <ScrollArea type="auto" style={{ flex: 1, minHeight: 0 }}>
             <Code block style={{ fontSize: 12, whiteSpace: 'pre' }}>
-              {text}
+              {filteredText}
             </Code>
-          </ScrollArea.Autosize>
+          </ScrollArea>
         )}
       </Stack>
     </Dialog>
