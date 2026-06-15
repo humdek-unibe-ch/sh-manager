@@ -58,6 +58,21 @@ describe('EnvDialog', () => {
     await waitFor(() => expect(onStarted).toHaveBeenCalled());
   });
 
+  it('keeps added variables in their own clearly-marked section', async () => {
+    const user = userEvent.setup();
+    renderDialog();
+
+    await screen.findByText('JWT_TOKEN_TTL');
+    // Empty state until the operator adds one.
+    expect(screen.getByText(/None yet\./i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Add variable/i }));
+
+    // The new variable is clearly flagged as operator-added and gets a name field.
+    expect(await screen.findByText('added')).toBeInTheDocument();
+    expect(screen.getByLabelText('Name')).toBeInTheDocument();
+  });
+
   it('blocks saving a custom key that collides with a manager-owned key', async () => {
     const user = userEvent.setup();
     const client = makeFakeClient();

@@ -15,7 +15,7 @@
  * containers (BFF job layer: 202 + journaled log). Secrets are never shown.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Badge, Code, Divider, Group, Modal, ScrollArea, Stack, Text } from '@mantine/core';
+import { Badge, Code, Divider, Group, Modal, Paper, ScrollArea, Stack, Text } from '@mantine/core';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Alert, Button, TextField } from '../../components';
 import { ApiError, type ApiClient } from '../../lib/api-client';
@@ -80,6 +80,11 @@ export function EnvDialog({ client, instanceId, opened, onClose, onStarted }: En
   }, [opened, config.data]);
 
   const editable = rows.filter((r) => !r.managed);
+  // Split the editable surface so operator-added variables are visually
+  // separated from the manager's known editable defaults and always live in a
+  // clearly-labelled section at the bottom.
+  const builtinEditable = editable.filter((r) => !r.custom);
+  const customRows = editable.filter((r) => r.custom);
   const managed = rows.filter((r) => r.managed);
   const managedKeys = useMemo(() => new Set(config.data?.managedKeys ?? []), [config.data]);
 
@@ -164,57 +169,100 @@ export function EnvDialog({ client, instanceId, opened, onClose, onStarted }: En
           </Alert>
         ) : (
           <>
-            <ScrollArea.Autosize mah={380} type="auto">
-              <Stack gap="sm" pr="sm">
-                {editable.map((row) => {
-                  const changed = row.custom ? true : row.value !== row.defaultValue;
-                  return (
-                    <Group key={row.id} align="flex-end" gap="sm" wrap="nowrap">
-                      {row.custom ? (
-                        <TextField
-                          label="Name"
-                          value={row.key}
-                          onChange={(v) => update(row.id, { key: v })}
-                          placeholder="MY_CUSTOM_VAR"
-                        />
-                      ) : (
-                        <div style={{ minWidth: 240 }}>
-                          <Group gap={6} mb={2}>
-                            <Code>{row.key}</Code>
-                            {changed ? (
-                              <Badge size="xs" color="yellow" variant="light">
-                                modified
-                              </Badge>
-                            ) : null}
-                          </Group>
-                        </div>
-                      )}
-                      <div style={{ flex: 1 }}>
-                        <TextField
-                          label={row.custom ? 'Value' : ''}
-                          value={row.value}
-                          onChange={(v) => update(row.id, { value: v })}
-                          {...(errors.get(row.id) ? { error: errors.get(row.id)! } : {})}
-                        />
-                      </div>
-                      {row.custom ? (
+            <Stack gap={6}>
+              <Text size="xs" fw={600} c="dimmed" tt="uppercase">
+                Editable settings
+              </Text>
+              <ScrollArea.Autosize mah={300} type="auto">
+                <Stack gap="sm" pr="sm">
+                  {builtinEditable.length === 0 ? (
+                    <Text size="sm" c="dimmed">
+                      This instance exposes no editable defaults.
+                    </Text>
+                  ) : (
+                    builtinEditable.map((row) => {
+                      const changed = row.value !== row.defaultValue;
+                      return (
+                        <Group key={row.id} align="flex-end" gap="sm" wrap="nowrap">
+                          <div style={{ minWidth: 240 }}>
+                            <Group gap={6} mb={2}>
+                              <Code>{row.key}</Code>
+                              {changed ? (
+                                <Badge size="xs" color="yellow" variant="light">
+                                  modified
+                                </Badge>
+                              ) : null}
+                            </Group>
+                          </div>
+                          <div style={{ flex: 1 }}>
+                            <TextField
+                              label=""
+                              value={row.value}
+                              onChange={(v) => update(row.id, { value: v })}
+                              {...(errors.get(row.id) ? { error: errors.get(row.id)! } : {})}
+                            />
+                          </div>
+                          <Button
+                            variant="ghost"
+                            disabled={!changed}
+                            onClick={() => update(row.id, { value: row.defaultValue ?? '' })}
+                          >
+                            Reset
+                          </Button>
+                        </Group>
+                      );
+                    })
+                  )}
+                </Stack>
+              </ScrollArea.Autosize>
+            </Stack>
+
+            <Divider
+              label={`Custom variables you added${customRows.length > 0 ? ` (${customRows.length})` : ''}`}
+              labelPosition="center"
+            />
+
+            {customRows.length === 0 ? (
+              <Text size="sm" c="dimmed">
+                None yet. Use <strong>Add variable</strong> below to define your own <Code>KEY=value</Code>{' '}
+                pairs — they are saved as overrides that survive future updates and always appear here.
+              </Text>
+            ) : (
+              <Stack gap="sm">
+                {customRows.map((row) => (
+                  <Paper key={row.id} withBorder p="sm" radius="md">
+                    <Stack gap={6}>
+                      <Group justify="space-between">
+                        <Badge size="sm" color="teal" variant="light">
+                          added
+                        </Badge>
                         <Button variant="ghost" onClick={() => removeRow(row.id)}>
                           Remove
                         </Button>
-                      ) : (
-                        <Button
-                          variant="ghost"
-                          disabled={!changed}
-                          onClick={() => update(row.id, { value: row.defaultValue ?? '' })}
-                        >
-                          Reset
-                        </Button>
-                      )}
-                    </Group>
-                  );
-                })}
+                      </Group>
+                      <Group align="flex-end" gap="sm" wrap="nowrap">
+                        <div style={{ minWidth: 200 }}>
+                          <TextField
+                            label="Name"
+                            value={row.key}
+                            onChange={(v) => update(row.id, { key: v })}
+                            placeholder="MY_CUSTOM_VAR"
+                          />
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <TextField
+                            label="Value"
+                            value={row.value}
+                            onChange={(v) => update(row.id, { value: v })}
+                            {...(errors.get(row.id) ? { error: errors.get(row.id)! } : {})}
+                          />
+                        </div>
+                      </Group>
+                    </Stack>
+                  </Paper>
+                ))}
               </Stack>
-            </ScrollArea.Autosize>
+            )}
 
             <Group justify="space-between">
               <Button variant="secondary" onClick={addCustom}>
