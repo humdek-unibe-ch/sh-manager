@@ -132,7 +132,16 @@ export function InstanceDetail({ client, instanceId }: InstanceDetailProps): JSX
       <Card title="Overview">
         <KeyValue
           rows={[
-            { key: 'Domain', value: summary.domain || '—' },
+            {
+              key: 'Domain',
+              value: summary.domain ? (
+                <Anchor href={summary.domain.startsWith('http') ? summary.domain : `http://${summary.domain}`} target="_blank" rel="noopener noreferrer">
+                  {summary.domain}
+                </Anchor>
+              ) : (
+                '—'
+              ),
+            },
             { key: 'Mode', value: summary.mode ?? '—' },
             { key: 'SelfHelp version', value: summary.version ?? '—' },
             {
