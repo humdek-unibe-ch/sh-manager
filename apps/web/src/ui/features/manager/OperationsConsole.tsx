@@ -12,6 +12,7 @@
  * the operation journal — the GUI shows real logs, never imagined state.
  */
 import { useEffect, useRef, useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import {
   AppShell as MantineAppShell,
   Box,
@@ -69,10 +70,12 @@ export interface OperationsConsoleProps {
 
 export function OperationsConsole({ client, onSignOut }: OperationsConsoleProps): JSX.Element {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const { instanceId, view } = useParams<{ instanceId?: string; view?: string }>();
   const [navOpened, { toggle: toggleNav, close: closeNav }] = useDisclosure(false);
   /** `null` = dashboard, otherwise the selected instance id. */
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [createOpen, setCreateOpen] = useState(false);
+  const selectedId = instanceId ?? null;
+  const createOpen = view === 'new';
   /** Operation started from the create wizard — watched on the dashboard. */
   const [watchedOperationId, setWatchedOperationId] = useState<string | null>(null);
 
@@ -85,14 +88,6 @@ export function OperationsConsole({ client, onSignOut }: OperationsConsoleProps)
   });
   const instances = instancesQuery.data ?? [];
 
-  // If the selected instance disappears from the inventory (full delete from
-  // another session or this one), fall back to the dashboard.
-  useEffect(() => {
-    if (selectedId && instancesQuery.data && !instancesQuery.data.some((i) => i.instanceId === selectedId)) {
-      setSelectedId(null);
-    }
-  }, [selectedId, instancesQuery.data]);
-
   // First-run experience: a server with no instances goes straight into the
   // guided install wizard (once — closing it returns to the dashboard).
   const autoOpenedWizard = useRef(false);
@@ -100,13 +95,12 @@ export function OperationsConsole({ client, onSignOut }: OperationsConsoleProps)
     if (autoOpenedWizard.current) return;
     if (instancesQuery.data && instancesQuery.data.length === 0) {
       autoOpenedWizard.current = true;
-      setCreateOpen(true);
+      navigate('/instances/new');
     }
-  }, [instancesQuery.data]);
+  }, [instancesQuery.data, navigate]);
 
   const select = (id: string | null): void => {
-    setSelectedId(id);
-    setCreateOpen(false);
+    navigate(id ? `/instances/${id}` : '/');
     closeNav();
   };
 
@@ -184,7 +178,7 @@ export function OperationsConsole({ client, onSignOut }: OperationsConsoleProps)
 
         <MantineAppShell.Section>
           <Divider my="sm" />
-          <Button variant="primary" block onClick={() => setCreateOpen(true)}>
+          <Button variant="primary" block onClick={() => navigate('/instances/new')}>
             New instance
           </Button>
         </MantineAppShell.Section>
@@ -197,7 +191,7 @@ export function OperationsConsole({ client, onSignOut }: OperationsConsoleProps)
           <CreateInstanceWizard
             key={String(createOpen)}
             client={client}
-            onClose={() => setCreateOpen(false)}
+            onClose={() => navigate('/')}
             onStarted={(operationId) => {
               setWatchedOperationId(operationId);
               // The new instance shows up in the inventory as the install
@@ -206,9 +200,8 @@ export function OperationsConsole({ client, onSignOut }: OperationsConsoleProps)
               void queryClient.invalidateQueries({ queryKey: INSTANCES_KEY });
             }}
             onOpenInstance={(instanceId) => {
-              setCreateOpen(false);
               void queryClient.invalidateQueries({ queryKey: INSTANCES_KEY });
-              select(instanceId);
+              navigate(`/instances/${instanceId}`);
             }}
           />
         ) : selectedId === null ? (
@@ -216,7 +209,7 @@ export function OperationsConsole({ client, onSignOut }: OperationsConsoleProps)
             client={client}
             instances={instances}
             onOpenInstance={select}
-            onCreate={() => setCreateOpen(true)}
+            onCreate={() => navigate('/instances/new')}
             watchedOperationId={watchedOperationId}
             onHideWatched={() => setWatchedOperationId(null)}
           />

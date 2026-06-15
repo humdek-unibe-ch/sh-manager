@@ -19,6 +19,7 @@ A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instanc
 ## [1.4.2] - Unreleased
 
 ### Added
+- **URL-based navigation** — the operations console now updates the browser URL when navigating between dashboard, instances, and the create wizard. State is preserved on page refresh, allowing operators to share links or return to their previous view after a reload.
 - **Clickable domain in instance list and detail** — the domain field in both the instances list table and the instance detail page is now a clickable link that opens in a new tab, allowing operators to quickly navigate to their instances.
 - **Help text for admin display name** — the admin name field in the create-instance wizard now includes descriptive help text explaining that it is an optional display name for the admin account.
 

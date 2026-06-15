@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MPL-2.0
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { BrowserRouter } from 'react-router-dom';
 import { MantineProvider } from '@mantine/core';
 import { Notifications } from '@mantine/notifications';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -25,11 +26,13 @@ const queryClient = new QueryClient({
 
 createRoot(container).render(
   <StrictMode>
-    <MantineProvider theme={theme} defaultColorScheme="auto">
-      <QueryClientProvider client={queryClient}>
-        <Notifications position="top-right" />
-        <App />
-      </QueryClientProvider>
-    </MantineProvider>
+    <BrowserRouter>
+      <MantineProvider theme={theme} defaultColorScheme="auto">
+        <QueryClientProvider client={queryClient}>
+          <Notifications position="top-right" />
+          <App />
+        </QueryClientProvider>
+      </MantineProvider>
+    </BrowserRouter>
   </StrictMode>,
 );
