@@ -23,6 +23,9 @@ A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instanc
 - **Clickable domain in instance list and detail** — the domain field in both the instances list table and the instance detail page is now a clickable link that opens in a new tab, allowing operators to quickly navigate to their instances.
 - **Help text for admin display name** — the admin name field in the create-instance wizard now includes descriptive help text explaining that it is an optional display name for the admin account.
 
+### Changed
+- **Smaller default button size** — all buttons in the GUI now use a smaller default size to prevent text cutoff and improve layout consistency across the interface.
+
 ## [1.4.1] - 2026-06-13
 
 ### Fixed

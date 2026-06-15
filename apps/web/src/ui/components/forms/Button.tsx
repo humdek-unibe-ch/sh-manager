@@ -8,7 +8,7 @@ export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
   block?: boolean;
-  size?: 'md' | 'lg';
+  size?: 'sm' | 'md' | 'lg';
   loading?: boolean;
   children: ReactNode;
 }
@@ -24,7 +24,7 @@ const STYLE: Record<ButtonVariant, { variant: string; color?: string }> = {
 export function Button({
   variant = 'secondary',
   block = false,
-  size = 'md',
+  size = 'sm',
   loading = false,
   disabled,
   children,
@@ -39,7 +39,7 @@ export function Button({
       variant={style.variant}
       color={style.color}
       fullWidth={block}
-      size={size === 'lg' ? 'lg' : 'md'}
+      size={size === 'lg' ? 'lg' : size === 'sm' ? 'xs' : 'md'}
       loading={loading}
       disabled={disabled}
     >
