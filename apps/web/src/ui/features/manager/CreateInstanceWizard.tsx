@@ -317,7 +317,7 @@ export function CreateInstanceWizard({
                 help="Sign-in email for the first admin account."
                 {...(emailError ? { error: emailError } : {})}
               />
-              <TextField label="Admin name" value={adminName} onChange={setAdminName} placeholder="Optional" />
+              <TextField label="Admin name" value={adminName} onChange={setAdminName} placeholder="Optional" help="Optional display name for the admin account." />
             </Group>
             <TextField
               label="Outbound email (SMTP DSN)"
