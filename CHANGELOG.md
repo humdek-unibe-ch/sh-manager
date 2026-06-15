@@ -16,6 +16,11 @@ The manager has two version axes (see
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
 
+## [1.4.3] - Unreleased
+
+### Fixed
+- **Health check service badges now show correct colors** — the service badge color check was looking for state `'running'` but the health check API returns `'healthy'`, `'degraded'`, etc. Changed the condition to check for `'healthy'` so healthy services display teal (green) instead of red.
+
 ## [1.4.2] - 2026-06-15
 
 ### Added

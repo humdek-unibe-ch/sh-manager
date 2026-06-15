@@ -172,7 +172,7 @@ export function InstanceDetail({ client, instanceId }: InstanceDetailProps): JSX
             {health.data.services.map((s) => (
               <Group key={s.service} gap="sm" wrap="nowrap">
                 <Badge
-                  color={s.state === 'running' ? 'teal' : s.required ? 'red' : 'gray'}
+                  color={s.state === 'healthy' ? 'teal' : s.required ? 'red' : 'gray'}
                   variant="light"
                   styles={{ label: { textTransform: 'none' } }}
                 >
