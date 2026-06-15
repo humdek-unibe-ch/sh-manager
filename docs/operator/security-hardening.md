@@ -69,10 +69,11 @@ sh-manager admin create --email ops@example.ch --roles server_owner --name "Ops"
 sh-manager admin role grant ops@example.ch instance_operator
 sh-manager admin disable old.operator@example.ch
 sh-manager admin list
-
-# OIDC: allow a campus identity to authenticate
-sh-manager admin allow-email ops@example.ch
 ```
+
+Authentication is **local only** (email + password). The manager is reached on
+the server itself or over an SSH tunnel, so no login port is exposed — there is
+no campus/OIDC/SSO sign-in.
 
 Roles: `server_owner`, `instance_operator`, `read_only`. Grant the least
 privilege each operator needs. Passwords are hashed; digests are never printed.

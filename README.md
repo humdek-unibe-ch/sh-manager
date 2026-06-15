@@ -168,7 +168,7 @@ Docker / network / filesystem side effects live behind injected boundaries.
 | `@shm/core` | Instance-scope guard, preflight, health, update plan/execute, bootstrap/install, post-up provisioning |
 | `@shm/backup` | Backup manifest + integrity, restore/clone planning |
 | `@shm/support` | Secret redaction + support bundle assembly |
-| `@shm/auth` | Configurable campus/OIDC operator authorization (old PHP plugin is reference-only) |
+| `@shm/auth` | Local operator authentication (email + password), roles, sessions, CSRF |
 | `apps/cli` | `sh-manager` command-line entrypoint |
 | `apps/web` | `sh-manager-web` localhost web UI: Vite React SPA + Node BFF |
 

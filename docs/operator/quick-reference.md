@@ -151,7 +151,6 @@ address, outbound mail, remove, live operation logs) — see
 | Start the management UI | `sh-manager web` (reach it via SSH tunnel; first run offers in-browser operator creation) |
 | Create operator | `sh-manager admin create --email ops@example.ch --roles server_owner --name "Ops"` (no `--password` = generated + shown once) |
 | Grant a role | `sh-manager admin role grant ops@example.ch instance_operator` |
-| Allow OIDC email | `sh-manager admin allow-email ops@example.ch` |
 | List / disable | `sh-manager admin list` · `sh-manager admin disable old@example.ch` |
 
 ## Paths and env vars

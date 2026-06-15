@@ -20,7 +20,9 @@ export const OPERATOR_DIR_MODE = 0o700;
 function isOperatorTable(value: unknown): value is OperatorTable {
   if (typeof value !== 'object' || value === null) return false;
   const t = value as Partial<OperatorTable>;
-  return t.version === 1 && Array.isArray(t.operators) && Array.isArray(t.allowedEmails);
+  // A legacy `allowedEmails` array (from the removed OIDC allowlist) is tolerated
+  // on load — extra fields are simply ignored and dropped on the next save.
+  return t.version === 1 && Array.isArray(t.operators);
 }
 
 export class FileOperatorStore implements OperatorStore {

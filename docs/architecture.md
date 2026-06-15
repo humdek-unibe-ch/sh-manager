@@ -58,7 +58,7 @@ sh-manager (CLI)            sh-manager-web (BFF)
 | `@shm/core` | Instance-scope guard, preflight, health, update plan/execute, bootstrap/install orchestration, post-up provisioning. |
 | `@shm/backup` | Backup manifest + integrity (checksums), restore/clone planning + secret policy, the pure backup **schedule engine** (due/catch-up, injected clock) and **GFS retention** classifier/prune planner (slot model + safety invariants). |
 | `@shm/support` | Secret redaction + support-bundle assembly (re-scanned for residual secrets). |
-| `@shm/auth` | Configurable local + campus/OIDC operator authorization, sessions, CSRF, password hashing, operator store. |
+| `@shm/auth` | Local operator authentication (email + password), roles, sessions, CSRF, password hashing, operator store. |
 | `apps/cli` | `sh-manager` command-line entrypoint + real boundary implementations. |
 | `apps/web` | `sh-manager-web` localhost BFF + the React SPA. |
 

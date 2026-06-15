@@ -46,7 +46,7 @@ This repository is **not** a SelfHelp backend, frontend, or plugin. It orchestra
 - `packages/core` — orchestration that composes the other packages (install/update/lifecycle); `@shm/core`.
 - `packages/backup` — backup/restore + integrity; `@shm/backup`.
 - `packages/support` — support-bundle generation + secret redaction; `@shm/support`.
-- `packages/auth` — operator auth: sessions, password hashing, OIDC allow-list; `@shm/auth`.
+- `packages/auth` — operator auth: local accounts (email + password), roles, sessions, CSRF, password hashing; `@shm/auth`. Auth is local-only (remote access via SSH tunnel); there is no campus/OIDC/SSO login.
 - `apps/cli` — the `sh-manager` CLI (`server`, `instance`, `admin`, `doctor`, …); entry `apps/cli/src/bin.ts`.
 - `apps/web` — the local web UI:
   - `apps/web/src/server.ts` + `apps/web/src/bin.ts` — the **BFF** (serves the SPA from `dist-web/` and exposes `/api/*`).
@@ -157,7 +157,7 @@ These are the canonical SelfHelp testing policy, shared verbatim across the back
 ### Manager-specific testing additions
 
 - The manager has no Symfony/DB/Mercure layer, so rules that name backend fixtures/personas, JWT, ACL, Mercure, or QA database seeding apply only to the SelfHelp repos those tools live in. The manager honors the **spirit**: deterministic, isolated, no real outbound, behaviour-named tests, regression test per bug, focused test per feature.
-- Critical packages must have unit tests for their security-relevant logic: registry signature/checksum/canonical-payload validation, resolver compatibility/advisory/`requiresManager` behaviour, the Docker guard (forbidden flags), instance manifest/lock atomic writes, update dry-run/preflight/execute paths, backup/support redaction + integrity, and auth session/password/OIDC allow-list logic.
+- Critical packages must have unit tests for their security-relevant logic: registry signature/checksum/canonical-payload validation, resolver compatibility/advisory/`requiresManager` behaviour, the Docker guard (forbidden flags), instance manifest/lock atomic writes, update dry-run/preflight/execute paths, backup/support redaction + integrity, and auth session/password/local-operator logic.
 - Web UI tests cover at least: the login flow, install-wizard rendering + validation gating, console/status rendering, and API error handling — all against the in-memory fake client or injected `fetch`, never a real BFF.
 - "No real outbound / no external services" (rules 14, 30) is enforced for the manager by always injecting `fetch`/`exec`/fs and using fixtures; a test that would shell out to Docker or hit the network is a violation.
 
@@ -174,7 +174,7 @@ These are the canonical SelfHelp testing policy, shared verbatim across the back
 - **Never** emit or run `docker compose down -v` or any command that can delete instance volumes/data. The Docker guard exists to block dangerous flags — extend it, do not route around it.
 - Secrets (DB passwords, app keys, admin password, JWT/Mercure secrets, signing keys) are generated and written to **restricted files** on the server and shown once by the install process. They are never printed to logs, the web UI, support bundles, or docs. Redact defensively.
 - The web BFF binds to localhost / private access by default. Remote use is via SSH tunnel. Do not add a default public bind.
-- Operator auth (`@shm/auth`): keep password hashing, session handling, CSRF tokens for state-changing requests, and the OIDC allow-list intact. Security-sensitive changes need a regression test that asserts the failure path.
+- Operator auth (`@shm/auth`): keep password hashing, session handling, CSRF tokens for state-changing requests, and the first-run bootstrap-token flow intact. Auth is local-only (no campus/OIDC/SSO); remote access is via SSH tunnel. Security-sensitive changes need a regression test that asserts the failure path.
 - Verify before you trust: every release/manifest is checked for checksum + Ed25519 signature against trusted keys before install. Honor advisories and `requiresManager` gating from the resolver.
 - Never trust browser-provided instance scope; derive it server-side.
 

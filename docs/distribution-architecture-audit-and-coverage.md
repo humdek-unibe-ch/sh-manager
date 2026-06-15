@@ -76,8 +76,8 @@ prefix; other repos are prefixed, e.g. `backend:`).
 | Scenario(s) | Test(s) | Status |
 | --- | --- | --- |
 | Web UI disabled by default; localhost/VPN/private-network bind; login required | `apps/web/src/server.test.ts`, `packages/auth/src/session.test.ts` | Covered |
-| Local-auth passwords hashed, never in `.env`; bootstrap token one-time + rotates | `packages/auth/src/password.test.ts`, `packages/auth/src/storage.test.ts`, `packages/auth/src/auth.test.ts` | Covered |
-| Campus login disabled by default; only configured mappings become operators; unauthorized rejected | `packages/auth/src/oidc.test.ts`, `packages/auth/src/operators.test.ts` | Covered |
+| Local-auth passwords hashed, never in `.env`; bootstrap token one-time + rotates | `packages/auth/src/password.test.ts`, `packages/auth/src/storage.test.ts`, `packages/auth/src/operators.test.ts` | Covered |
+| Local-only auth (no campus/OIDC/SSO); remote access is via SSH tunnel, no login port exposed | `apps/web/src/server.test.ts`, `packages/auth/src/operators.test.ts` | Covered |
 
 ## Multi-instance
 

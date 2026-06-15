@@ -11,7 +11,6 @@ import {
   disableOperator,
   grantRole,
   revokeRole,
-  addAllowedEmail,
   authenticateLocal,
   findOperatorByEmail,
 } from './operators.js';
@@ -117,13 +116,5 @@ describe('local authentication', () => {
     const disabled = authenticateLocal(table, 'op@example.org', STRONG);
     expect(disabled.ok).toBe(false);
     expect(disabled.reason).toMatch(/disabled/i);
-  });
-});
-
-describe('OIDC allowlist', () => {
-  it('adds an allowed email idempotently', () => {
-    let table = addAllowedEmail(emptyOperatorTable(), 'Person@Example.org');
-    table = addAllowedEmail(table, 'person@example.org');
-    expect(table.allowedEmails).toEqual(['person@example.org']);
   });
 });

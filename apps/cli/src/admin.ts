@@ -3,16 +3,15 @@
 /**
  * Manager operator administration (CLI-facing).
  *
- * Thin, store-backed actions for managing local operators and the OIDC email
- * allowlist. Each action loads the {@link OperatorTable}, applies a pure
- * mutation from `@shm/auth`, and persists it atomically. The store is injected
- * so these are unit-testable without touching disk.
+ * Thin, store-backed actions for managing local operators. Each action loads
+ * the {@link OperatorTable}, applies a pure mutation from `@shm/auth`, and
+ * persists it atomically. The store is injected so these are unit-testable
+ * without touching disk.
  */
 import path from 'node:path';
 import {
   FileOperatorStore,
   MANAGER_ROLES,
-  addAllowedEmail,
   createBootstrapToken,
   createOperator,
   disableOperator,
@@ -86,10 +85,6 @@ export async function adminRoleGrant(store: OperatorStore, email: string, role: 
     throw new Error(`Unknown manager role "${role}". Valid roles: ${MANAGER_ROLES.join(', ')}.`);
   }
   await store.save(grantRole(await store.load(), email, role, now));
-}
-
-export async function adminAllowEmailAdd(store: OperatorStore, email: string): Promise<void> {
-  await store.save(addAllowedEmail(await store.load(), email));
 }
 
 export async function adminList(store: OperatorStore): Promise<RedactedOperator[]> {

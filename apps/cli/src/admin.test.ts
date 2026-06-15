@@ -3,7 +3,6 @@
 import { describe, expect, it } from 'vitest';
 import { InMemoryOperatorStore, authenticateLocal, verifyBootstrapToken } from '@shm/auth';
 import {
-  adminAllowEmailAdd,
   adminBootstrapToken,
   adminCreate,
   adminDisable,
@@ -64,12 +63,6 @@ describe('admin operator lifecycle', () => {
     expect(list[0]?.disabled).toBe(true);
     // A disabled operator can no longer authenticate.
     expect(authenticateLocal(await store.load(), 'op@example.org', 'a strong passphrase here').ok).toBe(false);
-  });
-
-  it('adds an OIDC allowlist email (normalised)', async () => {
-    const store = new InMemoryOperatorStore();
-    await adminAllowEmailAdd(store, 'Campus.User@Example.ORG');
-    expect((await store.load()).allowedEmails).toEqual(['campus.user@example.org']);
   });
 
   it('issues a one-time bootstrap token whose hash is verifiable', async () => {

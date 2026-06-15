@@ -4,10 +4,11 @@
  * Local manager-operator registry.
  *
  * Holds the set of people allowed to operate the SelfHelp Manager: local
- * password operators (created on first run or via the CLI) and the OIDC
- * email allowlist. The table is a plain serialisable structure so it can be
- * persisted atomically with restrictive permissions; raw passwords are never
- * stored (only scrypt digests via {@link hashPassword}).
+ * password operators, created on first run or via the CLI. The table is a plain
+ * serialisable structure so it can be persisted atomically with restrictive
+ * permissions; raw passwords are never stored (only scrypt digests via
+ * {@link hashPassword}). The manager is local-only (SSH tunnel for remote use),
+ * so there is no campus/OIDC/SSO identity source here.
  *
  * First-run bootstrap: when no enabled local operator exists, the manager web
  * UI is locked behind a one-time bootstrap token (a high-entropy random string
@@ -19,13 +20,14 @@ import type { ManagerRole } from './config.js';
 import { MANAGER_ROLES } from './config.js';
 import { hashPassword, verifyPassword } from './password.js';
 
-export type OperatorSource = 'local' | 'oidc';
+/** Operators are always local (email + password); kept for forward clarity. */
+export type OperatorSource = 'local';
 
 export interface ManagerOperator {
   id: string;
   email: string;
   displayName: string;
-  /** scrypt digest for local operators; null for OIDC-only identities. */
+  /** scrypt password digest (never the raw password). */
   passwordHash: string | null;
   roles: ManagerRole[];
   disabled: boolean;
@@ -44,8 +46,6 @@ export interface BootstrapToken {
 export interface OperatorTable {
   version: 1;
   operators: ManagerOperator[];
-  /** Extra emails (beyond mapped operators) allowed to log in via OIDC. */
-  allowedEmails: string[];
   bootstrapToken: BootstrapToken | null;
 }
 
@@ -55,7 +55,7 @@ export interface OperatorStore {
 }
 
 export function emptyOperatorTable(): OperatorTable {
-  return { version: 1, operators: [], allowedEmails: [], bootstrapToken: null };
+  return { version: 1, operators: [], bootstrapToken: null };
 }
 
 function normaliseEmail(email: string): string {
@@ -78,9 +78,9 @@ export function findOperatorByEmail(table: OperatorTable, email: string): Manage
   return table.operators.find((o) => o.email === target);
 }
 
-/** True when no ENABLED local operator exists, so first-run bootstrap applies. */
+/** True when no ENABLED operator exists, so first-run bootstrap applies. */
 export function isBootstrapRequired(table: OperatorTable): boolean {
-  return !table.operators.some((o) => o.source === 'local' && !o.disabled);
+  return !table.operators.some((o) => !o.disabled);
 }
 
 export interface BootstrapTokenIssue {
@@ -144,8 +144,7 @@ export function createOperator(
   assertRoles(input.roles);
   if (input.roles.length === 0) throw new Error('At least one role is required.');
 
-  const source: OperatorSource = input.source ?? 'local';
-  if (source === 'local' && !input.password) {
+  if (!input.password) {
     throw new Error('A password is required for a local operator.');
   }
 
@@ -154,10 +153,10 @@ export function createOperator(
     id: randomUUID(),
     email,
     displayName: input.displayName.trim() || email,
-    passwordHash: input.password ? hashPassword(input.password) : null,
+    passwordHash: hashPassword(input.password),
     roles: [...new Set(input.roles)],
     disabled: false,
-    source,
+    source: input.source ?? 'local',
     createdAt: ts,
     updatedAt: ts,
   };
@@ -211,18 +210,6 @@ export function setPassword(table: OperatorTable, email: string, password: strin
   return updateOperator(table, email, (o) => ({ ...o, passwordHash: hashPassword(password), source: 'local' }), now);
 }
 
-export function addAllowedEmail(table: OperatorTable, email: string): OperatorTable {
-  const target = normaliseEmail(email);
-  if (!target.includes('@')) throw new Error('A valid email is required.');
-  if (table.allowedEmails.includes(target)) return table;
-  return { ...table, allowedEmails: [...table.allowedEmails, target] };
-}
-
-export function removeAllowedEmail(table: OperatorTable, email: string): OperatorTable {
-  const target = normaliseEmail(email);
-  return { ...table, allowedEmails: table.allowedEmails.filter((e) => e !== target) };
-}
-
 export interface LocalAuthResult {
   ok: boolean;
   operator?: ManagerOperator;
@@ -232,7 +219,7 @@ export interface LocalAuthResult {
 /** Authenticate a local operator by email + password (constant-time verify). */
 export function authenticateLocal(table: OperatorTable, email: string, password: string): LocalAuthResult {
   const operator = findOperatorByEmail(table, email);
-  if (!operator || operator.source !== 'local' || !operator.passwordHash) {
+  if (!operator || !operator.passwordHash) {
     // Spend a verify cycle against a dummy hash to reduce user-enumeration timing signal.
     verifyPassword(password, 'scrypt$16384$8$1$64$AAAA$AAAA');
     return { ok: false, reason: 'Invalid credentials.' };

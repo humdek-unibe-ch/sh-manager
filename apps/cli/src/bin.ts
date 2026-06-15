@@ -55,7 +55,6 @@ import { applySelfUpdate, checkSelfUpdate, formatSelfUpdate } from './self-updat
 import { generateWrapperScript, type WrapperShell } from './wrapper.js';
 import type { ManagerRole } from '@shm/auth';
 import {
-  adminAllowEmailAdd,
   adminBootstrapToken,
   adminCreate,
   adminDisable,
@@ -919,7 +918,7 @@ safeMode
     }
   });
 
-const admin = program.command('admin').description('Manage manager operators (local auth + OIDC allowlist)');
+const admin = program.command('admin').description('Manage manager operators (local email + password auth)');
 
 admin
   .command('create')
@@ -972,19 +971,6 @@ adminRole
     try {
       await adminRoleGrant(fileOperatorStore(program.opts().root as string), email, role as ManagerRole);
       console.log(`Granted ${role} to ${email}.`);
-    } catch (err) {
-      fail(err);
-    }
-  });
-
-const adminAllowEmail = admin.command('allow-email').description('OIDC email allowlist management');
-adminAllowEmail
-  .command('add <email>')
-  .description('Allow an email to authenticate via OIDC')
-  .action(async (email: string) => {
-    try {
-      await adminAllowEmailAdd(fileOperatorStore(program.opts().root as string), email);
-      console.log(`Allowed OIDC email ${email}.`);
     } catch (err) {
       fail(err);
     }
