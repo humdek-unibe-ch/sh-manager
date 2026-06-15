@@ -8,13 +8,41 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `1.4.5`). Registry releases
+- **The manager tool** uses its own semver (currently `1.4.6`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
   **`0.x`** line (core, frontend, scheduler, worker — all `0.1.0`).
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
+
+## [1.4.6] - 2026-06-15
+
+### Added
+- **Live operations console (Server-Sent Events).** The web console now opens a
+  single authenticated event stream (`GET /api/events`) and refreshes the
+  operation history, the live operation log, the instance detail and the
+  left-hand instance list **the instant** the backend changes — installs,
+  updates, backups, restores, clones, and address/email/env/name changes all
+  update in real time instead of waiting for the next poll. The operation
+  journal is the single source of truth: it emits a compact change event on
+  every create/advance/finish, the BFF streams it (with a heartbeat and prompt
+  teardown on shutdown), and the browser turns each event into a targeted query
+  refresh (bursts of log lines are coalesced). Polling stays on as a fallback,
+  so a browser without `EventSource` or a dropped stream still stays correct —
+  it just loses the instant feel. No secrets cross the wire: events carry only
+  id/kind/instance/status/phase/timestamps, never logs or results.
+
+### Fixed
+- **Logs viewer: one scrollbar and a sticky filter.** The per-instance **Logs…**
+  dialog scrolled twice (the modal body *and* an inner log box) and the
+  service/line controls scrolled out of view while reading a long log. The
+  controls — plus a new **Filter** field that case-insensitively substring-matches
+  log lines — now stay pinned at the top, and the log output owns the single
+  scroll region. You can scroll a long log and still narrow it down (e.g. to
+  `ERROR`) without losing the controls. (Dialogs gained an opt-in
+  `scrollBody={false}` so a dialog can pin a header and scroll just a sub-region
+  instead of nesting two scrollbars.)
 
 ## [1.4.5] - 2026-06-15
 
