@@ -12,7 +12,7 @@
  * the operation journal — the GUI shows real logs, never imagined state.
  */
 import { useEffect, useRef, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   AppShell as MantineAppShell,
   Box,
@@ -33,6 +33,7 @@ import { ConsoleDashboard, CONSOLE_STATE_KEY } from './ConsoleDashboard';
 import { CreateInstanceWizard } from './CreateInstanceWizard';
 import { InstanceDetail } from './InstanceDetail';
 import { INSTANCES_KEY, instanceStatusTone } from './InstancesList';
+import { parseConsoleRoute } from './console-route';
 
 const DOT_COLOR: Record<BadgeTone, string> = {
   ok: 'var(--mantine-color-teal-6)',
@@ -71,7 +72,10 @@ export interface OperationsConsoleProps {
 export function OperationsConsole({ client, onSignOut }: OperationsConsoleProps): JSX.Element {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const { instanceId, view } = useParams<{ instanceId?: string; view?: string }>();
+  const location = useLocation();
+  // The console is a single mounted shell, so it derives its view from the
+  // pathname rather than from `<Route>` params (see `parseConsoleRoute`).
+  const { instanceId, view } = parseConsoleRoute(location.pathname);
   const [navOpened, { toggle: toggleNav, close: closeNav }] = useDisclosure(false);
   /** `null` = dashboard, otherwise the selected instance id. */
   const selectedId = instanceId ?? null;
