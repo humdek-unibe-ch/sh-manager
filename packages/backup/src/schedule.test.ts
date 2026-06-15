@@ -104,6 +104,42 @@ describe('isBackupDue', () => {
   });
 });
 
+describe('rescheduling the daily time mid-day (operator edits the schedule)', () => {
+  // The schedule change itself never resets the recorded lastRunAt (only an
+  // actual run does), so dueness after an edit follows purely from comparing
+  // the last run against the NEW time's most recent occurrence.
+
+  it('runs again the same day when the time is moved LATER past now (14:35 -> 14:45)', () => {
+    // Backup already taken today at 14:35.
+    const ranAt1435 = local(2026, 6, 12, 14, 35);
+    // Operator moves the daily time to 14:45; it is now 14:46.
+    const moved = policy({ time: '14:45' });
+    expect(isBackupDue(moved, ranAt1435, local(2026, 6, 12, 14, 46))).toBe(true);
+    // Once the 14:45 occurrence is covered, it is not due again until tomorrow.
+    const ranAt1446 = local(2026, 6, 12, 14, 46);
+    expect(isBackupDue(moved, ranAt1446, local(2026, 6, 12, 23, 0))).toBe(false);
+    expect(isBackupDue(moved, ranAt1446, local(2026, 6, 13, 14, 45))).toBe(true);
+  });
+
+  it('does NOT double-run the same day when the time is moved EARLIER (14:45 -> 14:35)', () => {
+    // Backup already taken today at 14:45; today's 14:35 occurrence is older
+    // than that run, so moving the time earlier must not trigger a second
+    // same-day backup — it resumes tomorrow at 14:35.
+    const ranAt1445 = local(2026, 6, 12, 14, 45);
+    const moved = policy({ time: '14:35' });
+    expect(isBackupDue(moved, ranAt1445, local(2026, 6, 12, 14, 50))).toBe(false);
+    expect(isBackupDue(moved, ranAt1445, local(2026, 6, 13, 14, 35))).toBe(true);
+  });
+
+  it('runs at the new time even if it has not occurred yet today', () => {
+    // Moved to 14:45 at 14:40 (before the new time): not due yet, then due at 14:45.
+    const ranAt1435 = local(2026, 6, 12, 14, 35);
+    const moved = policy({ time: '14:45' });
+    expect(isBackupDue(moved, ranAt1435, local(2026, 6, 12, 14, 40))).toBe(false);
+    expect(isBackupDue(moved, ranAt1435, local(2026, 6, 12, 14, 45))).toBe(true);
+  });
+});
+
 describe('nextRunAt', () => {
   it('is null when disabled', () => {
     expect(nextRunAt(policy({ enabled: false }), null, local(2026, 6, 12))).toBeNull();

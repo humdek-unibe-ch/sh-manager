@@ -8,7 +8,7 @@ SPDX-License-Identifier: MPL-2.0
 Audience: QA testers and server operators
 Status: Active
 Applies to: `sh-manager` (manager tool `1.4.0+`)
-Last verified: 2026-06-13
+Last verified: 2026-06-15
 Source of truth: `apps/cli/src/bin.ts`, `apps/web/src`, `e2e/docker-e2e.test.ts`
 
 This is the structured manual test plan for a manager release. It complements —
@@ -50,9 +50,10 @@ Conventions used in the steps:
 |---|---|---|
 | QA-BOOT | Server bootstrap + first-run operator setup | 4 |
 | QA-INST | Instance install (GUI wizard + CLI) | 4 |
-| QA-HLTH | Health checks | 2 |
+| QA-AUTH | Multi-instance CMS login isolation | 3 |
+| QA-HLTH | Health checks | 3 |
 | QA-BKP | Manual backups | 3 |
-| QA-SCHED | Scheduled backups + GFS retention | 6 |
+| QA-SCHED | Scheduled backups + GFS retention | 7 |
 | QA-RST | Restore | 4 |
 | QA-CLN | Clone | 2 |
 | QA-UPD | Update (dry-run / preflight / execute / rollback) | 4 |
@@ -194,6 +195,61 @@ sh-manager instance install \
 
 ---
 
+## QA-AUTH — Multi-instance CMS login isolation
+
+These cases target the bug where several instances served on the same host
+(`localhost:<port>`) shared ONE browser cookie jar (cookies are scoped by host,
+not port), so logging into — or updating — one instance silently logged the
+operator out of the others. Each instance now namespaces its httpOnly session
+cookies (`sh_auth_<id>`, `sh_refresh_<id>`, `sh_impersonate_<id>`) by
+`SELFHELP_INSTANCE_ID`. Run these with at least two instances on different ports
+(reuse `website1` from QA-INST-001 and `website2` from QA-INST-004), each with
+an admin account.
+
+### QA-AUTH-001 — Logging into one instance never logs out another
+
+- **Severity**: Critical (regression)
+- **Preconditions**: `website1` and `website2` running on different local ports.
+- **Steps**:
+  1. In one browser profile, log into `website1`'s CMS admin.
+  2. In a second tab (same profile), log into `website2`'s CMS admin.
+  3. Return to the `website1` tab and open an admin page.
+  4. In DevTools → Application → Cookies, inspect both origins.
+- **Expected**: Both sessions stay logged in. `website1` carries
+  `sh_auth_website1` and `website2` carries `sh_auth_website2` (distinct names);
+  neither overwrites the other. (`sh_csrf` may be shared across ports — that is
+  expected and harmless.)
+- **Automated equivalent**: `src/config/cookie-names.test.ts` (frontend).
+
+### QA-AUTH-002 — Update/restart of one instance keeps its own session
+
+- **Severity**: High
+- **Steps**:
+  1. Logged into `website1`, run an update or `docker restart` of its backend.
+  2. While it restarts, keep the `website1` tab open; refresh once it is back.
+  3. Confirm the untouched `website2` is still logged in.
+- **Expected**: `website1` recovers WITHOUT a forced re-login — the BFF treats a
+  briefly-unreachable backend as transient (503, session kept) and silently
+  refreshes once it is back. `website2` is unaffected. Neither bounces to
+  `/login`.
+- **Automated equivalent**: `src/config/__tests__/server.config.refresh.test.ts`
+  (unreachable vs invalid), `src/config/cookie-names.test.ts`.
+
+### QA-AUTH-003 — Access token silently renews from the 30-day refresh token
+
+- **Severity**: High
+- **Steps**:
+  1. Log into `website1`.
+  2. Let the session sit idle past the access-token TTL (default 1h; for a fast
+     check, lower `JWT_TOKEN_TTL` on a throwaway instance).
+  3. Navigate to an admin page after the access TTL has elapsed.
+- **Expected**: The page renders without a re-login — the proxy/BFF rotates the
+  access token using the refresh token transparently. The operator only lands on
+  `/login` once the 30-day refresh token itself is missing/expired.
+- **Automated equivalent**: `src/config/__tests__/server.config.refresh.test.ts`.
+
+---
+
 ## QA-HLTH — Health
 
 ### QA-HLTH-001 — Healthy instance reports healthy
@@ -218,6 +274,22 @@ sh-manager instance install \
 - **Expected**: Health degrades with the failing probe named; after restart
   the verdict returns to healthy.
 - **Automated equivalent**: `apps/cli/src/cli.test.ts` (health mapping).
+
+### QA-HLTH-003 — The `volume-init` container is expected to be "Exited (0)"
+
+- **Severity**: Medium
+- **Steps**:
+  1. Run `docker ps -a` (or open Docker Desktop) for an instance project.
+  2. Note the `…-volume-init-1` container's status.
+  3. Run `sh-manager instance health website1`.
+- **Expected**: `…-volume-init-1` shows `Exited (0)` — it is a one-shot that
+  hands ownership of the data volumes to the app user and then exits; the
+  Symfony services gate on its successful completion. An `Exited (0)` init
+  container is HEALTHY, not a half-running stack, and the manager's health
+  verdict (which probes the HTTP surface, not this container's Docker flag)
+  reports `healthy`. Only a NON-zero exit code is worth investigating.
+- **Automated equivalent**: `packages/docker/src/compose.test.ts`
+  (`volume-init` + `service_completed_successfully` gate).
 
 ---
 
@@ -345,6 +417,26 @@ Read [the scheduled-backups runbook](../operator/scheduled-backups.md) first.
   per-instance actions (taken / skipped / pruned), and exits 0.
 - **Automated equivalent**: none (deployment glue) — covered by this manual
   case plus QA-SCHED-002/003 for the underlying behavior.
+
+### QA-SCHED-007 — Editing the daily time reschedules correctly
+
+- **Severity**: High
+- **Steps**:
+  1. Set the schedule to a minute already passed today and run
+     `sh-manager server run-scheduled-backups` (a backup is taken).
+  2. Change the time LATER to another minute that has ALSO passed today; run the
+     trigger again (or wait for the GUI loop).
+  3. Separately, change the time EARLIER than the run already taken today; run
+     the trigger again.
+- **Expected**: Moving the time later the same day takes a NEW backup at the new
+  time — editing the policy does not reset "last run", and the new occurrence is
+  not yet covered. Moving it earlier than a run already taken today does NOT
+  double-run; it resumes at the new time tomorrow. The GUI "Next run" reflects
+  the edit immediately. (This is the "I changed 14:35 → 14:45 but no second
+  backup happened" report: later-same-day DOES run; earlier-same-day correctly
+  skips.)
+- **Automated equivalent**: `packages/backup/src/schedule.test.ts`
+  ("rescheduling the daily time mid-day").
 
 ---
 
