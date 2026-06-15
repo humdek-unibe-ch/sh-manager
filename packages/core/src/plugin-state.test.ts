@@ -130,6 +130,48 @@ describe('finalizePluginOperations', () => {
     expect(restarts).toEqual([['backend', 'worker', 'scheduler']]);
   });
 
+  it('rebuilds every Symfony cache after the bundles file lands and BEFORE restart so the new plugin route resolves', async () => {
+    // Regression for "Failed to load surveys / No route found for GET
+    // …/admin/plugins/<id>/surveys" right after a managed install: the prod
+    // images warm var/cache lazily and `compose restart` keeps the writable
+    // layer, so without a cache rebuild the rebooted kernel reuses the
+    // pre-plugin compiled container + router matcher and the plugin's
+    // DB-synced routes 404. cache:clear must run in all three services, after
+    // their bundles file is in place, and before the restart.
+    const { deps, calls, restarts } = fake();
+    await finalizePluginOperations({ operations: [installOp], coreVersion: '0.4.2' }, deps);
+
+    for (const svc of ['backend', 'worker', 'scheduler'] as const) {
+      const cacheClear = calls.find((c) => c.service === svc && c.cmd.includes('cache:clear'));
+      expect(cacheClear, `cache:clear missing for ${svc}`).toBeDefined();
+    }
+
+    // Ordering: worker/scheduler get the bundles file (tar -xf) BEFORE their
+    // cache:clear, and the whole rebuild completes BEFORE the single restart.
+    const flat = calls.map((c) => `${c.service}:${c.cmd}`);
+    for (const svc of ['worker', 'scheduler'] as const) {
+      const extractIdx = flat.findIndex((c) => c.startsWith(`${svc}:`) && c.includes('tar -xf'));
+      const clearIdx = flat.findIndex((c) => c.startsWith(`${svc}:`) && c.includes('cache:clear'));
+      expect(extractIdx).toBeGreaterThanOrEqual(0);
+      expect(clearIdx).toBeGreaterThan(extractIdx);
+    }
+    expect(restarts).toEqual([['backend', 'worker', 'scheduler']]);
+  });
+
+  it('falls back to deleting the compiled cache when cache:clear fails so the restart still gets a fresh kernel', async () => {
+    const { deps, calls } = fake({ failMatching: { pattern: /cache:clear/, message: 'warmup boom' } });
+    const report = await finalizePluginOperations({ operations: [installOp], coreVersion: '0.4.2' }, deps);
+
+    // The install itself still succeeds — the cache rebuild is best-effort.
+    expect(report.outcomes[0]).toMatchObject({ status: 'done' });
+    expect(report.restarted).toBe(true);
+    // Every service that failed cache:clear drops its compiled cache instead.
+    for (const svc of ['backend', 'worker', 'scheduler'] as const) {
+      const fallback = calls.find((c) => c.service === svc && c.cmd.includes('rm -rf var/cache'));
+      expect(fallback, `cache fallback missing for ${svc}`).toBeDefined();
+    }
+  });
+
   it('uses composer remove for uninstalls and tolerates an already-removed package', async () => {
     const uninstall: PendingPluginOperation = {
       operationId: 9,
@@ -224,6 +266,11 @@ describe('reinstallPluginsForCore', () => {
     expect(snapshotIdx).toBeGreaterThan(repairIdx);
     // Snapshot is keyed by the NEW core version (the old one must not be reused).
     expect(backendCmds[snapshotIdx]).toContain(pluginStateSnapshotPath('0.5.0'));
+    // Caches are recompiled in every service so the new-core kernel loads the
+    // reinstalled plugin bundles + routes (else the admin API 404s post-update).
+    for (const svc of ['backend', 'worker', 'scheduler'] as const) {
+      expect(calls.some((c) => c.service === svc && c.cmd.includes('cache:clear'))).toBe(true);
+    }
     expect(restarts).toEqual([['backend', 'worker', 'scheduler']]);
   });
 
@@ -288,6 +335,12 @@ describe('restorePluginStateIfNeeded', () => {
     for (const svc of ['backend', 'worker', 'scheduler'] as const) {
       const extract = calls.find((c) => c.service === svc && c.cmd.includes('tar -xf'));
       expect(extract?.cmd).toContain(pluginStateSnapshotPath('0.4.2'));
+      // After restoring the snapshot the recreated container has lazily warmed a
+      // plugin-less cache; recompile it before restart so the restored plugins
+      // (and their routes) are active again.
+      const extractIdx = calls.findIndex((c) => c.service === svc && c.cmd.includes('tar -xf'));
+      const clearIdx = calls.findIndex((c) => c.service === svc && c.cmd.includes('cache:clear'));
+      expect(clearIdx).toBeGreaterThan(extractIdx);
     }
     expect(restarts).toEqual([['backend', 'worker', 'scheduler']]);
   });

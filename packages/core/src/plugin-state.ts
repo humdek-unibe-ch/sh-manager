@@ -256,6 +256,45 @@ async function extractSnapshot(deps: PluginExecDeps, service: SymfonyService, co
 }
 
 /**
+ * Rebuild the Symfony compiled cache (DI container + dumped router matcher) in
+ * each service so a freshly added/removed plugin BUNDLE and its DB-synced
+ * `api_routes` actually load on the next boot.
+ *
+ * Why this is mandatory before the restart: the production images bake an EMPTY
+ * `var/cache` and warm it lazily on the first request (see the backend
+ * Dockerfile, `--no-scripts` + "cache is warmed lazily at container start").
+ * `docker compose restart` keeps the container's writable layer, so the cache
+ * compiled BEFORE the plugin changed — without the plugin's bundle registered
+ * and without its rows from the backend's DB-backed ApiRouteLoader — survives
+ * the restart. The plugin then stays invisible at runtime: its admin API 404s
+ * ("No route found for GET …/admin/plugins/<id>/…") and the host reports
+ * "plugin could not be mounted" even though the row, vendor and bundles file
+ * are all present. Recompiling here makes the post-restart kernel pick up the
+ * new `selfhelp_plugin_bundles.php` + `api_routes` table.
+ *
+ * Best-effort and self-healing: a transient `cache:clear` failure falls back to
+ * deleting the compiled cache so the post-restart lazy warm still produces a
+ * fresh (plugin-aware) cache rather than leaving the stale one in place.
+ */
+async function rebuildSymfonyCaches(
+  deps: PluginExecDeps,
+  services: readonly SymfonyService[],
+): Promise<void> {
+  for (const service of services) {
+    await logLine(deps, `rebuild Symfony cache (${service}) so new plugin bundles + routes load after restart`);
+    try {
+      await deps.exec(service, ['php', 'bin/console', 'cache:clear']);
+    } catch (err) {
+      await logLine(
+        deps,
+        `cache:clear failed on ${service} (${errMessage(err)}); dropping the compiled cache for a lazy re-warm on restart`,
+      );
+      await deps.exec(service, ['sh', '-c', 'rm -rf var/cache/* 2>/dev/null || true']);
+    }
+  }
+}
+
+/**
  * Drain parked managed-mode plugin operations. Sequential and fail-fast: a
  * failed operation stops the drain (state is uncertain), but the snapshot +
  * sync + restart still run when any operation finalized so the services pick
@@ -315,6 +354,10 @@ export async function finalizePluginOperations(
     await snapshotPluginState(deps, input.coreVersion);
     await extractSnapshot(deps, 'worker', input.coreVersion);
     await extractSnapshot(deps, 'scheduler', input.coreVersion);
+    // Recompile every service's cache AFTER the bundles file landed in all
+    // three so the restart boots a kernel that actually loads the plugin and
+    // its routes (otherwise the admin API 404s — see rebuildSymfonyCaches).
+    await rebuildSymfonyCaches(deps, SYMFONY_SERVICES);
     await deps.restart(SYMFONY_SERVICES);
   }
   return { outcomes, restarted: anyDone };
@@ -383,6 +426,7 @@ export async function reinstallPluginsForCore(
   await snapshotPluginState(deps, input.coreVersion);
   await extractSnapshot(deps, 'worker', input.coreVersion);
   await extractSnapshot(deps, 'scheduler', input.coreVersion);
+  await rebuildSymfonyCaches(deps, SYMFONY_SERVICES);
   await deps.restart(SYMFONY_SERVICES);
   return { reinstalled, restarted: true };
 }
@@ -406,6 +450,7 @@ export async function restorePluginStateIfNeeded(
   for (const service of SYMFONY_SERVICES) {
     await extractSnapshot(deps, service, coreVersion);
   }
+  await rebuildSymfonyCaches(deps, SYMFONY_SERVICES);
   await deps.restart(SYMFONY_SERVICES);
   return { restored: true };
 }
