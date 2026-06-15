@@ -19,7 +19,7 @@ A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instanc
 ## [1.4.2] - Unreleased
 
 ### Added
-- **Clickable domain in instance overview** — the domain field in the instance detail page is now a clickable link that opens in a new tab, allowing operators to quickly navigate to their instances.
+- **Clickable domain in instance list and detail** — the domain field in both the instances list table and the instance detail page is now a clickable link that opens in a new tab, allowing operators to quickly navigate to their instances.
 - **Help text for admin display name** — the admin name field in the create-instance wizard now includes descriptive help text explaining that it is an optional display name for the admin account.
 
 ## [1.4.1] - 2026-06-13

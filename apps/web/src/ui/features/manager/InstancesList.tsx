@@ -105,7 +105,13 @@ export function InstancesList({ client, onOpen, onCreate }: InstancesListProps):
                       ) : null}
                     </Table.Td>
                     <Table.Td>
-                      <Text size="sm">{inst.domain || '—'}</Text>
+                      {inst.domain ? (
+                        <Anchor href={inst.domain.startsWith('http') ? inst.domain : `http://${inst.domain}`} target="_blank" rel="noopener noreferrer" size="sm">
+                          {inst.domain}
+                        </Anchor>
+                      ) : (
+                        <Text size="sm">—</Text>
+                      )}
                     </Table.Td>
                     <Table.Td>
                       <Text size="sm">{inst.mode ?? '—'}</Text>
