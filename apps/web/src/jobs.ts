@@ -60,6 +60,23 @@ export interface OperationRecord {
   error: string | null;
 }
 
+/**
+ * Compact change notification emitted by {@link OperationJournal} whenever an
+ * operation is created or advances (log line, phase, success, failure). It
+ * deliberately omits the (potentially large) log array: the manager web UI
+ * uses it as a "this operation changed — refetch what you're showing" nudge,
+ * which is what powers the Server-Sent-Events live console (no polling lag).
+ */
+export interface OperationEvent {
+  id: string;
+  kind: OperationKind;
+  instanceId: string | null;
+  status: OperationStatus;
+  phase: string;
+  startedAt: string;
+  finishedAt: string | null;
+}
+
 export interface AuditEntry {
   at: string;
   /** Operator email, or "system" for the background poller. */
@@ -84,10 +101,45 @@ export class OperationJournal {
   private readonly now: () => Date;
   /** Serializes read-modify-write per operation id (append vs complete races). */
   private readonly chains = new Map<string, Promise<void>>();
+  /** Live change listeners (the SSE stream subscribes here). */
+  private readonly listeners = new Set<(event: OperationEvent) => void>();
 
   constructor(root: string, now: () => Date = () => new Date()) {
     this.dir = path.join(managerStateDir(root), 'operations');
     this.now = now;
+  }
+
+  /**
+   * Subscribe to operation change events (create / advance / finish). Returns
+   * an unsubscribe function. A listener throwing must never break journaling,
+   * so emit() isolates each callback.
+   */
+  subscribe(listener: (event: OperationEvent) => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  private emit(record: OperationRecord): void {
+    if (this.listeners.size === 0) return;
+    const event: OperationEvent = {
+      id: record.id,
+      kind: record.kind,
+      instanceId: record.instanceId,
+      status: record.status,
+      phase: record.phase,
+      startedAt: record.startedAt,
+      finishedAt: record.finishedAt,
+    };
+    for (const listener of [...this.listeners]) {
+      try {
+        listener(event);
+      } catch {
+        // A broken subscriber (e.g. a dead SSE socket) must not stop the
+        // operation from being journaled or notified to others.
+      }
+    }
   }
 
   private file(id: string): string {
@@ -132,49 +184,58 @@ export class OperationJournal {
       error: null,
     };
     await this.writeRecordAtomic(this.file(record.id), JSON.stringify(record, null, 2));
+    this.emit(record);
     return record;
   }
 
-  private async mutate(id: string, fn: (r: OperationRecord) => void): Promise<void> {
+  private async mutate(id: string, fn: (r: OperationRecord) => void): Promise<OperationRecord> {
+    let updated: OperationRecord | undefined;
     await this.chain(id, async () => {
       const raw = await readFile(this.file(id), 'utf8');
       const record = JSON.parse(raw) as OperationRecord;
       fn(record);
       await this.writeRecordAtomic(this.file(id), JSON.stringify(record, null, 2));
+      updated = record;
     });
+    if (!updated) throw new Error(`Operation "${id}" could not be updated.`);
+    return updated;
   }
 
   async append(id: string, line: string): Promise<void> {
     const at = this.now().toISOString();
-    await this.mutate(id, (r) => {
+    const record = await this.mutate(id, (r) => {
       r.log.push(`[${at}] ${redactString(line)}`);
       if (r.log.length > MAX_LOG_LINES) r.log.splice(0, r.log.length - MAX_LOG_LINES);
     });
+    this.emit(record);
   }
 
   async setPhase(id: string, phase: string): Promise<void> {
     const at = this.now().toISOString();
-    await this.mutate(id, (r) => {
+    const record = await this.mutate(id, (r) => {
       r.phase = phase;
       r.log.push(`[${at}] --- ${redactString(phase)} ---`);
     });
+    this.emit(record);
   }
 
   async complete(id: string, result: unknown): Promise<void> {
-    await this.mutate(id, (r) => {
+    const record = await this.mutate(id, (r) => {
       r.status = 'succeeded';
       r.phase = 'done';
       r.finishedAt = this.now().toISOString();
       r.result = result === undefined ? null : redactObject(result);
     });
+    this.emit(record);
   }
 
   async fail(id: string, error: unknown): Promise<void> {
-    await this.mutate(id, (r) => {
+    const record = await this.mutate(id, (r) => {
       r.status = 'failed';
       r.finishedAt = this.now().toISOString();
       r.error = redactString(error instanceof Error ? error.message : String(error));
     });
+    this.emit(record);
   }
 
   async get(id: string): Promise<OperationRecord | null> {

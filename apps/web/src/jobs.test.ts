@@ -38,6 +38,45 @@ describe('OperationJournal', () => {
     expect(read?.result).toEqual({ backupId: 'backup-1' });
   });
 
+  it('notifies subscribers on create, advance and finish (the SSE source)', async () => {
+    const journal = new OperationJournal(root);
+    const events: { id: string; status: string; phase: string }[] = [];
+    const unsubscribe = journal.subscribe((e) => events.push({ id: e.id, status: e.status, phase: e.phase }));
+
+    const record = await journal.create('instance_backup', 'clinic-a');
+    await journal.setPhase(record.id, 'backup');
+    await journal.append(record.id, 'dumping database');
+    await journal.complete(record.id, { backupId: 'backup-1' });
+
+    // create + setPhase + append + complete = 4 notifications, all for this op.
+    expect(events.map((e) => e.status)).toEqual(['running', 'running', 'running', 'succeeded']);
+    expect(events.at(-1)).toMatchObject({ id: record.id, status: 'succeeded', phase: 'done' });
+    expect(events.every((e) => e.id === record.id)).toBe(true);
+
+    // After unsubscribing, no further events arrive.
+    unsubscribe();
+    await journal.fail(record.id, new Error('late'));
+    expect(events.length).toBe(4);
+  });
+
+  it('isolates a throwing subscriber so journaling still completes', async () => {
+    const journal = new OperationJournal(root);
+    let healthy = 0;
+    journal.subscribe(() => {
+      throw new Error('subscriber blew up');
+    });
+    journal.subscribe(() => {
+      healthy += 1;
+    });
+
+    const record = await journal.create('instance_update', 'clinic-a');
+    await journal.complete(record.id, null);
+
+    // The healthy subscriber saw both events and the record still completed.
+    expect(healthy).toBe(2);
+    expect((await journal.get(record.id))?.status).toBe('succeeded');
+  });
+
   it('redacts secrets from log lines, results and errors before they touch disk', async () => {
     const journal = new OperationJournal(root);
     const record = await journal.create('instance_update', 'clinic-a');

@@ -34,6 +34,7 @@ import { CreateInstanceWizard } from './CreateInstanceWizard';
 import { InstanceDetail } from './InstanceDetail';
 import { INSTANCES_KEY, instanceStatusTone } from './InstancesList';
 import { parseConsoleRoute } from './console-route';
+import { useManagerEvents } from './use-manager-events';
 
 const DOT_COLOR: Record<BadgeTone, string> = {
   ok: 'var(--mantine-color-teal-6)',
@@ -71,6 +72,9 @@ export interface OperationsConsoleProps {
 
 export function OperationsConsole({ client, onSignOut }: OperationsConsoleProps): JSX.Element {
   const queryClient = useQueryClient();
+  // Live operation/command progress via the BFF Server-Sent-Events stream; the
+  // query polling below stays on as a fallback if the stream is unavailable.
+  useManagerEvents();
   const navigate = useNavigate();
   const location = useLocation();
   // The console is a single mounted shell, so it derives its view from the
