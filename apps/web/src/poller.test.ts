@@ -58,6 +58,7 @@ function fakeInstances(b: FakeBehaviour): ManagerInstanceActions {
     clone: unsupported,
     setAddress: unsupported,
     setMailer: unsupported,
+    setName: unsupported,
     setEnv: unsupported,
     remove: unsupported,
     async hasPendingCmsOperation(id) {

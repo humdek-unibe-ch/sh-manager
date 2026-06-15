@@ -28,6 +28,7 @@ import {
   instanceGetEnv,
   instanceSetAddress,
   instanceSetEnv,
+  instanceSetName,
   instanceGetMailer,
   instanceHealth,
   instanceInstall,
@@ -758,6 +759,23 @@ instance
       for (const w of res.warnings) console.log(`  warning: ${w}`);
       console.log(res.restarted ? `Instance restarted; reachable at ${res.publicUrl}` : 'Config written. Restart pending (run docker compose up -d in the instance directory).');
       if (res.health) console.log(formatHealth(res.health));
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+instance
+  .command('rename <id> <displayName>')
+  .description("Rename an instance's display name only (metadata; the technical id and all data are untouched)")
+  .action(async (id: string, displayName: string) => {
+    try {
+      const d = await deps(program.opts().root as string);
+      const res = await instanceSetName(d, id, { displayName });
+      console.log(
+        res.changed
+          ? `Renamed: "${res.previousName}" -> "${res.displayName}" (id "${id}" unchanged).`
+          : `Display name unchanged ("${res.displayName}").`,
+      );
     } catch (err) {
       fail(err);
     }

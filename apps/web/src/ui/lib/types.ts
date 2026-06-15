@@ -24,6 +24,7 @@ import type {
   SetAddressRequest,
   SetEnvRequest,
   SetMailerRequest,
+  SetNameRequest,
   UpdateInstanceRequest,
 } from '../../instances';
 import type { OperationRecord, OperationStatus } from '../../jobs';
@@ -49,6 +50,7 @@ export type {
   SetAddressRequest,
   SetEnvRequest,
   SetMailerRequest,
+  SetNameRequest,
   UpdateInstanceRequest,
   OperationRecord,
   OperationStatus,

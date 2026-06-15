@@ -86,6 +86,7 @@ import {
   SECRET_FILE_MODE,
   ensureManagerToken,
   generateCloneSecrets,
+  generateInstanceReadme,
   instancePaths,
   instancesDir,
   nodeSecretIO,
@@ -1946,6 +1947,7 @@ export async function instanceRestore(
   secretsRegenerated?: boolean;
   secretsWritten?: string[];
   migrated?: boolean;
+  pluginsRemounted?: boolean;
   health?: HealthReport;
 }> {
   const paths = instancePaths(instanceId, deps.root);
@@ -2107,6 +2109,21 @@ export async function instanceRestore(
     ]);
   }
 
+  // 7b. Re-mount plugins. The restored DB lists the instance's plugins as
+  // installed and the plugin_artifacts volumes were repopulated above, but the
+  // freshly (re)created Symfony containers start WITHOUT the composer-installed
+  // bundles mounted — exactly like an address/mailer/env recreate. Without this
+  // the host reports "plugin could not be mounted / runtime import failed" and
+  // the instance is left in a half-restored state (DB says installed, runtime
+  // not loaded). Re-extract the composer-state snapshot from the plugin volume
+  // into backend/worker/scheduler and restart them so the plugin runtime and
+  // its public ESM artifacts are served again. Best-effort (never throws).
+  const pluginsRemounted = await restorePluginStateAfterRecreate(
+    deps,
+    instanceId,
+    restoredManifest.versions.selfhelp,
+  );
+
   // 8. Health.
   const health = evaluateHealth(
     instanceId,
@@ -2122,6 +2139,7 @@ export async function instanceRestore(
     secretsRegenerated,
     ...(secretsWritten ? { secretsWritten } : {}),
     migrated,
+    pluginsRemounted,
     health,
   };
 }
@@ -2455,6 +2473,65 @@ export async function instanceSetAddress(
     restarted: restart,
     ...(health ? { health } : {}),
   };
+}
+
+// ---------------------------------------------------------------------------
+// instance rename (change the operator-facing display name only)
+// ---------------------------------------------------------------------------
+
+export interface SetNameOptions {
+  /** New operator-facing display name (the instanceId is never changed). */
+  displayName: string;
+}
+
+export interface SetNameResult {
+  changed: boolean;
+  previousName: string;
+  displayName: string;
+}
+
+/**
+ * Renames an instance's operator-facing DISPLAY NAME only.
+ *
+ * The `instanceId` is the immutable technical key — it names the Compose
+ * project, the on-disk directory, the Docker volumes/network and the routing —
+ * so renaming *it* would have to recreate every Docker resource and migrate all
+ * data; that is deliberately out of scope. A display-name change is metadata
+ * only: it atomically rewrites the manifest (and regenerates the operator
+ * README so it matches), with NO container restart and no data risk. This is
+ * the rename operators want after a clone or a domain change.
+ */
+export async function instanceSetName(
+  deps: ActionDeps,
+  instanceId: string,
+  opts: SetNameOptions,
+): Promise<SetNameResult> {
+  const manifest = await readManifestFriendly(deps, instanceId);
+  const displayName = opts.displayName.trim();
+  if (displayName === '') {
+    throw new Error('A display name is required (it cannot be empty).');
+  }
+  if (displayName.length > 200) {
+    throw new Error('Display name is too long (max 200 characters).');
+  }
+  const previousName = manifest.displayName;
+  const changed = displayName !== previousName;
+
+  const updated: InstanceManifest = {
+    ...manifest,
+    displayName,
+    updatedAt: deps.now?.() ?? new Date().toISOString(),
+  };
+  await new ManifestStore(instanceId, deps.root).write(updated);
+
+  // Keep the generated operator README in sync (it prints the display name).
+  const paths = instancePaths(instanceId, deps.root);
+  await writeFileAtomic(
+    paths.readmePath,
+    generateInstanceReadme(updated, { managerVersion: deps.managerVersion, root: deps.root }),
+  );
+
+  return { changed, previousName, displayName };
 }
 
 // ---------------------------------------------------------------------------

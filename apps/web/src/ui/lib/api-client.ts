@@ -33,6 +33,7 @@ import type {
   SetAddressRequest,
   SetEnvRequest,
   SetMailerRequest,
+  SetNameRequest,
   Snapshot,
   UpdateInstanceRequest,
 } from './types';
@@ -78,8 +79,12 @@ export interface ApiClientOptions {
 export interface ApiClient {
   getState(): Promise<Snapshot>;
   managerUpdateCheck(): Promise<ManagerUpdateCheck>;
-  /** Installable release versions for the create wizard's version dropdown. */
-  listVersions(channel?: string): Promise<RegistryVersions>;
+  /**
+   * Installable release versions for a version dropdown. `kind` selects the
+   * registry feed: `core` (install/update target, default) or `frontend` (the
+   * independently-released frontend used by the frontend-only update dialog).
+   */
+  listVersions(channel?: string, kind?: 'core' | 'frontend'): Promise<RegistryVersions>;
   /** Pre-auth sign-in metadata (works without a session). */
   getAuthMeta(): Promise<AuthMeta>;
   login(email: string, password: string): Promise<LoginResult>;
@@ -123,6 +128,8 @@ export interface ApiClient {
   setInstanceAddress(instanceId: string, req: SetAddressRequest): Promise<StartedOperation>;
   /** Set or clear the outbound-mail DSN; the instance restarts automatically. */
   setMailer(instanceId: string, req: SetMailerRequest): Promise<StartedOperation>;
+  /** Rename the instance's display name only (metadata; no restart). */
+  setInstanceName(instanceId: string, req: SetNameRequest): Promise<StartedOperation>;
   /** Persist non-secret env overrides; the instance restarts automatically. */
   setInstanceEnv(instanceId: string, req: SetEnvRequest): Promise<StartedOperation>;
   removeInstance(instanceId: string, req: RemoveInstanceRequest): Promise<StartedOperation>;
@@ -179,11 +186,13 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       return snapshot;
     },
     managerUpdateCheck: () => request<ManagerUpdateCheck>('/api/manager/update-check', 'GET'),
-    listVersions: (channel) =>
-      request<RegistryVersions>(
-        `/api/registry/versions${channel ? `?channel=${encodeURIComponent(channel)}` : ''}`,
-        'GET',
-      ),
+    listVersions: (channel, kind) => {
+      const params = new URLSearchParams();
+      if (channel) params.set('channel', channel);
+      if (kind) params.set('kind', kind);
+      const qs = params.toString();
+      return request<RegistryVersions>(`/api/registry/versions${qs ? `?${qs}` : ''}`, 'GET');
+    },
     getAuthMeta: () => request<AuthMeta>('/api/auth/meta', 'GET'),
     async login(email, password) {
       const result = await request<LoginResult>('/api/login', 'POST', { email, password });
@@ -256,6 +265,8 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       request<StartedOperation>(`/api/instances/${encodeURIComponent(instanceId)}/address`, 'POST', req),
     setMailer: (instanceId, req) =>
       request<StartedOperation>(`/api/instances/${encodeURIComponent(instanceId)}/mailer`, 'POST', req),
+    setInstanceName: (instanceId, req) =>
+      request<StartedOperation>(`/api/instances/${encodeURIComponent(instanceId)}/name`, 'POST', req),
     setInstanceEnv: (instanceId, req) =>
       request<StartedOperation>(`/api/instances/${encodeURIComponent(instanceId)}/env`, 'POST', req),
     removeInstance: (instanceId, req) =>

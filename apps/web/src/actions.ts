@@ -63,9 +63,17 @@ export interface BootstrapActions {
   checkResources(requiredPorts: number[]): Promise<ResourceCheck>;
   /** Optional: "is a newer manager released?" surfaced in the UI header. */
   checkManagerUpdate?(): Promise<ManagerUpdateCheck>;
-  /** Optional: list installable versions for the create wizard's version dropdown. */
-  listVersions?(registryUrl: string, channel: string): Promise<RegistryVersions>;
+  /**
+   * Optional: list installable versions for a version dropdown. `kind` selects
+   * the registry channel feed — `core` (the install/update target, default) or
+   * `frontend` (the independently-released frontend, used by the frontend-only
+   * update dialog).
+   */
+  listVersions?(registryUrl: string, channel: string, kind?: RegistryVersionKind): Promise<RegistryVersions>;
 }
+
+/** Which registry feed a version listing reads from. */
+export type RegistryVersionKind = 'core' | 'frontend';
 
 /** Map the typed sub-results onto the generic {@link CheckResult}. */
 export function dockerToCheck(d: DockerCheck): CheckResult {

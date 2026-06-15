@@ -49,6 +49,32 @@ export function InstanceFrontendUpdateDialog({
   onClose,
   onStarted,
 }: InstanceFrontendUpdateDialogProps): JSX.Element {
+  return (
+    <Modal opened={opened} onClose={onClose} title={`Update frontend — ${instanceId}`} size="lg" centered>
+      <InstanceFrontendUpdateBody client={client} instanceId={instanceId} onClose={onClose} onStarted={onStarted} />
+    </Modal>
+  );
+}
+
+export interface InstanceFrontendUpdateBodyProps {
+  client: ApiClient;
+  instanceId: string;
+  onClose: () => void;
+  onStarted: (operationId: string) => void;
+}
+
+/**
+ * The frontend-only update form without the surrounding Modal, so it can be
+ * embedded in {@link InstanceFrontendUpdateDialog} or in the combined
+ * {@link UpdateDialog} (mode = frontend). Keeps the current core and swaps only
+ * the stateless frontend container.
+ */
+export function InstanceFrontendUpdateBody({
+  client,
+  instanceId,
+  onClose,
+  onStarted,
+}: InstanceFrontendUpdateBodyProps): JSX.Element {
   const [target, setTarget] = useState('');
   const [useTestChannel, setUseTestChannel] = useState(false);
   const [plan, setPlan] = useState<FrontendUpdatePlan | null>(null);
@@ -80,7 +106,6 @@ export function InstanceFrontendUpdateDialog({
   const canExecute = plan !== null && isExecutable(plan) && !execute.isPending;
 
   return (
-    <Modal opened={opened} onClose={onClose} title={`Update frontend — ${instanceId}`} size="lg" centered>
       <Stack gap="md">
         <Text size="sm" c="dimmed">
           The frontend is released independently of the core. This swaps only the frontend container to a
@@ -90,6 +115,7 @@ export function InstanceFrontendUpdateDialog({
 
         <VersionSelect
           client={client}
+          kind="frontend"
           label="Target frontend version"
           {...(useTestChannel ? { channel: 'test' } : {})}
           value={target === '' ? 'latest' : target}
@@ -167,6 +193,5 @@ export function InstanceFrontendUpdateDialog({
           </Button>
         </Group>
       </Stack>
-    </Modal>
   );
 }

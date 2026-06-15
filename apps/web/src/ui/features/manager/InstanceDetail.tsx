@@ -10,24 +10,25 @@
  * lock + audit). The page polls the journal, so progress is visible here AND
  * survives a browser reload.
  */
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Anchor, Badge, Group, Stack, Table, Text, Title } from '@mantine/core';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { notifications } from '@mantine/notifications';
 import { Alert, Button, Card, EmptyState, KeyValue, Spinner, StatusBadge } from '../../components';
 import { ApiError, type ApiClient, type InstanceHealthReport } from '../../lib/api-client';
 import type { OperationRecord } from '../../lib/types';
 import { BackupManager } from './BackupManager';
 import { CloneInstanceDialog } from './CloneInstanceDialog';
 import { EnvDialog } from './EnvDialog';
-import { InstanceUpdateDialog } from './InstanceUpdateDialog';
-import { InstanceFrontendUpdateDialog } from './InstanceFrontendUpdateDialog';
+import { UpdateDialog } from './UpdateDialog';
 import { MailerDialog } from './MailerDialog';
 import { OperationLog, operationTone } from './OperationLog';
 import { RemoveInstanceDialog } from './RemoveInstanceDialog';
+import { RenameInstanceDialog } from './RenameInstanceDialog';
 import { SetAddressDialog } from './SetAddressDialog';
 import { instanceStatusTone } from './InstancesList';
 
-type DialogKind = 'update' | 'frontend-update' | 'clone' | 'address' | 'mailer' | 'env' | 'remove' | null;
+type DialogKind = 'update' | 'clone' | 'rename' | 'address' | 'mailer' | 'env' | 'remove' | null;
 
 function healthTone(overall: InstanceHealthReport['overall']): 'ok' | 'warning' | 'error' | 'neutral' {
   switch (overall) {
@@ -50,6 +51,7 @@ export interface InstanceDetailProps {
 export function InstanceDetail({ client, instanceId }: InstanceDetailProps): JSX.Element {
   const [dialog, setDialog] = useState<DialogKind>(null);
   const [watchedOperationId, setWatchedOperationId] = useState<string | null>(null);
+  const queryClient = useQueryClient();
 
   const detailQuery = useQuery({
     queryKey: ['manager', 'instance', instanceId],
@@ -63,6 +65,42 @@ export function InstanceDetail({ client, instanceId }: InstanceDetailProps): JSX
     refetchInterval: 5_000,
   });
 
+  // Watch the in-progress operation here too (shares <OperationLog/>'s query
+  // key, so it's a single poll). The moment it reaches a terminal state we
+  // refresh EVERY query scoped to this instance — detail, operations, backups,
+  // schedule, mailer, env — so the whole view reflects the new state without
+  // waiting for the next interval tick, and the operator gets a toast.
+  const watchedQuery = useQuery({
+    queryKey: ['manager', 'operation', watchedOperationId],
+    queryFn: () => client.getOperation(watchedOperationId as string),
+    enabled: watchedOperationId !== null,
+    refetchInterval: (q) => (q.state.data?.status === 'running' ? 2_000 : false),
+  });
+
+  const refreshInstance = (): void => {
+    void queryClient.invalidateQueries({ queryKey: ['manager', 'instance', instanceId] });
+  };
+
+  const notifiedOpRef = useRef<string | null>(null);
+  useEffect(() => {
+    const op = watchedQuery.data;
+    if (!op || op.status === 'running') return;
+    if (notifiedOpRef.current === op.id) return;
+    notifiedOpRef.current = op.id;
+    void queryClient.invalidateQueries({ queryKey: ['manager', 'instance', instanceId] });
+    const label = op.kind.replace(/_/g, ' ');
+    if (op.status === 'succeeded') {
+      notifications.show({ color: 'teal', title: 'Operation finished', message: `${label} completed.` });
+    } else if (op.status === 'failed') {
+      notifications.show({
+        color: 'red',
+        title: 'Operation failed',
+        message: op.error ?? `${label} failed.`,
+        autoClose: 8_000,
+      });
+    }
+  }, [watchedQuery.data, instanceId, queryClient]);
+
   const health = useMutation({ mutationFn: () => client.runInstanceHealth(instanceId) });
 
   const detail = detailQuery.data ?? null;
@@ -72,6 +110,9 @@ export function InstanceDetail({ client, instanceId }: InstanceDetailProps): JSX
 
   const onStarted = (operationId: string): void => {
     setWatchedOperationId(operationId);
+    notifiedOpRef.current = null;
+    // Pull in the brand-new journal row immediately (don't wait for the tick).
+    refreshInstance();
   };
 
   if (detailQuery.isPending) {
@@ -110,11 +151,11 @@ export function InstanceDetail({ client, instanceId }: InstanceDetailProps): JSX
           <Button variant="primary" disabled={busy} onClick={() => setDialog('update')}>
             Update…
           </Button>
-          <Button variant="secondary" disabled={busy} onClick={() => setDialog('frontend-update')}>
-            Update frontend…
-          </Button>
           <Button variant="secondary" disabled={busy} onClick={() => setDialog('clone')}>
             Clone…
+          </Button>
+          <Button variant="secondary" disabled={busy} onClick={() => setDialog('rename')}>
+            Rename…
           </Button>
           <Button variant="secondary" disabled={busy} onClick={() => setDialog('address')}>
             Change address…
@@ -211,6 +252,11 @@ export function InstanceDetail({ client, instanceId }: InstanceDetailProps): JSX
       <Card
         title="Operation history"
         description="Every GUI and background action on this instance, with its full (redacted) log."
+        aside={
+          <Button variant="ghost" loading={operationsQuery.isFetching} onClick={refreshInstance}>
+            Refresh
+          </Button>
+        }
       >
         {operationsQuery.isPending ? (
           <Group justify="center" py="md">
@@ -259,17 +305,10 @@ export function InstanceDetail({ client, instanceId }: InstanceDetailProps): JSX
         )}
       </Card>
 
-      <InstanceUpdateDialog
+      <UpdateDialog
         client={client}
         instanceId={instanceId}
         opened={dialog === 'update'}
-        onClose={() => setDialog(null)}
-        onStarted={onStarted}
-      />
-      <InstanceFrontendUpdateDialog
-        client={client}
-        instanceId={instanceId}
-        opened={dialog === 'frontend-update'}
         onClose={() => setDialog(null)}
         onStarted={onStarted}
       />
@@ -278,6 +317,14 @@ export function InstanceDetail({ client, instanceId }: InstanceDetailProps): JSX
         sourceInstanceId={instanceId}
         sourceMode={summary.mode === 'local' ? 'local' : summary.mode === 'production' ? 'production' : null}
         opened={dialog === 'clone'}
+        onClose={() => setDialog(null)}
+        onStarted={onStarted}
+      />
+      <RenameInstanceDialog
+        client={client}
+        instanceId={instanceId}
+        currentName={summary.displayName}
+        opened={dialog === 'rename'}
         onClose={() => setDialog(null)}
         onStarted={onStarted}
       />

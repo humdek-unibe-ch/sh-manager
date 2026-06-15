@@ -50,6 +50,27 @@ export function InstanceUpdateDialog({
   onClose,
   onStarted,
 }: InstanceUpdateDialogProps): JSX.Element {
+  return (
+    <Modal opened={opened} onClose={onClose} title={`Update ${instanceId}`} size="lg" centered>
+      <InstanceUpdateBody client={client} instanceId={instanceId} onClose={onClose} onStarted={onStarted} />
+    </Modal>
+  );
+}
+
+export interface InstanceUpdateBodyProps {
+  client: ApiClient;
+  instanceId: string;
+  onClose: () => void;
+  onStarted: (operationId: string) => void;
+}
+
+/**
+ * The core-update form without the surrounding Modal, so it can be embedded
+ * either in {@link InstanceUpdateDialog} or in the combined {@link UpdateDialog}
+ * (mode = core). Updating the core also moves the frontend to a release the new
+ * core supports — they ship in the same operation, which the dry-run plan shows.
+ */
+export function InstanceUpdateBody({ client, instanceId, onClose, onStarted }: InstanceUpdateBodyProps): JSX.Element {
   const [target, setTarget] = useState('');
   const [useTestChannel, setUseTestChannel] = useState(false);
   const [acceptMigrationRisk, setAcceptMigrationRisk] = useState(false);
@@ -90,12 +111,12 @@ export function InstanceUpdateDialog({
   const canExecute = plan !== null && isExecutable(plan) && !execute.isPending;
 
   return (
-    <Modal opened={opened} onClose={onClose} title={`Update ${instanceId}`} size="lg" centered>
       <Stack gap="md">
         <Text size="sm" c="dimmed">
           Run the dry-run first: it resolves the target release, verifies signatures, evaluates plugin
           compatibility and preflight resources — without touching the instance. A pre-update backup is taken
-          automatically during execution.
+          automatically during execution. Updating the core also moves the frontend to a compatible release in
+          the same operation; the plan below lists the exact core and frontend versions.
         </Text>
 
         <VersionSelect
@@ -137,9 +158,14 @@ export function InstanceUpdateDialog({
             <Group gap="sm">
               <StatusBadge tone={planTone(plan.status)}>{plan.status}</StatusBadge>
               <Text size="sm">
-                <Code>{plan.currentVersion}</Code> → <Code>{plan.targetVersion ?? '—'}</Code>
+                Core <Code>{plan.currentVersion}</Code> → <Code>{plan.targetVersion ?? '—'}</Code>
               </Text>
             </Group>
+            {plan.frontend ? (
+              <Text size="sm" c="dimmed">
+                The compatible frontend <Code>{plan.frontend.version}</Code> is upgraded in the same operation.
+              </Text>
+            ) : null}
             {plan.reasons.length > 0 ? (
               <List size="sm" spacing={4}>
                 {plan.reasons.map((r) => (
@@ -226,6 +252,5 @@ export function InstanceUpdateDialog({
           </Button>
         </Group>
       </Stack>
-    </Modal>
   );
 }

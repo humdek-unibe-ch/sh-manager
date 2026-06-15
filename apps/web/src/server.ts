@@ -63,6 +63,7 @@ import type {
   SetAddressRequest,
   SetEnvRequest,
   SetMailerRequest,
+  SetNameRequest,
   UpdateInstanceRequest,
 } from './instances.js';
 
@@ -444,6 +445,15 @@ export function createManagerServer(options: ManagerServerOptions): ManagerServe
       await start('instance_set_mailer', instanceId, (opCtx) => im.instances.setMailer(instanceId, req, opCtx));
       return true;
     }
+    if (rest === '/name' && ctx.method === 'POST') {
+      const body = (ctx.body ?? {}) as Partial<SetNameRequest>;
+      const displayName = typeof body.displayName === 'string' ? body.displayName.trim() : '';
+      if (displayName === '') throw new HttpError(400, 'A display name is required.');
+      if (displayName.length > 200) throw new HttpError(400, 'Display name is too long (max 200 characters).');
+      const req: SetNameRequest = { displayName };
+      await start('instance_set_name', instanceId, (opCtx) => im.instances.setName(instanceId, req, opCtx));
+      return true;
+    }
     if (rest === '/env' && ctx.method === 'GET') {
       sendJson(res, 200, await im.instances.envConfig(instanceId));
       return true;
@@ -636,7 +646,10 @@ export function createManagerServer(options: ManagerServerOptions): ManagerServe
       const raw = ctx.url.searchParams.get('registryUrl');
       const registryUrl = raw && /^https?:\/\//.test(raw) ? raw : defaultRegistryUrl;
       const channel = ctx.url.searchParams.get('channel') ?? 'stable';
-      return sendJson(res, 200, await options.actions.listVersions(registryUrl, channel));
+      // `kind` selects the registry feed: the core release line (default) or the
+      // independently-released frontend line (frontend-only update dialog).
+      const kind = ctx.url.searchParams.get('kind') === 'frontend' ? 'frontend' : 'core';
+      return sendJson(res, 200, await options.actions.listVersions(registryUrl, channel, kind));
     }
 
     throw new HttpError(404, 'Not found.');

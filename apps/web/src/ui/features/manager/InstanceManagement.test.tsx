@@ -92,6 +92,19 @@ describe('InstanceDetail', () => {
     expect(screen.getByText(/redis/)).toBeInTheDocument();
   });
 
+  it('exposes a refresh control and notifies when a started operation finishes', async () => {
+    const user = userEvent.setup();
+    render(<InstanceDetail client={makeFakeClient()} instanceId="clinic-a" />);
+
+    // The operation history can be refreshed on demand.
+    expect(await screen.findByRole('button', { name: /^Refresh$/i })).toBeInTheDocument();
+
+    // Starting any action watches the journal; the fake op completes at once,
+    // so the operator gets a completion toast and the view refreshes itself.
+    await user.click(screen.getByRole('button', { name: /create backup/i }));
+    expect(await screen.findByText('Operation finished')).toBeInTheDocument();
+  });
+
   it('requires a dry-run and an explicit risk acknowledgement before an update can execute', async () => {
     const user = userEvent.setup();
     render(<InstanceDetail client={makeFakeClient()} instanceId="clinic-a" />);

@@ -18,6 +18,8 @@ export interface VersionSelectProps {
   client: ApiClient;
   /** Release channel previewed in the dropdown (server default when omitted). */
   channel?: string;
+  /** Registry feed to list: `core` (default) or `frontend`. */
+  kind?: 'core' | 'frontend';
   /** Current selection: `latest` or a pinned version. */
   value: string;
   onChange: (value: string) => void;
@@ -28,14 +30,15 @@ export interface VersionSelectProps {
 export function VersionSelect({
   client,
   channel,
+  kind = 'core',
   value,
   onChange,
   label = 'SelfHelp version',
   help = 'Pick "latest" for the newest verified release, or pin an exact version from the registry.',
 }: VersionSelectProps): JSX.Element {
   const versionsQuery = useQuery({
-    queryKey: ['manager', 'registry-versions', channel ?? 'default'],
-    queryFn: () => client.listVersions(channel),
+    queryKey: ['manager', 'registry-versions', kind, channel ?? 'default'],
+    queryFn: () => client.listVersions(channel, kind),
     staleTime: 60_000,
     retry: false,
   });

@@ -275,12 +275,12 @@ describe('authenticated manager endpoints', () => {
   });
 
   it('lists registry versions against the server-default registry', async () => {
-    const calls: { url: string; channel: string }[] = [];
+    const calls: { url: string; channel: string; kind: string | undefined }[] = [];
     const base = await start(
       testServer({
         actions: fakeActions({
-          listVersions: async (registryUrl, channel) => {
-            calls.push({ url: registryUrl, channel });
+          listVersions: async (registryUrl, channel, kind) => {
+            calls.push({ url: registryUrl, channel, kind });
             return { versions: ['0.2.0', '0.1.0'] };
           },
         }),
@@ -291,10 +291,14 @@ describe('authenticated manager endpoints', () => {
     const res = await fetch(base + '/api/registry/versions', { headers: { cookie } });
     expect(res.status).toBe(200);
     expect(((await res.json()) as { versions: string[] }).versions).toEqual(['0.2.0', '0.1.0']);
-    expect(calls[0]).toEqual({ url: 'https://registry.example.com/', channel: 'stable' });
+    expect(calls[0]).toEqual({ url: 'https://registry.example.com/', channel: 'stable', kind: 'core' });
 
     await fetch(base + '/api/registry/versions?channel=test', { headers: { cookie } });
     expect(calls[1]?.channel).toBe('test');
+
+    // The frontend-only update dialog reads the independent frontend feed.
+    await fetch(base + '/api/registry/versions?kind=frontend', { headers: { cookie } });
+    expect(calls[2]?.kind).toBe('frontend');
   });
 
   it('answers /api/state with the manager version and the session identity', async () => {
@@ -395,6 +399,9 @@ describe('instance management APIs', () => {
       },
       async setMailer() {
         return { configured: true, redactedDsn: 'smtp://mailer:***@mail.example.org:587', restarted: true };
+      },
+      async setName(_id, req) {
+        return { changed: true, previousName: 'Old', displayName: req.displayName };
       },
       async setEnv(_id, req) {
         return { applied: Object.keys(req.overrides).length, restarted: true, health: null };
@@ -675,6 +682,33 @@ describe('instance management APIs', () => {
       expect(clear.status).toBe(202);
       const cleared = (await clear.json()) as { operationId: string };
       expect(await waitForOperation(base, cookie, cleared.operationId)).toBe('succeeded');
+    } finally {
+      await rm(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('renames an instance display name (rejecting an empty name)', async () => {
+    const tmpRoot = await mkdtemp(path.join(tmpdir(), 'shm-mgmt-'));
+    try {
+      const { base, cookie, csrfToken } = await managementBase(tmpRoot);
+      const mutating = { cookie, 'Content-Type': 'application/json', 'x-shm-csrf': csrfToken };
+
+      // An empty / whitespace-only name is rejected before any operation starts.
+      const bad = await fetch(base + '/api/instances/clinic-a/name', {
+        method: 'POST',
+        headers: mutating,
+        body: JSON.stringify({ displayName: '   ' }),
+      });
+      expect(bad.status).toBe(400);
+
+      const ok = await fetch(base + '/api/instances/clinic-a/name', {
+        method: 'POST',
+        headers: mutating,
+        body: JSON.stringify({ displayName: 'Renamed Clinic' }),
+      });
+      expect(ok.status).toBe(202);
+      const { operationId } = (await ok.json()) as { operationId: string };
+      expect(await waitForOperation(base, cookie, operationId)).toBe('succeeded');
     } finally {
       await rm(tmpRoot, { recursive: true, force: true });
     }

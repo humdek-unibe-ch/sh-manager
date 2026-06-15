@@ -35,6 +35,7 @@ import {
   instanceSetAddress,
   instanceSetEnv,
   instanceSetMailer,
+  instanceSetName,
   instanceSupportBundle,
   serverInit,
   serverPurge,
@@ -1127,6 +1128,43 @@ describe('instance lifecycle (offline)', () => {
     );
   });
 
+  it('rename changes ONLY the display name (id, domain, data, containers untouched)', async () => {
+    const { d, runner: lifecycleRunner } = await lifecycleDeps();
+    await installWebsite1(d);
+    const callsBefore = lifecycleRunner.calls.length;
+
+    const res = await instanceSetName(d, 'website1', { displayName: 'Clinic A (production)' });
+    expect(res).toEqual({ changed: true, previousName: 'Website 1', displayName: 'Clinic A (production)' });
+
+    // Manifest display name changed; the immutable id + domain did NOT.
+    const manifest = await new ManifestStore('website1', root).read();
+    expect(manifest.displayName).toBe('Clinic A (production)');
+    expect(manifest.instanceId).toBe('website1');
+    expect(manifest.domain).toBe('website1.example.ch');
+
+    // The generated README reflects the new name (kept in sync).
+    const readme = await readFile(instancePaths('website1', root).readmePath, 'utf8');
+    expect(readme).toContain('Clinic A (production)');
+    expect(readme).toContain('`website1`');
+
+    // A rename is metadata only: it must NEVER touch Docker / restart anything.
+    expect(lifecycleRunner.calls.length).toBe(callsBefore);
+  });
+
+  it('rename trims, re-rename to the same name reports changed:false, empty is rejected', async () => {
+    const { d } = await lifecycleDeps();
+    await installWebsite1(d);
+
+    const first = await instanceSetName(d, 'website1', { displayName: '  Spaced Name  ' });
+    expect(first.displayName).toBe('Spaced Name');
+    expect((await new ManifestStore('website1', root).read()).displayName).toBe('Spaced Name');
+
+    const same = await instanceSetName(d, 'website1', { displayName: 'Spaced Name' });
+    expect(same.changed).toBe(false);
+
+    await expect(instanceSetName(d, 'website1', { displayName: '   ' })).rejects.toThrow(/display name is required/i);
+  });
+
   it('clone --apply writes fresh secrets that share nothing with the source on disk', async () => {
     const base = await lifecycleDeps();
     const d: ActionDeps = { ...base.d, jwtModulusLength: 2048 };
@@ -1203,6 +1241,50 @@ describe('instance lifecycle (offline)', () => {
     const restoreCalls = base.runner.calls.filter((c) => c.cwd === website1Dir);
     expect(restoreCalls.some((c) => c.args[0] === 'stop')).toBe(true);
     expect(restoreCalls.some((c) => c.args.includes('-v') || c.args.includes('--volumes'))).toBe(false);
+  });
+
+  it('restore --apply re-mounts plugins from the restored snapshot (no half-restored state)', async () => {
+    // Regression: a restore of a backup that had plugins used to leave the
+    // instance half-restored — the DB lists the plugins as installed and the
+    // plugin volumes are repopulated, but the freshly recreated Symfony
+    // containers start WITHOUT the composer bundles, so the host reported
+    // "plugin could not be mounted / runtime import failed". The restore must
+    // re-extract the composer-state snapshot (restored onto the plugin volume)
+    // into backend/worker/scheduler and restart them, exactly like an
+    // address/mailer/env recreate.
+    const base = await lifecycleDeps();
+    const d: ActionDeps = { ...base.d, jwtModulusLength: 2048 };
+    await installWebsite1(d);
+    const backup = await instanceBackup(d, 'website1');
+
+    const website1Dir = instancePaths('website1', root).dir;
+    // After recreate the backend's marker file is gone (fresh writable layer)
+    // but the snapshot tar was restored onto the plugin volume.
+    const remountRunner = new RecordingComposeRunner((args: string[]): ComposeResult => {
+      const joined = args.join(' ');
+      if (joined.includes('mysqldump')) return { stdout: '-- dump\n', stderr: '' };
+      if (joined.includes('test -f') && joined.includes('selfhelp.plugins.lock.json')) {
+        return { stdout: 'no\n', stderr: '' };
+      }
+      if (joined.includes('test -f') && joined.includes('composer-state-')) {
+        return { stdout: 'yes\n', stderr: '' };
+      }
+      return { stdout: '', stderr: '' };
+    });
+    d.runner = remountRunner;
+
+    const res = await instanceRestore(d, 'website1', backup.backupId, { mode: 'same_instance', apply: true });
+    expect(res.executed).toBe(true);
+    expect(res.pluginsRemounted).toBe(true);
+
+    const calls = remountRunner.calls.filter((c) => c.cwd === website1Dir);
+    const extractCalls = calls.filter(
+      (c) => c.args.join(' ').includes('tar -xf') && c.args.join(' ').includes('composer-state-'),
+    );
+    expect(extractCalls.some((c) => c.args.includes('backend'))).toBe(true);
+    expect(extractCalls.some((c) => c.args.includes('worker'))).toBe(true);
+    expect(extractCalls.some((c) => c.args.includes('scheduler'))).toBe(true);
+    expect(calls.some((c) => c.args[0] === 'restart' && c.args.includes('backend'))).toBe(true);
   });
 
   it('restore --apply refuses a corrupted backup BEFORE the stack is touched (integrity gate)', async () => {

@@ -28,8 +28,10 @@ import type {
 export interface FakeClientOptions {
   /** Simulate a newer published manager release. */
   managerUpdateAvailable?: boolean;
-  /** Versions returned by listVersions (default: a small fixed set). */
+  /** Core versions returned by listVersions (default: a small fixed set). */
   availableVersions?: string[];
+  /** Frontend versions returned by listVersions('…','frontend') (default: a small fixed set). */
+  availableFrontendVersions?: string[];
   /** Instance inventory served by the instance APIs (default: one active instance). */
   instances?: InstanceSummary[];
   /** Backups per instance id. */
@@ -229,7 +231,10 @@ export function makeFakeClient(opts: FakeClientOptions = {}): ApiClient {
           : {}),
       };
     },
-    async listVersions() {
+    async listVersions(_channel, kind) {
+      if (kind === 'frontend') {
+        return { versions: opts.availableFrontendVersions ?? ['0.1.7', '0.1.6', '0.1.5'] };
+      }
       return { versions: opts.availableVersions ?? ['0.3.0', '0.2.1', '0.2.0'] };
     },
     async managerUpdateCheck() {
@@ -446,6 +451,16 @@ export function makeFakeClient(opts: FakeClientOptions = {}): ApiClient {
       const started = startFakeOperation('instance_set_mailer', instanceId);
       if (req.clear === true || !req.dsn) delete mailers[instanceId];
       else mailers[instanceId] = { configured: true, redactedDsn: 'smtp://***@configured' };
+      return started;
+    },
+    async setInstanceName(instanceId, req) {
+      const target = instances.find((i) => i.instanceId === instanceId);
+      if (!target) throw new ApiError(404, `Instance "${instanceId}" not found.`);
+      const displayName = req.displayName.trim();
+      if (displayName === '') throw new ApiError(400, 'A display name is required.');
+      if (displayName.length > 200) throw new ApiError(400, 'Display name is too long (max 200 characters).');
+      const started = startFakeOperation('instance_set_name', instanceId);
+      target.displayName = displayName;
       return started;
     },
     async setInstanceEnv(instanceId, req) {

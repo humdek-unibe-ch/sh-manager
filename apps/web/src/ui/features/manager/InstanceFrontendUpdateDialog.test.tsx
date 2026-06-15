@@ -35,11 +35,23 @@ describe('InstanceFrontendUpdateDialog', () => {
 
     await user.click(screen.getByRole('button', { name: /Run dry-run/i }));
 
-    // The resolved plan shows the current -> target frontend versions.
-    expect(await screen.findByText('0.1.5')).toBeInTheDocument();
-    expect(screen.getByText('0.1.7')).toBeInTheDocument();
+    // The resolved plan shows the current -> target frontend versions. The same
+    // versions can also appear as options in the frontend version dropdown, so
+    // match all occurrences rather than asserting a single one.
+    expect((await screen.findAllByText('0.1.5')).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('0.1.7').length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: /Update frontend/i })).toBeEnabled();
     expect(execSpy).not.toHaveBeenCalled();
+  });
+
+  it('lists the FRONTEND release feed (not the core feed) in the target dropdown', async () => {
+    const client = makeFakeClient();
+    const spy = vi.spyOn(client, 'listVersions');
+    renderDialog(client);
+
+    await waitFor(() => expect(spy).toHaveBeenCalledWith(undefined, 'frontend'));
+    // The frontend-only feed must never be queried as the core feed here.
+    expect(spy).not.toHaveBeenCalledWith(undefined, 'core');
   });
 
   it('executes the frontend-only update after the dry-run', async () => {
@@ -50,7 +62,7 @@ describe('InstanceFrontendUpdateDialog', () => {
     renderDialog(client, onStarted);
 
     await user.click(screen.getByRole('button', { name: /Run dry-run/i }));
-    await screen.findByText('0.1.7');
+    await screen.findAllByText('0.1.7');
     await user.click(screen.getByRole('button', { name: /Update frontend/i }));
 
     await waitFor(() => expect(execSpy).toHaveBeenCalledWith('clinic-a', {}));

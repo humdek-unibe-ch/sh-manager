@@ -47,6 +47,7 @@ import {
   instanceSetAddress,
   instanceSetEnv,
   instanceSetMailer,
+  instanceSetName,
   instanceUpdate,
   instanceFrontendUpdate,
   serverInit,
@@ -162,6 +163,11 @@ export interface SetMailerRequest {
   clear?: boolean;
 }
 
+export interface SetNameRequest {
+  /** New operator-facing display name (the instanceId is never changed). */
+  displayName: string;
+}
+
 export interface SetEnvRequest {
   /** Full set of operator overrides to persist (replaces the previous set). */
   overrides: Record<string, string>;
@@ -203,6 +209,8 @@ export interface ManagerInstanceActions {
   setAddress(instanceId: string, req: SetAddressRequest, ctx: OperationContext): Promise<unknown>;
   /** Sets or clears the instance's SMTP DSN and restarts it. */
   setMailer(instanceId: string, req: SetMailerRequest, ctx: OperationContext): Promise<unknown>;
+  /** Renames the instance's display name only (metadata; no restart). */
+  setName(instanceId: string, req: SetNameRequest, ctx: OperationContext): Promise<unknown>;
   /** Persists operator env overrides, regenerates `.env`, and restarts the instance. */
   setEnv(instanceId: string, req: SetEnvRequest, ctx: OperationContext): Promise<unknown>;
   remove(instanceId: string, req: RemoveInstanceRequest, ctx: OperationContext): Promise<unknown>;
@@ -562,6 +570,17 @@ export function buildInstanceActions(opts: BuildInstanceActionsOptions): Manager
           : 'Mailer DSN cleared; instance falls back to the bundled Mailpit.',
       );
       return { configured: res.configured, redactedDsn: res.redactedDsn ?? null, restarted: res.restarted };
+    },
+
+    async setName(instanceId, req, ctx) {
+      await ctx.setPhase('rename');
+      const res = await instanceSetName(deps, instanceId, { displayName: req.displayName });
+      await ctx.log(
+        res.changed
+          ? `Display name changed: "${res.previousName}" -> "${res.displayName}".`
+          : `Display name unchanged ("${res.displayName}").`,
+      );
+      return { changed: res.changed, previousName: res.previousName, displayName: res.displayName };
     },
 
     async setEnv(instanceId, req, ctx) {

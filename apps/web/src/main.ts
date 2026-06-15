@@ -121,11 +121,12 @@ export async function startWebUi(opts: WebUiOptions = {}): Promise<{ host: strin
     async checkManagerUpdate() {
       return checkSelfUpdate({ currentVersion: managerVersion });
     },
-    async listVersions(registryUrl, channel) {
+    async listVersions(registryUrl, channel, kind = 'core') {
       const client = new RegistryClient({ baseUrl: registryUrl, trustedKeys, managerVersion });
       try {
         const index = await client.getIndex();
-        const versions = [...new Set(index.core.filter((r) => r.channel === channel && !r.blocked).map((r) => r.version))]
+        const feed = kind === 'frontend' ? index.frontend : index.core;
+        const versions = [...new Set(feed.filter((r) => r.channel === channel && !r.blocked).map((r) => r.version))]
           .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
         return { versions };
       } catch (err) {
