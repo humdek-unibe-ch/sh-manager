@@ -283,4 +283,25 @@ describe('mailer DSN override (operator SMTP)', () => {
     // A DSN without userinfo has nothing to hide.
     expect(redactMailerDsn('smtp://mail.example.org:587')).toBe('smtp://mail.example.org:587');
   });
+
+  it('redactMailerDsn never leaks the password when the username is an email (@ in userinfo)', () => {
+    // Regression: a Gmail-style DSN where the username itself contains "@".
+    // The old "up to the first @" redaction left the app password in clear text.
+    const gmail = 'smtp://person@gmail.com:zlgwufruwqongaju@smtp.gmail.com:587?encryption=tls';
+    const redacted = redactMailerDsn(gmail);
+    expect(redacted).toBe('smtp://***@smtp.gmail.com:587?encryption=tls');
+    expect(redacted).not.toContain('zlgwufruwqongaju');
+    expect(redacted).not.toContain('person@gmail.com');
+  });
+
+  it('redactMailerDsn keeps a passwordless relay DSN intact (campus/uni SMTP)', () => {
+    // A relay that accepts mail from the server's network without auth.
+    expect(redactMailerDsn('smtp://smtp.unibe.ch:25')).toBe('smtp://smtp.unibe.ch:25');
+    expect(redactMailerDsn('smtp://mail.example.org')).toBe('smtp://mail.example.org');
+  });
+
+  it('redactMailerDsn does not over-redact when query parameters contain @', () => {
+    const dsn = 'smtp://u:p@mail.example.org:587?from=a@b.example';
+    expect(redactMailerDsn(dsn)).toBe('smtp://***@mail.example.org:587?from=a@b.example');
+  });
 });

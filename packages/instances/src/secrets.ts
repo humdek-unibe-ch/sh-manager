@@ -142,9 +142,27 @@ export function withMailerDsn(secrets: InstanceSecrets, mailerDsn: string | unde
 /**
  * Mailer DSN with any `user:password@` userinfo masked, safe for UI/CLI
  * display ("what is configured" without revealing SMTP credentials).
+ *
+ * Security: the userinfo must be matched up to the LAST `@` in the authority,
+ * not the first. SMTP usernames are frequently email addresses
+ * (`user@gmail.com:app-password@smtp.gmail.com:587`), so a naive "up to the
+ * first @" redaction would leave the password in clear text. We isolate the
+ * authority (everything between `scheme://` and the first `/`, `?` or `#`) and
+ * replace its entire userinfo with `***`. A DSN without userinfo (e.g. a relay
+ * that needs no authentication, `smtp://smtp.example.org:25`) is returned
+ * unchanged — there is nothing secret to hide.
  */
 export function redactMailerDsn(dsn: string): string {
-  return dsn.replace(/\/\/([^/@]+)@/, '//***@');
+  const scheme = dsn.match(/^[a-z][a-z0-9+.-]*:\/\//i);
+  if (!scheme) return dsn;
+  const prefix = scheme[0];
+  const rest = dsn.slice(prefix.length);
+  const authorityEnd = rest.search(/[/?#]/);
+  const authority = authorityEnd === -1 ? rest : rest.slice(0, authorityEnd);
+  const tail = authorityEnd === -1 ? '' : rest.slice(authorityEnd);
+  const lastAt = authority.lastIndexOf('@');
+  if (lastAt === -1) return dsn;
+  return `${prefix}***@${authority.slice(lastAt + 1)}${tail}`;
 }
 
 /** A clone always receives freshly generated secrets; the source's are never reused. */

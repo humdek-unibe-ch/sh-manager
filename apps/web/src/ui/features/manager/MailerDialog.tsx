@@ -9,9 +9,9 @@
  * layer: 202 + journaled log).
  */
 import { useEffect, useState } from 'react';
-import { Code, Group, Modal, Stack, Text } from '@mantine/core';
+import { Anchor, Code, Group, Modal, Stack, Text } from '@mantine/core';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { Alert, Button, TextField } from '../../components';
+import { Alert, Button, KeyValue, TextField } from '../../components';
 import { ApiError, type ApiClient } from '../../lib/api-client';
 import { MAILER_DSN_RE } from '../../../instance-validation';
 
@@ -21,6 +21,28 @@ export interface MailerDialogProps {
   opened: boolean;
   onClose: () => void;
   onStarted: (operationId: string) => void;
+}
+
+/** A passwordless relay example operators can fill in with one click. */
+const PASSWORDLESS_EXAMPLE = 'smtp://smtp.unibe.ch:25';
+
+/**
+ * Best-effort, display-only breakdown of a (redacted) SMTP DSN so the operator
+ * can see the current host/port/auth at a glance. Never used to send anything —
+ * the server keeps the authoritative (unredacted) value in the secrets file.
+ */
+function describeDsn(redactedDsn: string): { host: string; port: string; auth: 'yes' | 'no'; encryption: string } | null {
+  try {
+    const url = new URL(redactedDsn);
+    return {
+      host: url.hostname || '—',
+      port: url.port || '(default)',
+      auth: redactedDsn.includes('***@') ? 'yes' : 'no',
+      encryption: url.searchParams.get('encryption') ?? '(opportunistic)',
+    };
+  } catch {
+    return null;
+  }
 }
 
 export function MailerDialog({ client, instanceId, opened, onClose, onStarted }: MailerDialogProps): JSX.Element {
@@ -39,7 +61,7 @@ export function MailerDialog({ client, instanceId, opened, onClose, onStarted }:
 
   const dsnError =
     dsn !== '' && !MAILER_DSN_RE.test(dsn)
-      ? 'Use a DSN like smtp://user:pass@mail.example.org:587.'
+      ? 'Use a DSN like smtp://user:pass@mail.example.org:587 (or smtp://host:25 for a relay without authentication).'
       : undefined;
 
   const start = useMutation({
@@ -50,21 +72,37 @@ export function MailerDialog({ client, instanceId, opened, onClose, onStarted }:
     },
   });
 
+  const parsed = current.data?.configured && current.data.redactedDsn ? describeDsn(current.data.redactedDsn) : null;
+
   return (
     <Modal opened={opened} onClose={onClose} title={`Outbound email of ${instanceId}`} size="lg" centered>
       <Stack gap="md">
-        <Text size="sm" c="dimmed">
-          {current.data?.configured ? (
-            <>
+        {current.isPending ? (
+          <Text size="sm" c="dimmed">
+            Loading the current mail configuration…
+          </Text>
+        ) : current.data?.configured ? (
+          <Stack gap={6}>
+            <Text size="sm" c="dimmed">
               Currently sending through <Code>{current.data.redactedDsn}</Code> (credentials hidden).
-            </>
-          ) : (
-            <>
-              Currently using the bundled <Code>Mailpit</Code> test mailbox — mail never leaves the server.
-              Configure a real SMTP server for production use.
-            </>
-          )}
-        </Text>
+            </Text>
+            {parsed ? (
+              <KeyValue
+                rows={[
+                  { key: 'SMTP host', value: parsed.host },
+                  { key: 'Port', value: parsed.port },
+                  { key: 'Authentication', value: parsed.auth === 'yes' ? 'username + password' : 'none (relay)' },
+                  { key: 'Encryption', value: parsed.encryption },
+                ]}
+              />
+            ) : null}
+          </Stack>
+        ) : (
+          <Text size="sm" c="dimmed">
+            Currently using the bundled <Code>Mailpit</Code> test mailbox — mail never leaves the server.
+            Configure a real SMTP server for production use.
+          </Text>
+        )}
 
         <TextField
           label="SMTP DSN"
@@ -74,6 +112,26 @@ export function MailerDialog({ client, instanceId, opened, onClose, onStarted }:
           help="Symfony Mailer DSN. The value is stored in the instance's restricted secrets file and never displayed back in full."
           {...(dsnError ? { error: dsnError } : {})}
         />
+
+        <Alert tone="info" title="Using a campus / university relay without a password">
+          <Stack gap={6}>
+            <Text size="sm">
+              If the server sends through an SMTP relay that accepts mail from its network without
+              authentication (e.g. the university mail host), leave out the username and password and just
+              point at the host and port:
+            </Text>
+            <Group gap="sm">
+              <Code>{PASSWORDLESS_EXAMPLE}</Code>
+              <Anchor component="button" type="button" size="sm" onClick={() => setDsn(PASSWORDLESS_EXAMPLE)}>
+                Use this example
+              </Anchor>
+            </Group>
+            <Text size="xs" c="dimmed">
+              Replace the host/port with your relay (for UniBE that is typically the internal mail host on
+              port 25). No credentials are stored in this case.
+            </Text>
+          </Stack>
+        </Alert>
 
         <Alert tone="info" title="The instance restarts automatically">
           Applying the change recreates the containers so all services pick up the new mail settings.
