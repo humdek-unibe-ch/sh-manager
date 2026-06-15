@@ -18,6 +18,7 @@ import { ApiError, type ApiClient, type InstanceHealthReport } from '../../lib/a
 import type { OperationRecord } from '../../lib/types';
 import { BackupManager } from './BackupManager';
 import { CloneInstanceDialog } from './CloneInstanceDialog';
+import { EnvDialog } from './EnvDialog';
 import { InstanceUpdateDialog } from './InstanceUpdateDialog';
 import { MailerDialog } from './MailerDialog';
 import { OperationLog, operationTone } from './OperationLog';
@@ -25,7 +26,7 @@ import { RemoveInstanceDialog } from './RemoveInstanceDialog';
 import { SetAddressDialog } from './SetAddressDialog';
 import { instanceStatusTone } from './InstancesList';
 
-type DialogKind = 'update' | 'clone' | 'address' | 'mailer' | 'remove' | null;
+type DialogKind = 'update' | 'clone' | 'address' | 'mailer' | 'env' | 'remove' | null;
 
 function healthTone(overall: InstanceHealthReport['overall']): 'ok' | 'warning' | 'error' | 'neutral' {
   switch (overall) {
@@ -116,6 +117,9 @@ export function InstanceDetail({ client, instanceId }: InstanceDetailProps): JSX
           </Button>
           <Button variant="secondary" disabled={busy} onClick={() => setDialog('mailer')}>
             Email…
+          </Button>
+          <Button variant="secondary" disabled={busy} onClick={() => setDialog('env')}>
+            Environment…
           </Button>
           <Button variant="danger" disabled={busy} onClick={() => setDialog('remove')}>
             Remove…
@@ -279,6 +283,13 @@ export function InstanceDetail({ client, instanceId }: InstanceDetailProps): JSX
         client={client}
         instanceId={instanceId}
         opened={dialog === 'mailer'}
+        onClose={() => setDialog(null)}
+        onStarted={onStarted}
+      />
+      <EnvDialog
+        client={client}
+        instanceId={instanceId}
+        opened={dialog === 'env'}
         onClose={() => setDialog(null)}
         onStarted={onStarted}
       />

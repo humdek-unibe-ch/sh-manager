@@ -60,6 +60,7 @@ import type {
   ManagerInstanceActions,
   RemoveInstanceRequest,
   SetAddressRequest,
+  SetEnvRequest,
   SetMailerRequest,
   UpdateInstanceRequest,
 } from './instances.js';
@@ -440,6 +441,25 @@ export function createManagerServer(options: ManagerServerOptions): ManagerServe
       }
       const req = body as SetMailerRequest;
       await start('instance_set_mailer', instanceId, (opCtx) => im.instances.setMailer(instanceId, req, opCtx));
+      return true;
+    }
+    if (rest === '/env' && ctx.method === 'GET') {
+      sendJson(res, 200, await im.instances.envConfig(instanceId));
+      return true;
+    }
+    if (rest === '/env' && ctx.method === 'POST') {
+      const body = (ctx.body ?? {}) as Partial<SetEnvRequest>;
+      const overrides = body.overrides;
+      if (overrides === null || typeof overrides !== 'object' || Array.isArray(overrides)) {
+        throw new HttpError(400, 'overrides must be an object of KEY=value pairs.');
+      }
+      for (const [key, value] of Object.entries(overrides)) {
+        if (typeof value !== 'string') {
+          throw new HttpError(400, `The value for ${key} must be a string.`);
+        }
+      }
+      const req = { overrides } as SetEnvRequest;
+      await start('instance_set_env', instanceId, (opCtx) => im.instances.setEnv(instanceId, req, opCtx));
       return true;
     }
     if (rest === '/update/dry-run' && ctx.method === 'POST') {

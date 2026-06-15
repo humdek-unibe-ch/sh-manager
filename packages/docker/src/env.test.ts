@@ -1,7 +1,13 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
 import { describe, expect, it } from 'vitest';
-import { buildInstanceEnv, buildInstanceRouting, renderDotEnv } from './env.js';
+import {
+  MANAGER_CONTROLLED_ENV_KEYS,
+  buildInstanceEnv,
+  buildInstanceRouting,
+  parseDotEnv,
+  renderDotEnv,
+} from './env.js';
 
 const input = {
   instanceId: 'website1',
@@ -49,6 +55,17 @@ describe('BFF URL invariant', () => {
     const env = buildInstanceEnv(input);
     expect(env.MERCURE_URL).toBe('http://mercure/.well-known/mercure');
     expect(env.MERCURE_PUBLIC_URL).toBe('https://website1.example.ch/.well-known/mercure');
+  });
+
+  it('stamps the public frontend URL the backend uses for emailed links', () => {
+    // Regression: validation / password-reset emails linked to the backend's
+    // dev default http://localhost:3000 because FRONTEND_BASE_URL was never
+    // emitted — they must point at the instance's own public URL.
+    expect(buildInstanceEnv(input).FRONTEND_BASE_URL).toBe('https://website1.example.ch');
+    expect(
+      buildInstanceEnv({ ...input, mode: 'local', publicFrontendUrl: 'http://localhost:9123' })
+        .FRONTEND_BASE_URL,
+    ).toBe('http://localhost:9123');
   });
 
   it('hands LOCAL-mode subscribers the internal hub URL, never the host port', () => {
@@ -118,5 +135,70 @@ describe('plugin trust env (verification chain, security)', () => {
     const dotenv = renderDotEnv(env);
     expect(dotenv).not.toContain('SELFHELP_PLUGIN_TRUSTED_KEYS');
     expect(dotenv).toContain('SELFHELP_PLUGIN_REQUIRE_SIGNATURE=true');
+  });
+});
+
+describe('operator env overrides (manager environment editor)', () => {
+  it('lets an operator override an editable default and add a custom var', () => {
+    const env = buildInstanceEnv({
+      ...input,
+      envOverrides: { JWT_TOKEN_TTL: '7200', MY_FEATURE_FLAG: 'on' },
+    });
+    expect(env.JWT_TOKEN_TTL).toBe('7200'); // overrode the 3600 default
+    expect(env.MY_FEATURE_FLAG).toBe('on'); // brand-new custom key
+  });
+
+  it('NEVER lets an override clobber a manager-controlled structural key', () => {
+    // Identity, internal routing, JWT key paths, plugin trust, and the mailer
+    // DSN are re-asserted after overrides so a bad value cannot brick the
+    // instance or smuggle SMTP credentials into the non-secret .env.
+    const env = buildInstanceEnv({
+      ...input,
+      pluginTrustedKeys: 'k=AAAA',
+      envOverrides: {
+        SELFHELP_INSTANCE_ID: 'evil',
+        SYMFONY_INTERNAL_URL: 'http://attacker',
+        SELFHELP_PLUGIN_REQUIRE_SIGNATURE: 'false',
+        MAILER_DSN: 'smtp://user:pass@evil.example',
+        JWT_SECRET_KEY: '/tmp/evil.pem',
+      },
+    });
+    expect(env.SELFHELP_INSTANCE_ID).toBe('website1');
+    expect(env.SYMFONY_INTERNAL_URL).toBe('http://backend:8080');
+    expect(env.SELFHELP_PLUGIN_REQUIRE_SIGNATURE).toBe('true');
+    expect(env.MAILER_DSN).toBe('smtp://mailpit:1025');
+    expect(env.JWT_SECRET_KEY).toBe('/app/config/jwt/private.pem');
+  });
+
+  it('every manager-controlled key is genuinely protected from overrides', () => {
+    const tampered = Object.fromEntries(MANAGER_CONTROLLED_ENV_KEYS.map((k) => [k, 'TAMPERED']));
+    const base = buildInstanceEnv({ ...input, pluginTrustedKeys: 'k=AAAA', registryUrl: 'https://r/' });
+    const withOverrides = buildInstanceEnv({
+      ...input,
+      pluginTrustedKeys: 'k=AAAA',
+      registryUrl: 'https://r/',
+      envOverrides: tampered,
+    });
+    for (const key of MANAGER_CONTROLLED_ENV_KEYS) {
+      expect(withOverrides[key]).toBe(base[key]);
+    }
+  });
+});
+
+describe('parseDotEnv', () => {
+  it('round-trips renderDotEnv output (ignoring comments/blank lines)', () => {
+    const env = buildInstanceEnv({ ...input, envOverrides: { MY_VAR: 'hello world' } });
+    const parsed = parseDotEnv(renderDotEnv(env));
+    expect(parsed).toMatchObject(env);
+    expect(parsed.MY_VAR).toBe('hello world');
+  });
+
+  it('keeps values verbatim (including = and quotes) and skips junk lines', () => {
+    const parsed = parseDotEnv(
+      ['# a comment', '', '  KEY_A = value-a ', 'DSN=smtp://u:p@h:587/?x=1', 'not a kv line', '123BAD=x'].join('\n'),
+    );
+    expect(parsed.KEY_A).toBe(' value-a '); // value verbatim; key trimmed
+    expect(parsed.DSN).toBe('smtp://u:p@h:587/?x=1'); // first `=` splits only
+    expect(parsed).not.toHaveProperty('123BAD'); // invalid identifier ignored
   });
 });

@@ -356,6 +356,16 @@ describe('instance management APIs', () => {
         if (id !== 'clinic-a') throw new Error('not found');
         return { configured: true, redactedDsn: 'smtp://mailer:***@mail.example.org:587' };
       },
+      async envConfig(id) {
+        return {
+          instanceId: id,
+          managedKeys: ['SELFHELP_INSTANCE_ID'],
+          entries: [
+            { key: 'JWT_TOKEN_TTL', value: '3600', defaultValue: '3600', managed: false, custom: false, overridden: false },
+            { key: 'SELFHELP_INSTANCE_ID', value: id, defaultValue: id, managed: true, custom: false, overridden: false },
+          ],
+        };
+      },
       async updateDryRun() {
         return { status: 'update_available' };
       },
@@ -379,6 +389,9 @@ describe('instance management APIs', () => {
       },
       async setMailer() {
         return { configured: true, redactedDsn: 'smtp://mailer:***@mail.example.org:587', restarted: true };
+      },
+      async setEnv(_id, req) {
+        return { applied: Object.keys(req.overrides).length, restarted: true, health: null };
       },
       async remove() {
         return { executed: true };
@@ -656,6 +669,39 @@ describe('instance management APIs', () => {
       expect(clear.status).toBe(202);
       const cleared = (await clear.json()) as { operationId: string };
       expect(await waitForOperation(base, cookie, cleared.operationId)).toBe('succeeded');
+    } finally {
+      await rm(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('reads and sets instance env overrides (rejecting non-object payloads)', async () => {
+    const tmpRoot = await mkdtemp(path.join(tmpdir(), 'shm-mgmt-'));
+    try {
+      const { base, cookie, csrfToken } = await managementBase(tmpRoot);
+      const mutating = { cookie, 'Content-Type': 'application/json', 'x-shm-csrf': csrfToken };
+
+      const get = await fetch(base + '/api/instances/clinic-a/env', { headers: { cookie } });
+      expect(get.status).toBe(200);
+      const env = (await get.json()) as { entries: { key: string; managed: boolean }[]; managedKeys: string[] };
+      expect(env.entries.some((e) => e.key === 'JWT_TOKEN_TTL' && !e.managed)).toBe(true);
+      expect(env.managedKeys).toContain('SELFHELP_INSTANCE_ID');
+
+      // A non-object `overrides` is rejected before any operation starts.
+      const bad = await fetch(base + '/api/instances/clinic-a/env', {
+        method: 'POST',
+        headers: mutating,
+        body: JSON.stringify({ overrides: 'nope' }),
+      });
+      expect(bad.status).toBe(400);
+
+      const ok = await fetch(base + '/api/instances/clinic-a/env', {
+        method: 'POST',
+        headers: mutating,
+        body: JSON.stringify({ overrides: { JWT_TOKEN_TTL: '7200' } }),
+      });
+      expect(ok.status).toBe(202);
+      const { operationId } = (await ok.json()) as { operationId: string };
+      expect(await waitForOperation(base, cookie, operationId)).toBe('succeeded');
     } finally {
       await rm(tmpRoot, { recursive: true, force: true });
     }

@@ -18,6 +18,7 @@ import type {
   CloneInstanceRequest,
   CreateInstanceRequest,
   InstanceDetail,
+  InstanceEnvConfig,
   InstanceSummary,
   LoginResult,
   MailerStatus,
@@ -29,6 +30,7 @@ import type {
   RemoveInstanceRequest,
   ServerStatus,
   SetAddressRequest,
+  SetEnvRequest,
   SetMailerRequest,
   Snapshot,
   UpdateInstanceRequest,
@@ -102,6 +104,8 @@ export interface ApiClient {
   pruneBackups(instanceId: string): Promise<StartedOperation>;
   runInstanceHealth(instanceId: string): Promise<InstanceHealthReport>;
   getMailer(instanceId: string): Promise<MailerStatus>;
+  /** Effective non-secret environment of an instance (read-only). */
+  getInstanceEnv(instanceId: string): Promise<InstanceEnvConfig>;
   updateDryRun(instanceId: string, req: UpdateInstanceRequest): Promise<{ plan: unknown }>;
   listOperations(instanceId?: string): Promise<OperationRecord[]>;
   getOperation(operationId: string): Promise<OperationRecord>;
@@ -114,6 +118,8 @@ export interface ApiClient {
   setInstanceAddress(instanceId: string, req: SetAddressRequest): Promise<StartedOperation>;
   /** Set or clear the outbound-mail DSN; the instance restarts automatically. */
   setMailer(instanceId: string, req: SetMailerRequest): Promise<StartedOperation>;
+  /** Persist non-secret env overrides; the instance restarts automatically. */
+  setInstanceEnv(instanceId: string, req: SetEnvRequest): Promise<StartedOperation>;
   removeInstance(instanceId: string, req: RemoveInstanceRequest): Promise<StartedOperation>;
 }
 
@@ -213,6 +219,8 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     runInstanceHealth: (instanceId) =>
       request<InstanceHealthReport>(`/api/instances/${encodeURIComponent(instanceId)}/health`, 'POST'),
     getMailer: (instanceId) => request<MailerStatus>(`/api/instances/${encodeURIComponent(instanceId)}/mailer`, 'GET'),
+    getInstanceEnv: (instanceId) =>
+      request<InstanceEnvConfig>(`/api/instances/${encodeURIComponent(instanceId)}/env`, 'GET'),
     updateDryRun: (instanceId, req) =>
       request<{ plan: unknown }>(`/api/instances/${encodeURIComponent(instanceId)}/update/dry-run`, 'POST', req),
     listOperations: async (instanceId) =>
@@ -239,6 +247,8 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       request<StartedOperation>(`/api/instances/${encodeURIComponent(instanceId)}/address`, 'POST', req),
     setMailer: (instanceId, req) =>
       request<StartedOperation>(`/api/instances/${encodeURIComponent(instanceId)}/mailer`, 'POST', req),
+    setInstanceEnv: (instanceId, req) =>
+      request<StartedOperation>(`/api/instances/${encodeURIComponent(instanceId)}/env`, 'POST', req),
     removeInstance: (instanceId, req) =>
       request<StartedOperation>(`/api/instances/${encodeURIComponent(instanceId)}/remove`, 'POST', req),
   };

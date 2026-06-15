@@ -64,6 +64,20 @@ Services: `frontend`, `backend`, `worker`, `scheduler`, `mysql`, `redis`,
 | Back to the default (bundled Mailpit) | `sh-manager instance mailer website1 --clear` |
 | Write only, apply later | add `--no-restart` |
 
+## Environment variables (non-secret `.env`)
+
+| Task | Command |
+| --- | --- |
+| Show the effective environment | `sh-manager instance env website1` (managed/secret keys flagged read-only) |
+| Override an editable value | `sh-manager instance env website1 --set JWT_TOKEN_TTL=7200` |
+| Add a custom variable | `sh-manager instance env website1 --set MY_FLAG=on` |
+| Remove an override (back to default) | `sh-manager instance env website1 --unset JWT_TOKEN_TTL` |
+| Write only, apply later | add `--no-restart` |
+
+> Manager-owned keys (instance id, internal URLs, JWT key paths, plugin trust)
+> and `MAILER_DSN` are protected. Use `instance mailer` for SMTP credentials —
+> they go into the restricted `secrets.env`, never the plain `.env`.
+
 ## Update
 
 | Task | Command |

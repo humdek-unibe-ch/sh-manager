@@ -135,6 +135,11 @@ export const instanceManifestSchema: JsonSchema = {
         properties: { id: { type: 'string' }, version: semverField },
       },
     },
+    // Optional + additive: operator-set non-secret env overrides (string map).
+    envOverrides: {
+      type: 'object',
+      additionalProperties: { type: 'string' },
+    },
     // Optional + additive: instances without a schedule stay valid.
     backupSchedule: {
       type: 'object',

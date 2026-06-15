@@ -7,6 +7,7 @@
  * the server would reject.
  */
 import { validateSchedulePolicy } from '@shm/backup';
+import { MANAGER_CONTROLLED_ENV_KEYS } from '@shm/docker';
 import { validateAddressChange, validateCloneInstance, validateCreateInstance } from '../../instance-validation';
 import { ApiError, type ApiClient, type InstanceHealthReport } from '../lib/api-client';
 import type {
@@ -14,6 +15,7 @@ import type {
   BackupSummary,
   CheckResult,
   InstanceDetail,
+  InstanceEnvConfig,
   InstanceSummary,
   MailerStatus,
   OperationRecord,
@@ -46,6 +48,8 @@ export interface FakeClientOptions {
   preflight?: Partial<Record<'docker' | 'internet' | 'registry' | 'resources', CheckResult>>;
   /** Mailer status per instance id (default: not configured). */
   mailers?: Record<string, MailerStatus>;
+  /** Effective env per instance id (default: a small representative set). */
+  envConfigs?: Record<string, InstanceEnvConfig>;
   /** Backup schedule status per instance id (default: nothing configured). */
   backupSchedules?: Record<string, BackupScheduleStatus>;
   /** Retention preview served by previewBackupPrune (default: keep everything). */
@@ -113,6 +117,42 @@ export function fakeScheduleStatus(overrides: Partial<BackupScheduleStatus> = {}
   };
 }
 
+/** Representative effective env for an instance (editable + managed keys). */
+export function fakeEnvConfig(instanceId = 'clinic-a'): InstanceEnvConfig {
+  return {
+    instanceId,
+    managedKeys: [...MANAGER_CONTROLLED_ENV_KEYS],
+    entries: [
+      { key: 'APP_DEBUG', value: '0', defaultValue: '0', managed: false, custom: false, overridden: false },
+      {
+        key: 'FRONTEND_BASE_URL',
+        value: 'https://clinic-a.example',
+        defaultValue: 'https://clinic-a.example',
+        managed: false,
+        custom: false,
+        overridden: false,
+      },
+      { key: 'JWT_TOKEN_TTL', value: '3600', defaultValue: '3600', managed: false, custom: false, overridden: false },
+      {
+        key: 'SELFHELP_INSTANCE_ID',
+        value: instanceId,
+        defaultValue: instanceId,
+        managed: true,
+        custom: false,
+        overridden: false,
+      },
+      {
+        key: 'SYMFONY_INTERNAL_URL',
+        value: 'http://backend:8080',
+        defaultValue: 'http://backend:8080',
+        managed: true,
+        custom: false,
+        overridden: false,
+      },
+    ],
+  };
+}
+
 /** Default dry-run plan (mirrors the @shm/core UpdatePlan fields the UI reads). */
 export const FAKE_DRY_RUN_PLAN = {
   instanceId: 'clinic-a',
@@ -141,6 +181,7 @@ export function makeFakeClient(opts: FakeClientOptions = {}): ApiClient {
   const backups: Record<string, BackupSummary[]> = opts.backups ?? { 'clinic-a': [fakeBackup()] };
   const operations: OperationRecord[] = [...(opts.operations ?? [])];
   const mailers: Record<string, MailerStatus> = { ...(opts.mailers ?? {}) };
+  const envConfigs: Record<string, InstanceEnvConfig> = { ...(opts.envConfigs ?? {}) };
   const schedules: Record<string, BackupScheduleStatus> = { ...(opts.backupSchedules ?? {}) };
   let opCounter = operations.length;
   let operatorsConfigured = opts.operatorsConfigured ?? true;
@@ -309,6 +350,12 @@ export function makeFakeClient(opts: FakeClientOptions = {}): ApiClient {
       }
       return mailers[instanceId] ?? { configured: false };
     },
+    async getInstanceEnv(instanceId): Promise<InstanceEnvConfig> {
+      if (!instances.some((i) => i.instanceId === instanceId)) {
+        throw new ApiError(404, `Instance "${instanceId}" not found.`);
+      }
+      return envConfigs[instanceId] ?? fakeEnvConfig(instanceId);
+    },
     async updateDryRun() {
       return { plan: opts.dryRunPlan ?? FAKE_DRY_RUN_PLAN };
     },
@@ -379,6 +426,34 @@ export function makeFakeClient(opts: FakeClientOptions = {}): ApiClient {
       const started = startFakeOperation('instance_set_mailer', instanceId);
       if (req.clear === true || !req.dsn) delete mailers[instanceId];
       else mailers[instanceId] = { configured: true, redactedDsn: 'smtp://***@configured' };
+      return started;
+    },
+    async setInstanceEnv(instanceId, req) {
+      if (!instances.some((i) => i.instanceId === instanceId)) {
+        throw new ApiError(404, `Instance "${instanceId}" not found.`);
+      }
+      // Same guards the BFF/action enforce: valid names, no managed keys.
+      for (const [key, value] of Object.entries(req.overrides)) {
+        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+          throw new ApiError(400, `"${key}" is not a valid environment variable name.`);
+        }
+        if (MANAGER_CONTROLLED_ENV_KEYS.includes(key)) {
+          throw new ApiError(400, `${key} is managed by the manager and cannot be edited here.`);
+        }
+        if (/[\r\n]/.test(value)) {
+          throw new ApiError(400, `The value for ${key} must be a single line.`);
+        }
+      }
+      const started = startFakeOperation('instance_set_env', instanceId);
+      // Reflect the overrides so a re-fetch shows the new effective values.
+      const current = envConfigs[instanceId] ?? fakeEnvConfig(instanceId);
+      const byKey = new Map(current.entries.map((e) => [e.key, { ...e }]));
+      for (const [key, value] of Object.entries(req.overrides)) {
+        const existing = byKey.get(key);
+        if (existing) byKey.set(key, { ...existing, value, overridden: true });
+        else byKey.set(key, { key, value, managed: false, custom: true, overridden: true });
+      }
+      envConfigs[instanceId] = { ...current, entries: [...byKey.values()] };
       return started;
     },
     async removeInstance(instanceId) {

@@ -25,7 +25,9 @@ import {
   instanceBackupScheduleGet,
   instanceBackupScheduleSet,
   instanceClone,
+  instanceGetEnv,
   instanceSetAddress,
+  instanceSetEnv,
   instanceGetMailer,
   instanceHealth,
   instanceInstall,
@@ -739,6 +741,53 @@ instance
       });
       console.log(res.configured ? `Mailer DSN set to ${res.redactedDsn}.` : 'Mailer override cleared (back to default).');
       console.log(res.restarted ? 'Instance restarted with the new mail configuration.' : 'Config written. Restart pending (docker compose up -d).');
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+instance
+  .command('env <id>')
+  .description('Show or edit an instance\'s non-secret environment (.env). Manager-owned and secret keys are protected.')
+  .option(
+    '--set <KEY=VALUE>',
+    'set/override a variable (repeatable)',
+    (kv: string, prev: string[]) => prev.concat(kv),
+    [] as string[],
+  )
+  .option('--unset <KEY>', 'remove an operator override (repeatable)', (k: string, prev: string[]) => prev.concat(k), [] as string[])
+  .option('--no-restart', 'write the config only; apply later with docker compose up -d')
+  .action(async (id: string, opts) => {
+    try {
+      const d = await deps(program.opts().root as string);
+      const sets = opts.set as string[];
+      const unsets = opts.unset as string[];
+
+      // No mutation requested -> just print the effective environment.
+      if (sets.length === 0 && unsets.length === 0) {
+        const cfg = await instanceGetEnv(d, id);
+        for (const e of cfg.entries) {
+          const tags = [e.managed ? 'managed' : e.overridden ? 'override' : e.custom ? 'custom' : 'default'];
+          console.log(`${e.key}=${e.value}  [${tags.join(',')}]`);
+        }
+        return;
+      }
+
+      // Incremental edit: start from the current overrides, apply set/unset.
+      const cfg = await instanceGetEnv(d, id);
+      const overrides: Record<string, string> = {};
+      for (const e of cfg.entries) if (e.overridden) overrides[e.key] = e.value;
+      for (const kv of sets) {
+        const eq = kv.indexOf('=');
+        if (eq <= 0) throw new Error(`--set expects KEY=VALUE, got "${kv}".`);
+        overrides[kv.slice(0, eq).trim()] = kv.slice(eq + 1);
+      }
+      for (const k of unsets) delete overrides[k.trim()];
+
+      const res = await instanceSetEnv(d, id, { overrides, restart: opts.restart as boolean });
+      console.log(`Applied ${res.applied} environment override${res.applied === 1 ? '' : 's'}.`);
+      console.log(res.restarted ? 'Instance restarted with the new environment.' : 'Config written. Restart pending (docker compose up -d).');
+      if (res.health) console.log(formatHealth(res.health));
     } catch (err) {
       fail(err);
     }

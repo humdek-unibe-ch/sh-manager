@@ -139,6 +139,14 @@ export interface InstanceManifest {
   resources?: InstanceResourceConfig;
   /** Optional scheduled-backup policy; absent = no scheduled backups. */
   backupSchedule?: BackupSchedulePolicy;
+  /**
+   * Operator-set non-secret environment overrides, merged on top of the
+   * generated `.env` every time it is regenerated (install/update/clone/
+   * address change). Manager-controlled structural keys (instance id, internal
+   * URLs, JWT key paths, plugin trust) are never stored here. Secrets are never
+   * stored here either — they live in the restricted `secrets.env`.
+   */
+  envOverrides?: Record<string, string>;
 }
 
 export interface InstanceResourceConfig {

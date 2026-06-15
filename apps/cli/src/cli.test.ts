@@ -24,6 +24,7 @@ import {
   instanceBackupScheduleGet,
   instanceBackupScheduleSet,
   instanceClone,
+  instanceGetEnv,
   instanceGetMailer,
   instanceHealth,
   instanceInstall,
@@ -32,6 +33,7 @@ import {
   instanceRepair,
   instanceRestore,
   instanceSetAddress,
+  instanceSetEnv,
   instanceSetMailer,
   instanceSupportBundle,
   serverInit,
@@ -1382,6 +1384,80 @@ describe('instance lifecycle (offline)', () => {
       // --no-restart: not a single compose command ran.
       expect(base.runner.calls.filter((c) => c.cwd === paths.dir).length).toBe(callsBefore);
       expect(await instanceGetMailer(base.d, 'website1')).toEqual({ configured: false });
+    });
+  });
+
+  describe('environment editor (set-env / get-env)', () => {
+    it('persists operator overrides to .env + manifest and recreates the stack', async () => {
+      const base = await lifecycleDeps();
+      await installWebsite1(base.d);
+      const paths = instancePaths('website1', root);
+      const callsBefore = base.runner.calls.filter((c) => c.cwd === paths.dir).length;
+
+      const res = await instanceSetEnv(base.d, 'website1', {
+        overrides: { JWT_TOKEN_TTL: '7200', MY_FEATURE_FLAG: 'on' },
+      });
+      expect(res.applied).toBe(2);
+      expect(res.restarted).toBe(true);
+
+      // The generated .env carries the overrides; structural keys stay correct.
+      const dotenv = parseEnv(await readFile(paths.envPath, 'utf8'));
+      expect(dotenv.JWT_TOKEN_TTL).toBe('7200');
+      expect(dotenv.MY_FEATURE_FLAG).toBe('on');
+      expect(dotenv.SELFHELP_INSTANCE_ID).toBe('website1');
+
+      // Persisted on the manifest so they survive future regenerations.
+      const manifest = await new ManifestStore('website1', root).read();
+      expect(manifest.envOverrides).toEqual({ JWT_TOKEN_TTL: '7200', MY_FEATURE_FLAG: 'on' });
+
+      // Stack recreated so every service reloads the env.
+      const calls = base.runner.calls.filter((c) => c.cwd === paths.dir).slice(callsBefore);
+      expect(calls.some((c) => c.args[0] === 'up')).toBe(true);
+
+      // get-env reflects the override and classifies managed keys read-only.
+      const cfg = await instanceGetEnv(base.d, 'website1');
+      expect(cfg.entries.find((e) => e.key === 'JWT_TOKEN_TTL')).toMatchObject({
+        value: '7200',
+        managed: false,
+        overridden: true,
+      });
+      expect(cfg.entries.find((e) => e.key === 'MY_FEATURE_FLAG')).toMatchObject({ custom: true });
+      expect(cfg.entries.find((e) => e.key === 'SELFHELP_INSTANCE_ID')?.managed).toBe(true);
+    });
+
+    it('survives an address change (overrides re-merged into the regenerated .env)', async () => {
+      const base = await lifecycleDeps();
+      await installWebsite1(base.d);
+      await instanceSetEnv(base.d, 'website1', { overrides: { JWT_TOKEN_TTL: '7200' }, restart: false });
+
+      await instanceSetAddress(base.d, 'website1', { domain: 'moved.example.ch', restart: false });
+
+      const paths = instancePaths('website1', root);
+      const dotenv = parseEnv(await readFile(paths.envPath, 'utf8'));
+      expect(dotenv.JWT_TOKEN_TTL).toBe('7200');
+      // The address-derived key tracked the new domain (override didn't freeze it).
+      expect(dotenv.FRONTEND_BASE_URL).toBe('https://moved.example.ch');
+    });
+
+    it('refuses manager-controlled keys and invalid names without touching the instance', async () => {
+      const base = await lifecycleDeps();
+      await installWebsite1(base.d);
+      const paths = instancePaths('website1', root);
+      const callsBefore = base.runner.calls.filter((c) => c.cwd === paths.dir).length;
+
+      await expect(
+        instanceSetEnv(base.d, 'website1', { overrides: { SELFHELP_INSTANCE_ID: 'evil' } }),
+      ).rejects.toThrow(/managed by the manager/);
+      await expect(
+        instanceSetEnv(base.d, 'website1', { overrides: { MAILER_DSN: 'smtp://x' } }),
+      ).rejects.toThrow(/outbound-email settings/);
+      await expect(
+        instanceSetEnv(base.d, 'website1', { overrides: { '1BAD': 'x' } }),
+      ).rejects.toThrow(/not a valid environment variable name/);
+
+      // Nothing ran and no overrides were persisted.
+      expect(base.runner.calls.filter((c) => c.cwd === paths.dir).length).toBe(callsBefore);
+      expect((await new ManifestStore('website1', root).read()).envOverrides).toBeUndefined();
     });
   });
 });

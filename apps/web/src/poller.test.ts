@@ -47,6 +47,7 @@ function fakeInstances(b: FakeBehaviour): ManagerInstanceActions {
     health: unsupported,
     serverStatus: unsupported,
     mailer: unsupported,
+    envConfig: unsupported,
     updateDryRun: unsupported,
     create: unsupported,
     update: unsupported,
@@ -55,6 +56,7 @@ function fakeInstances(b: FakeBehaviour): ManagerInstanceActions {
     clone: unsupported,
     setAddress: unsupported,
     setMailer: unsupported,
+    setEnv: unsupported,
     remove: unsupported,
     async hasPendingCmsOperation(id) {
       if (b.pendingError) throw b.pendingError;

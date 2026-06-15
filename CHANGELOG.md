@@ -16,15 +16,48 @@ The manager has two version axes (see
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
 
-## [1.4.2] - Unreleased
+## [1.4.2] - 2026-06-15
 
 ### Added
+- **Environment editor for installed instances.** The instance detail page has a
+  new **Environment…** dialog (and the API/CLI gained `instance get-env` /
+  `instance set-env`) to view and edit an instance's non-secret runtime
+  configuration: tune editable defaults (`JWT_TOKEN_TTL`, `FRONTEND_BASE_URL`,
+  `CORS_ALLOW_ORIGIN`, `APP_DEBUG`, …) and add custom variables. Overrides are
+  persisted on the instance manifest (`envOverrides`) and re-merged into the
+  generated `.env` on every later regeneration (update/clone/address change), so
+  operator tuning is never silently reverted. Manager-owned structural keys
+  (instance id, internal Docker URLs, JWT key paths, plugin trust, version
+  stamps) are shown **read-only** and can never be overridden, and `MAILER_DSN`
+  is intentionally read-only here so SMTP credentials keep going through the
+  Email dialog into the restricted `secrets.env` — they never land in the
+  non-secret `.env`. Secrets are never displayed by the editor.
 - **URL-based navigation** — the operations console now updates the browser URL when navigating between dashboard, instances, and the create wizard. State is preserved on page refresh, allowing operators to share links or return to their previous view after a reload.
 - **Clickable domain in instance list and detail** — the domain field in both the instances list table and the instance detail page is now a clickable link that opens in a new tab, allowing operators to quickly navigate to their instances.
 - **Help text for admin display name** — the admin name field in the create-instance wizard now includes descriptive help text explaining that it is an optional display name for the admin account.
 
 ### Changed
 - **Smaller default button size** — all buttons in the GUI now use a smaller default size to prevent text cutoff and improve layout consistency across the interface.
+
+### Fixed
+- **Emailed links (account validation, password reset, welcome) now point at
+  the instance, not `localhost:3000`.** The backend builds those links from
+  `FRONTEND_BASE_URL`, which the generated instance `.env` never set, so it
+  fell back to the backend's dev default `http://localhost:3000` — a port no
+  real instance serves. The manager now writes `FRONTEND_BASE_URL` set to the
+  instance's own public URL (host:port in local mode, `https://<domain>` in
+  production). Existing instances pick it up on the next env apply / address
+  change, or via the new environment editor.
+- **URL-based navigation actually works now.** The console read its selected
+  instance / create-wizard state from `useParams()`, but the shell never
+  mounts any `<Route>` elements, so the params were always empty — clicking an
+  instance or "New instance" changed the URL but the center pane never
+  followed. The shell now derives its view from the location pathname
+  (`parseConsoleRoute`), so sidebar navigation, the auto-opened first-run
+  wizard, deep links and browser back/forward all work. This also fixes the
+  web UI test suite, which crashed with "useNavigate() may be used only in the
+  context of a <Router>" because the shared test renderer had no router
+  context.
 
 ## [1.4.1] - 2026-06-13
 

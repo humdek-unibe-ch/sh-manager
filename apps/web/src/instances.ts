@@ -19,7 +19,12 @@ import path from 'node:path';
 import type { HealthReport } from '@shm/core';
 import type { BackupManifest, BackupOrigin, BackupSchedulePolicy, InstanceManifest, ServerInventory } from '@shm/schemas';
 
-export type { BackupScheduleStatus, PruneExecutionReport } from '../../cli/src/actions.js';
+export type {
+  BackupScheduleStatus,
+  InstanceEnvConfig,
+  InstanceEnvEntry,
+  PruneExecutionReport,
+} from '../../cli/src/actions.js';
 import { InventoryStore, ManifestStore, instancePaths, type RemoveMode } from '@shm/instances';
 import {
   drainInstanceOperations,
@@ -30,6 +35,7 @@ import {
   instanceBackupScheduleGet,
   instanceBackupScheduleSet,
   instanceClone,
+  instanceGetEnv,
   instanceGetMailer,
   instanceHasDueScheduledBackup,
   instanceHealth,
@@ -39,11 +45,13 @@ import {
   instanceRestore,
   instanceRunScheduledBackup,
   instanceSetAddress,
+  instanceSetEnv,
   instanceSetMailer,
   instanceUpdate,
   serverInit,
   type ActionDeps,
   type BackupScheduleStatus,
+  type InstanceEnvConfig,
   type InstanceInstallOptions,
   type InstanceUpdateOptions,
   type MailerStatus,
@@ -146,6 +154,11 @@ export interface SetMailerRequest {
   clear?: boolean;
 }
 
+export interface SetEnvRequest {
+  /** Full set of operator overrides to persist (replaces the previous set). */
+  overrides: Record<string, string>;
+}
+
 /** Whether this state root is an initialized SelfHelp server. */
 export interface ServerStatus {
   initialized: boolean;
@@ -163,6 +176,8 @@ export interface ManagerInstanceActions {
   serverStatus(): Promise<ServerStatus>;
   /** Redacted outbound-mail configuration of an instance. */
   mailer(instanceId: string): Promise<MailerStatus>;
+  /** Effective non-secret environment of an instance (read-only view). */
+  envConfig(instanceId: string): Promise<InstanceEnvConfig>;
   /** Plan-only update preview (never mutates). */
   updateDryRun(instanceId: string, req: UpdateInstanceRequest): Promise<unknown>;
 
@@ -176,6 +191,8 @@ export interface ManagerInstanceActions {
   setAddress(instanceId: string, req: SetAddressRequest, ctx: OperationContext): Promise<unknown>;
   /** Sets or clears the instance's SMTP DSN and restarts it. */
   setMailer(instanceId: string, req: SetMailerRequest, ctx: OperationContext): Promise<unknown>;
+  /** Persists operator env overrides, regenerates `.env`, and restarts the instance. */
+  setEnv(instanceId: string, req: SetEnvRequest, ctx: OperationContext): Promise<unknown>;
   remove(instanceId: string, req: RemoveInstanceRequest, ctx: OperationContext): Promise<unknown>;
   /**
    * Cheap read-only peek: is a CMS-requested operation waiting? Lets the
@@ -325,6 +342,10 @@ export function buildInstanceActions(opts: BuildInstanceActionsOptions): Manager
 
     async mailer(instanceId) {
       return instanceGetMailer(deps, instanceId);
+    },
+
+    async envConfig(instanceId) {
+      return instanceGetEnv(deps, instanceId);
     },
 
     async updateDryRun(instanceId, req) {
@@ -497,6 +518,15 @@ export function buildInstanceActions(opts: BuildInstanceActionsOptions): Manager
           : 'Mailer DSN cleared; instance falls back to the bundled Mailpit.',
       );
       return { configured: res.configured, redactedDsn: res.redactedDsn ?? null, restarted: res.restarted };
+    },
+
+    async setEnv(instanceId, req, ctx) {
+      await ctx.setPhase('apply environment');
+      const res = await instanceSetEnv(deps, instanceId, { overrides: req.overrides, restart: true });
+      await ctx.log(
+        `Applied ${res.applied} environment override${res.applied === 1 ? '' : 's'}; containers recreated.`,
+      );
+      return { applied: res.applied, restarted: res.restarted, health: res.health ?? null };
     },
 
     async remove(instanceId, req, ctx) {

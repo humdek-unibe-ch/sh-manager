@@ -27,7 +27,17 @@ import type {
   TrustedKeysFile,
 } from '@shm/schemas';
 import type { ComposeRunner } from '@shm/docker';
-import { DEFAULT_PROXY_NETWORK, buildInstanceRouting, composeCommands, composeProjectName, generateInstanceComposeYaml, toEnginePath } from '@shm/docker';
+import {
+  DEFAULT_PROXY_NETWORK,
+  MANAGER_CONTROLLED_ENV_KEYS,
+  buildInstanceEnv,
+  buildInstanceRouting,
+  composeCommands,
+  composeProjectName,
+  generateInstanceComposeYaml,
+  parseDotEnv,
+  toEnginePath,
+} from '@shm/docker';
 import type { Fetcher } from '@shm/registry';
 import { RegistryClient } from '@shm/registry';
 import {
@@ -1007,6 +1017,9 @@ export async function instanceUpdate(deps: ActionDeps, instanceId: string, opts:
           services,
           installedPlugins: manifest.installedPlugins,
           pluginTrustedKeys: formatTrustedKeysEnv(deps.trustedKeys),
+          // Operator env overrides survive an update (they are re-merged into
+          // the freshly generated .env, structural keys excepted).
+          ...(manifest.envOverrides ? { envOverrides: manifest.envOverrides } : {}),
         });
         await writeFileAtomic(paths.composePath, artifacts.composeYaml);
         await writeFileAtomic(paths.envPath, artifacts.envText);
@@ -2053,6 +2066,8 @@ export async function instanceClone(
     pluginLock: sourceLock.plugins,
     ...(sourceManifest.resources ? { resources: sourceManifest.resources } : {}),
     pluginTrustedKeys: formatTrustedKeysEnv(deps.trustedKeys),
+    // A clone behaves like its source, including operator env overrides.
+    ...(sourceManifest.envOverrides ? { envOverrides: sourceManifest.envOverrides } : {}),
   });
 
   // A clone is a distinct security boundary: generate fresh secrets that share
@@ -2191,6 +2206,8 @@ export async function instanceSetAddress(
     pluginLock: lock.plugins,
     ...(manifest.resources ? { resources: manifest.resources } : {}),
     pluginTrustedKeys: formatTrustedKeysEnv(deps.trustedKeys),
+    // Keep operator env overrides across an address change.
+    ...(manifest.envOverrides ? { envOverrides: manifest.envOverrides } : {}),
   });
   await writeFileAtomic(paths.composePath, artifacts.composeYaml);
   await writeFileAtomic(paths.envPath, artifacts.envText);
@@ -2381,6 +2398,184 @@ export async function instanceSetMailer(
     configured: dsn !== '',
     ...(dsn !== '' ? { redactedDsn: redactMailerDsn(dsn) } : {}),
     restarted: restart,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// instance environment editor (non-secret .env)
+// ---------------------------------------------------------------------------
+
+export interface InstanceEnvEntry {
+  key: string;
+  /** Effective value currently in the live `.env`. */
+  value: string;
+  /**
+   * Manager-generated default for this key (before overrides). Absent for
+   * operator-added custom keys. Lets the editor show "modified vs default" and
+   * offer a one-click reset.
+   */
+  defaultValue?: string;
+  /** Manager-owned structural key (read-only; see MANAGER_CONTROLLED_ENV_KEYS). */
+  managed: boolean;
+  /** Operator added this key (not part of the generated base env). */
+  custom: boolean;
+  /** An operator override is currently in effect for this key. */
+  overridden: boolean;
+}
+
+export interface InstanceEnvConfig {
+  instanceId: string;
+  /** Effective `.env` entries (the live non-secret runtime config). */
+  entries: InstanceEnvEntry[];
+  /** Keys the editor must render read-only. */
+  managedKeys: string[];
+}
+
+export interface SetEnvOptions {
+  /**
+   * Full set of operator overrides to persist (replaces the previous set).
+   * Structural keys are rejected; secrets must never be sent here.
+   */
+  overrides: Record<string, string>;
+  /** Recreate containers so the new values take effect (default true). */
+  restart?: boolean;
+}
+
+export interface SetEnvResult {
+  applied: number;
+  restarted: boolean;
+  health?: HealthReport;
+}
+
+/** Builds the env input that mirrors what install/update generate for this instance. */
+function envInputFromManifest(deps: ActionDeps, manifest: InstanceManifest) {
+  return {
+    instanceId: manifest.instanceId,
+    mode: manifest.mode,
+    selfhelpVersion: manifest.versions.selfhelp,
+    frontendVersion: manifest.versions.frontend,
+    publicFrontendUrl: manifest.routing.publicFrontendUrl,
+    registryUrl: manifest.registry.url,
+    pluginTrustedKeys: formatTrustedKeysEnv(deps.trustedKeys),
+  };
+}
+
+/**
+ * Reads an instance's non-secret environment. The values come from the live
+ * `.env` (secrets live in `secrets.env`, which is NEVER read here), classified
+ * so the UI can render manager-owned keys read-only and operator-set keys as
+ * editable.
+ */
+export async function instanceGetEnv(deps: ActionDeps, instanceId: string): Promise<InstanceEnvConfig> {
+  const manifest = await readManifestFriendly(deps, instanceId);
+  const paths = instancePaths(instanceId, deps.root);
+  const fileEnv = parseDotEnv(await readFile(paths.envPath, 'utf8').catch(() => ''));
+  // Generated baseline (no overrides): tells us each key's default + which keys
+  // are operator-added "custom" ones.
+  const baseEnv = buildInstanceEnv(envInputFromManifest(deps, manifest));
+  const overrides = manifest.envOverrides ?? {};
+
+  const entries: InstanceEnvEntry[] = Object.entries(fileEnv)
+    .map(([key, value]) => {
+      const defaultValue = baseEnv[key];
+      return {
+        key,
+        value,
+        ...(defaultValue !== undefined ? { defaultValue } : {}),
+        managed: MANAGER_CONTROLLED_ENV_KEYS.includes(key),
+        custom: defaultValue === undefined,
+        overridden: Object.prototype.hasOwnProperty.call(overrides, key),
+      };
+    })
+    .sort((a, b) => {
+      // Editable first, managed last; alphabetical within each group.
+      if (a.managed !== b.managed) return a.managed ? 1 : -1;
+      return a.key.localeCompare(b.key);
+    });
+
+  return { instanceId, entries, managedKeys: [...MANAGER_CONTROLLED_ENV_KEYS] };
+}
+
+/**
+ * Persists operator env overrides and regenerates the instance `.env`. The
+ * overrides live on the manifest so they survive every later regeneration
+ * (update/clone/address-change). Structural keys are refused, and the stack is
+ * recreated by default so all services pick up the change.
+ */
+export async function instanceSetEnv(deps: ActionDeps, instanceId: string, opts: SetEnvOptions): Promise<SetEnvResult> {
+  const manifest = await readManifestFriendly(deps, instanceId);
+
+  const sanitized: Record<string, string> = {};
+  for (const [rawKey, rawValue] of Object.entries(opts.overrides ?? {})) {
+    const key = rawKey.trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+      throw new Error(`"${rawKey}" is not a valid environment variable name (use letters, digits, and underscores; cannot start with a digit).`);
+    }
+    if (MANAGER_CONTROLLED_ENV_KEYS.includes(key)) {
+      throw new Error(`${key} is managed by the manager and cannot be edited here${key === 'MAILER_DSN' ? ' — use the outbound-email settings instead' : ''}.`);
+    }
+    const value = String(rawValue);
+    if (/[\r\n]/.test(value)) {
+      throw new Error(`The value for ${key} must be a single line (no newlines).`);
+    }
+    sanitized[key] = value;
+  }
+
+  const lockStore = new LockStore(instanceId, deps.root);
+  const lock = await lockStore.read();
+  const { core, frontend } = releaseShapesFromLock(manifest, lock, 'env-change');
+  const paths = instancePaths(instanceId, deps.root);
+  const localPort =
+    manifest.mode === 'local' ? Number(new URL(manifest.routing.publicFrontendUrl).port) : undefined;
+
+  const artifacts = buildInstanceInstallArtifacts({
+    instanceId,
+    displayName: manifest.displayName,
+    mode: manifest.mode,
+    ...(manifest.mode === 'production' ? { domain: manifest.domain } : { localPort: localPort! }),
+    root: deps.root,
+    ...(deps.engineRoot ? { engineRoot: deps.engineRoot } : {}),
+    managerVersion: deps.managerVersion,
+    channel: manifest.registry.channel,
+    registry: { id: lock.registry.id, url: lock.registry.url, metadataSha256: lock.registry.metadataSha256 },
+    core,
+    frontend,
+    services: lock.services,
+    installedPlugins: manifest.installedPlugins,
+    pluginLock: lock.plugins,
+    ...(manifest.resources ? { resources: manifest.resources } : {}),
+    pluginTrustedKeys: formatTrustedKeysEnv(deps.trustedKeys),
+    envOverrides: sanitized,
+  });
+
+  // Only the .env content depends on the overrides; the compose/readme are
+  // unchanged, so we write just the .env and the manifest (which now records
+  // the overrides). Atomic writes never corrupt the running instance.
+  await writeFileAtomic(paths.envPath, artifacts.envText);
+  await new ManifestStore(instanceId, deps.root).write({
+    ...artifacts.manifest,
+    createdAt: manifest.createdAt,
+    updatedAt: deps.now?.() ?? new Date().toISOString(),
+  });
+
+  const restart = opts.restart ?? true;
+  let health: HealthReport | undefined;
+  if (restart) {
+    await deps.runner.run(paths.dir, composeCommands.upDetached());
+    // Recreated Symfony containers lose their composer-installed plugins;
+    // restore them from the snapshot on the plugin volume (no-op when intact).
+    await restorePluginStateAfterRecreate(deps, instanceId, manifest.versions.selfhelp);
+    health = evaluateHealth(
+      instanceId,
+      await deps.probeHealth(manifest.routing.publicFrontendUrl, manifest.routing.browserApiPrefix),
+      deps.now,
+    );
+  }
+
+  return {
+    applied: Object.keys(sanitized).length,
+    restarted: restart,
+    ...(health ? { health } : {}),
   };
 }
 

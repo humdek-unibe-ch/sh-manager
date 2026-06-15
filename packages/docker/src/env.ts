@@ -49,7 +49,42 @@ export interface InstanceEnvInput {
    * plugins from the SAME registry the manager resolves releases against.
    */
   registryUrl?: string;
+  /**
+   * Operator-set non-secret env overrides (manager UI / CLI). Merged LAST so an
+   * operator value wins over the generated default — EXCEPT for the structural
+   * {@link MANAGER_CONTROLLED_ENV_KEYS}, which are always re-asserted so an
+   * override can never brick instance identity, internal routing, JWT key
+   * paths, or plugin-trust. Secrets never travel through here.
+   */
+  envOverrides?: Record<string, string>;
 }
+
+/**
+ * Env keys the manager always owns: instance identity, internal Docker routing,
+ * JWT key file paths, the public Mercure/edge URLs, plugin-trust + signature
+ * enforcement, and the injected version stamps. Operators may NOT override these
+ * from the environment editor — a wrong value here silently breaks networking,
+ * auth, or the plugin catalogue. `MAILER_DSN` is included on purpose: a real
+ * SMTP DSN can carry credentials, so it must go through the dedicated mailer
+ * flow (stored in the restricted `secrets.env`), never the non-secret `.env`.
+ */
+export const MANAGER_CONTROLLED_ENV_KEYS: readonly string[] = [
+  'SELFHELP_INSTANCE_ID',
+  'SELFHELP_MODE',
+  'SELFHELP_CMS_VERSION',
+  'SELFHELP_FRONTEND_VERSION',
+  'NEXT_PUBLIC_API_URL',
+  'SYMFONY_INTERNAL_URL',
+  'SYMFONY_API_PREFIX',
+  'MERCURE_URL',
+  'MERCURE_PUBLIC_URL',
+  'JWT_SECRET_KEY',
+  'JWT_PUBLIC_KEY',
+  'MAILER_DSN',
+  'SELFHELP_PLUGIN_TRUSTED_KEYS',
+  'SELFHELP_PLUGIN_REQUIRE_SIGNATURE',
+  'SELFHELP_PLUGIN_DEFAULT_REGISTRY_URL',
+];
 
 export interface InstanceRouting {
   publicFrontendUrl: string;
@@ -85,7 +120,7 @@ export function buildInstanceRouting(input: InstanceEnvInput): InstanceRouting {
  */
 export function buildInstanceEnv(input: InstanceEnvInput): Record<string, string> {
   const routing = buildInstanceRouting(input);
-  return {
+  const base: Record<string, string> = {
     APP_ENV: 'prod',
     APP_DEBUG: '0',
     SELFHELP_INSTANCE_ID: input.instanceId,
@@ -116,6 +151,13 @@ export function buildInstanceEnv(input: InstanceEnvInput): Record<string, string
       input.mode === 'production'
         ? `${input.publicFrontendUrl}/.well-known/mercure`
         : INTERNAL_MERCURE_HUB_URL,
+    // Public, user-facing frontend origin the backend stamps into the links it
+    // emails (account validation, password reset, welcome…). Without it the
+    // backend falls back to its dev default `http://localhost:3000`, so a real
+    // instance mailed validation links to a port nobody is serving. Always the
+    // instance's own public URL (host:port in local mode, https://<domain> in
+    // production) — never the internal Docker URL.
+    FRONTEND_BASE_URL: input.publicFrontendUrl,
     SCHEDULED_JOBS_TICK_SECONDS: String(input.schedulerTickSeconds ?? 60),
     // JWT key *paths* are not secret (the keys themselves live in ./secrets/jwt,
     // mounted read-only at /app/config/jwt). The passphrase is in secrets.env.
@@ -142,6 +184,37 @@ export function buildInstanceEnv(input: InstanceEnvInput): Record<string, string
     SELFHELP_PLUGIN_REQUIRE_SIGNATURE: 'true',
     ...(input.registryUrl ? { SELFHELP_PLUGIN_DEFAULT_REGISTRY_URL: input.registryUrl } : {}),
   };
+
+  // Operator overrides win for everything EXCEPT the manager-owned structural
+  // keys, which are re-asserted afterwards so a bad override can never brick the
+  // instance. New (custom) keys an operator adds are kept as-is.
+  if (input.envOverrides) {
+    for (const [key, value] of Object.entries(input.envOverrides)) {
+      if (MANAGER_CONTROLLED_ENV_KEYS.includes(key)) continue;
+      base[key] = value;
+    }
+  }
+  return base;
+}
+
+/**
+ * Parses a `.env` text body into a key/value map. Only `KEY=VALUE` lines are
+ * read; blank lines and `#` comments are ignored, and surrounding whitespace is
+ * trimmed off the key. The value is taken verbatim (no quote stripping) so it
+ * round-trips through {@link renderDotEnv} unchanged.
+ */
+export function parseDotEnv(text: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (line === '' || line.startsWith('#')) continue;
+    const eq = line.indexOf('=');
+    if (eq <= 0) continue;
+    const key = line.slice(0, eq).trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue;
+    out[key] = rawLine.slice(rawLine.indexOf('=') + 1);
+  }
+  return out;
 }
 
 export function renderDotEnv(env: Record<string, string>): string {

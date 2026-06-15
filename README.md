@@ -216,6 +216,11 @@ sh-manager instance mailer website1
 sh-manager instance mailer website1 --set smtp://user:pass@mail.example.org:587
 sh-manager instance mailer website1 --clear
 
+# non-secret environment per instance: show / override / add / reset
+sh-manager instance env website1
+sh-manager instance env website1 --set JWT_TOKEN_TTL=7200 --set MY_FLAG=on
+sh-manager instance env website1 --unset JWT_TOKEN_TTL
+
 # manual backups + automatic nightly backups with GFS retention
 sh-manager instance backup website1
 sh-manager instance backup-schedule website1 --enable --time 02:00

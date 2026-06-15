@@ -150,6 +150,18 @@ manager version + self-update status, and the **Instances** section.
   back to the bundled Mailpit; the instance restarts to apply it.
   Credentials are **redacted** everywhere the DSN is displayed. CLI
   equivalent: `sh-manager instance mailer <id> [--set <dsn>|--clear]`.
+- **Environment (Environment… button)** — view and edit the instance's
+  **non-secret** runtime configuration (`.env`). Tune editable values such as
+  `JWT_TOKEN_TTL`, `FRONTEND_BASE_URL`, `CORS_ALLOW_ORIGIN` and `APP_DEBUG`, or
+  add your own custom variables. Edits are saved as **overrides on the instance
+  manifest**, so they survive future updates, clones and address changes (they
+  are re-applied to the regenerated `.env`). Manager-owned structural keys
+  (instance id, internal Docker URLs, JWT key paths, plugin trust, version
+  stamps) are shown **read-only**, and `MAILER_DSN` is read-only here on purpose
+  — a real SMTP DSN can carry credentials, so configure it through the **Email**
+  dialog (it is stored in the restricted `secrets.env`, never the plain `.env`).
+  The editor never displays secrets. Applying recreates the containers. CLI
+  equivalent: `sh-manager instance env <id> [--set KEY=VALUE …] [--unset KEY …]`.
 - **Remove** — three modes, same as the CLI: `disable` (reversible),
   `remove_containers_keep_data`, and `full_delete` (requires typing
   `delete <id>`).
@@ -210,6 +222,8 @@ the operation.
 | `POST /api/instances/:id/address` | Change the routed domain / local port; restarts the instance. |
 | `GET /api/instances/:id/mailer` | Show the outbound-mail (SMTP) configuration (credentials redacted). |
 | `POST /api/instances/:id/mailer` | Set or clear the SMTP DSN; restarts the instance. |
+| `GET /api/instances/:id/env` | Show the effective non-secret environment (managed keys flagged read-only). |
+| `POST /api/instances/:id/env` | Persist non-secret env overrides; restarts the instance. |
 | `POST /api/instances/:id/remove` | Disable / remove / full-delete. |
 | `GET /api/operations?instanceId=` | Operation history. |
 | `GET /api/operations/:id` | One operation incl. journaled log lines. |

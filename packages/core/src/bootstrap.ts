@@ -133,6 +133,13 @@ export interface InstanceInstallInput {
    * keys so the CMS can verify + list signed registry plugins.
    */
   pluginTrustedKeys?: string;
+  /**
+   * Operator-set non-secret env overrides. Persisted on the manifest and merged
+   * into the generated `.env` (see {@link buildInstanceEnv}); structural keys
+   * are never overridable. Carried through update/clone/address-change so the
+   * operator's tuning survives every regeneration.
+   */
+  envOverrides?: Record<string, string>;
 }
 
 export interface InstanceInstallArtifacts {
@@ -195,6 +202,9 @@ export function buildInstanceInstallArtifacts(input: InstanceInstallInput): Inst
     routing,
     installedPlugins: input.installedPlugins ?? [],
     ...(input.resources ? { resources: input.resources } : {}),
+    ...(input.envOverrides && Object.keys(input.envOverrides).length > 0
+      ? { envOverrides: input.envOverrides }
+      : {}),
   };
 
   const lock: InstanceLock = {
@@ -225,6 +235,7 @@ export function buildInstanceInstallArtifacts(input: InstanceInstallInput): Inst
       publicFrontendUrl,
       registryUrl: input.registry.url,
       ...(input.pluginTrustedKeys ? { pluginTrustedKeys: input.pluginTrustedKeys } : {}),
+      ...(input.envOverrides ? { envOverrides: input.envOverrides } : {}),
     }),
   );
 
