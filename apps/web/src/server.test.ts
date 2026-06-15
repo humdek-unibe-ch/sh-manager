@@ -369,10 +369,16 @@ describe('instance management APIs', () => {
       async updateDryRun() {
         return { status: 'update_available' };
       },
+      async frontendUpdateDryRun() {
+        return { status: 'ok', kind: 'frontend', currentFrontendVersion: '0.1.5', targetFrontendVersion: '0.1.7' };
+      },
       async create() {
         return { version: '0.1.0' };
       },
       async update() {
+        return { executed: true };
+      },
+      async frontendUpdate() {
         return { executed: true };
       },
       async backup() {
@@ -701,6 +707,37 @@ describe('instance management APIs', () => {
       });
       expect(ok.status).toBe(202);
       const { operationId } = (await ok.json()) as { operationId: string };
+      expect(await waitForOperation(base, cookie, operationId)).toBe('succeeded');
+    } finally {
+      await rm(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('previews and starts a frontend-only update via the dedicated routes', async () => {
+    const tmpRoot = await mkdtemp(path.join(tmpdir(), 'shm-mgmt-'));
+    try {
+      const { base, cookie, csrfToken } = await managementBase(tmpRoot);
+      const mutating = { cookie, 'Content-Type': 'application/json', 'x-shm-csrf': csrfToken };
+
+      // Dry-run is a pure read: it returns the resolved frontend-only plan.
+      const dry = await fetch(base + '/api/instances/clinic-a/frontend-update/dry-run', {
+        method: 'POST',
+        headers: mutating,
+        body: JSON.stringify({}),
+      });
+      expect(dry.status).toBe(200);
+      const { plan } = (await dry.json()) as { plan: { kind: string; targetFrontendVersion: string } };
+      expect(plan.kind).toBe('frontend');
+      expect(plan.targetFrontendVersion).toBe('0.1.7');
+
+      // Execution goes through the journaled job layer (202 + operation id).
+      const exec = await fetch(base + '/api/instances/clinic-a/frontend-update', {
+        method: 'POST',
+        headers: mutating,
+        body: JSON.stringify({ target: '0.1.7' }),
+      });
+      expect(exec.status).toBe(202);
+      const { operationId } = (await exec.json()) as { operationId: string };
       expect(await waitForOperation(base, cookie, operationId)).toBe('succeeded');
     } finally {
       await rm(tmpRoot, { recursive: true, force: true });

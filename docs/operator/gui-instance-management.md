@@ -125,6 +125,11 @@ manager version + self-update status, and the **Instances** section.
   ok / warning / blocked, with reasons). The target version comes from the
   **registry dropdown** ("latest" or a pinned release). Executing asks for
   explicit confirmation flags when the plan carries migration risk.
+- **Update frontend…** — a **frontend-only** update for instances already on the
+  newest core that have a newer compatible frontend in the registry. Dry-run
+  first, then execute; it swaps **only** the frontend container (no database
+  migration, no full backup, no maintenance window) and rolls the frontend back
+  on failure. See [update.md](update.md#frontend-only-updates).
 - **Backups** — create a backup, or restore one. A restore **always takes an
   automatic pre-restore backup first**, so the pre-restore state stays
   recoverable. The backup file stays on the server (the GUI shows the path;
@@ -218,6 +223,8 @@ the operation.
 | `PUT /api/instances/:id/backup-schedule` | Update the schedule policy (validated server-side). |
 | `POST /api/instances/:id/update/dry-run` | Resolve plan + preflight (synchronous). |
 | `POST /api/instances/:id/update` | Execute an update. |
+| `POST /api/instances/:id/frontend-update/dry-run` | Resolve the frontend-only plan (synchronous). |
+| `POST /api/instances/:id/frontend-update` | Execute a frontend-only update. |
 | `POST /api/instances/:id/clone` | Clone to a new instance (domain for production sources, port for local ones). |
 | `POST /api/instances/:id/address` | Change the routed domain / local port; restarts the instance. |
 | `GET /api/instances/:id/mailer` | Show the outbound-mail (SMTP) configuration (credentials redacted). |

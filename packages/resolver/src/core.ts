@@ -118,6 +118,120 @@ export function pickFrontendForCore(
   return sorted[0] ?? null;
 }
 
+export interface FrontendUpdateInput {
+  /** The frontend version currently installed on the instance. */
+  currentFrontendVersion: string;
+  /** The instance's installed core version (unchanged by a frontend-only update). */
+  coreVersion: string;
+  /**
+   * The current core release, when known. When present, its
+   * `frontendCompatibility.requiredFrontendRange` is enforced too, so a
+   * frontend-only update never moves to a frontend the running core forbids.
+   */
+  currentCore?: CoreRelease | null;
+  available: FrontendRelease[];
+  /** 'latest' picks the newest compatible non-blocked frontend; or a specific version. */
+  target?: 'latest' | string;
+  channel?: ReleaseChannel;
+  advisories?: SecurityAdvisory[];
+}
+
+export interface FrontendUpdateResult {
+  selected: FrontendRelease | null;
+  status: 'ok' | 'blocked' | 'up_to_date';
+  reasons: string[];
+}
+
+/**
+ * Resolve a FRONTEND-ONLY update: the newest compatible frontend that is
+ * strictly newer than the one installed, leaving the core version untouched.
+ *
+ * The platform releases the frontend independently of the core (a new frontend
+ * can target the same core range), so an instance on the latest core can still
+ * have a newer frontend available. The core-driven {@link resolveCoreTarget}
+ * never sees that case (it reports `up_to_date`), so this is the dedicated
+ * resolver for it. Compatibility is enforced both ways: the candidate must
+ * accept the running core (`backendCompatibility.requiredCoreRange`) and, when
+ * the current core release is known, the running core must accept the candidate
+ * (`frontendCompatibility.requiredFrontendRange`). Downgrades are blocked.
+ */
+export function resolveFrontendUpdate(input: FrontendUpdateInput): FrontendUpdateResult {
+  const {
+    currentFrontendVersion,
+    coreVersion,
+    currentCore = null,
+    available,
+    target = 'latest',
+    channel = 'stable',
+    advisories = [],
+  } = input;
+  const reasons: string[] = [];
+
+  const isCompatible = (f: FrontendRelease): boolean => {
+    if (f.blocked) return false;
+    if (f.channel !== channel) return false;
+    if (isBlockedByAdvisory(advisories, 'frontend', f.version, f.id)) {
+      reasons.push(`Frontend ${f.version} is blocked by a security advisory.`);
+      return false;
+    }
+    if (!satisfiesLoose(coreVersion, f.backendCompatibility.requiredCoreRange)) return false;
+    if (currentCore && !satisfiesLoose(f.version, currentCore.frontendCompatibility.requiredFrontendRange)) {
+      return false;
+    }
+    return true;
+  };
+
+  const cur = coerceVersion(currentFrontendVersion);
+
+  if (target !== 'latest') {
+    const wanted = coerceVersion(target);
+    const exact = available.find((r) => coerceVersion(r.version) === wanted);
+    if (!exact) {
+      const blockedByAdvisory = available.find(
+        (r) => coerceVersion(r.version) === wanted && isBlockedByAdvisory(advisories, 'frontend', r.version, r.id),
+      );
+      return {
+        selected: null,
+        status: 'blocked',
+        reasons: blockedByAdvisory
+          ? [`Frontend ${target} is blocked by a security advisory.`]
+          : [`Frontend ${target} is not available on the ${channel} channel.`],
+      };
+    }
+    if (cur !== null && wanted !== null && semver.eq(wanted, cur)) {
+      return { selected: null, status: 'up_to_date', reasons: [`Frontend ${currentFrontendVersion} is up to date.`] };
+    }
+    if (cur !== null && wanted !== null && semver.lt(wanted, cur)) {
+      return {
+        selected: null,
+        status: 'blocked',
+        reasons: [`Frontend downgrade from ${currentFrontendVersion} to ${target} is not supported.`],
+      };
+    }
+    if (!isCompatible(exact)) {
+      return {
+        selected: null,
+        status: 'blocked',
+        reasons: [`Frontend ${target} is not compatible with SelfHelp core ${coreVersion}.`],
+      };
+    }
+    return { selected: exact, status: 'ok', reasons };
+  }
+
+  const newer = available
+    .filter(isCompatible)
+    .filter((f) => {
+      const v = coerceVersion(f.version);
+      return v !== null && cur !== null && semver.gt(v, cur);
+    })
+    .sort((a, b) => semver.rcompare(coerceVersion(a.version) ?? '0.0.0', coerceVersion(b.version) ?? '0.0.0'));
+
+  if (newer.length === 0) {
+    return { selected: null, status: 'up_to_date', reasons: [`Frontend ${currentFrontendVersion} is up to date.`] };
+  }
+  return { selected: newer[0]!, status: 'ok', reasons };
+}
+
 /**
  * Core-coupled service release (scheduler / worker): the same shape the picker
  * needs to resolve the newest non-blocked release whose `requiredCoreRange`

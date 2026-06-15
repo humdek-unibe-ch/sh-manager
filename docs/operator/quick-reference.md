@@ -86,6 +86,9 @@ Services: `frontend`, `backend`, `worker`, `scheduler`, `mysql`, `redis`,
 | Apply (backup-first, auto-rollback) | `sh-manager instance update website1` |
 | Target a version | `sh-manager instance update website1 --version 0.1.1` |
 | Accept destructive migration | `sh-manager instance update website1 --accept-migration-risk` |
+| Frontend-only dry-run | `sh-manager instance update-frontend website1 --dry-run` |
+| Frontend-only apply | `sh-manager instance update-frontend website1` |
+| Frontend-only target a version | `sh-manager instance update-frontend website1 --version 0.1.7` |
 | Process a CMS-requested update | `sh-manager instance process-operations website1` (execs into the backend container; `--backend-url`/`--token` only for remote setups) |
 | Update the manager itself | `sh-manager self-update` (pulls the new image + restarts the web GUI container; source: git pull + build) — wrapper: `./shm.sh update` |
 | Only check for a manager update | `sh-manager self-update --check` (exit `2` = update available) |

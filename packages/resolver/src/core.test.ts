@@ -13,6 +13,7 @@ import {
   pickSchedulerForCore,
   pickWorkerForCore,
   resolveCoreTarget,
+  resolveFrontendUpdate,
 } from './core.js';
 
 function core(version: string, minFrom = '1.3.0', blocked = false): CoreRelease {
@@ -108,6 +109,81 @@ describe('pickFrontendForCore', () => {
     const c = core('1.5.0');
     const f = pickFrontendForCore(c, [frontend('1.4.9', '>=1.4.0 <1.5.0')]);
     expect(f).toBeNull();
+  });
+});
+
+describe('resolveFrontendUpdate', () => {
+  const available = [
+    frontend('0.1.4', '>=0.1.0 <0.2.0'),
+    frontend('0.1.5', '>=0.1.0 <0.2.0'),
+    frontend('0.1.7', '>=0.1.0 <0.2.0'),
+  ];
+
+  it('selects the newest compatible frontend strictly newer than the installed one', () => {
+    const r = resolveFrontendUpdate({ currentFrontendVersion: '0.1.5', coreVersion: '0.1.4', available });
+    expect(r.status).toBe('ok');
+    expect(r.selected?.version).toBe('0.1.7');
+  });
+
+  it('reports up_to_date when the installed frontend is already the newest', () => {
+    const r = resolveFrontendUpdate({ currentFrontendVersion: '0.1.7', coreVersion: '0.1.4', available });
+    expect(r.status).toBe('up_to_date');
+    expect(r.selected).toBeNull();
+  });
+
+  it('selects a specific newer target version', () => {
+    const r = resolveFrontendUpdate({ currentFrontendVersion: '0.1.4', coreVersion: '0.1.4', available, target: '0.1.5' });
+    expect(r.status).toBe('ok');
+    expect(r.selected?.version).toBe('0.1.5');
+  });
+
+  it('blocks a downgrade to an older frontend', () => {
+    const r = resolveFrontendUpdate({ currentFrontendVersion: '0.1.7', coreVersion: '0.1.4', available, target: '0.1.5' });
+    expect(r.status).toBe('blocked');
+    expect(r.reasons.join(' ')).toMatch(/downgrade/i);
+  });
+
+  it('blocks a specific target that is not in the channel', () => {
+    const r = resolveFrontendUpdate({ currentFrontendVersion: '0.1.4', coreVersion: '0.1.4', available, target: '9.9.9' });
+    expect(r.status).toBe('blocked');
+    expect(r.reasons.join(' ')).toMatch(/not available/i);
+  });
+
+  it('ignores frontends incompatible with the running core', () => {
+    const r = resolveFrontendUpdate({
+      currentFrontendVersion: '0.1.5',
+      coreVersion: '0.1.4',
+      available: [frontend('0.2.0', '>=0.2.0 <0.3.0')],
+    });
+    expect(r.status).toBe('up_to_date');
+  });
+
+  it('enforces the running core required frontend range when the core release is known', () => {
+    const runningCore = core('0.1.4');
+    runningCore.frontendCompatibility = { requiredFrontendRange: '>=0.1.0 <0.1.6' };
+    const r = resolveFrontendUpdate({
+      currentFrontendVersion: '0.1.5',
+      coreVersion: '0.1.4',
+      currentCore: runningCore,
+      available,
+    });
+    // 0.1.7 is forbidden by the running core; nothing newer is acceptable.
+    expect(r.status).toBe('up_to_date');
+  });
+
+  it('skips a frontend blocked by a security advisory', () => {
+    const advisories: SecurityAdvisory[] = [
+      {
+        id: 'SHSA-2026-0010',
+        severity: 'high',
+        affected: [{ kind: 'frontend', id: 'selfhelp-frontend', versions: '0.1.7' }],
+        fixed: [{ kind: 'frontend', id: 'selfhelp-frontend', version: '0.1.8' }],
+        recommendedAction: 'Avoid frontend 0.1.7.',
+        blocked: true,
+      },
+    ];
+    const r = resolveFrontendUpdate({ currentFrontendVersion: '0.1.5', coreVersion: '0.1.4', available, advisories });
+    expect(r.status).toBe('up_to_date');
   });
 });
 

@@ -41,6 +41,10 @@ interface PendingOperationDto {
   approved_by_user_id: number;
   accepted_migration_risk: boolean;
   destructive_migration: boolean;
+  /** Optional. `core` (default, back-compat) or `frontend` (lightweight swap). */
+  kind?: 'core' | 'frontend';
+  /** Optional. The frontend version a `frontend`-kind operation targets (null for core). */
+  target_frontend_version?: string | null;
 }
 
 const PENDING_PATH = '/cms-api/v1/manager/system/update/pending';
@@ -82,6 +86,13 @@ function toPendingOperation(dto: PendingOperationDto | null, trustedInstanceId: 
     approvedByUserId: dto.approved_by_user_id,
     acceptedMigrationRisk: dto.accepted_migration_risk,
     destructiveMigration: dto.destructive_migration,
+    // A backend that omits `kind` is treated as a `core` update (back-compat).
+    kind: dto.kind === 'frontend' ? 'frontend' : 'core',
+    // Only carry a frontend target when the backend actually sent one (core
+    // operations send null/omit it — the manager resolves the frontend itself).
+    ...(typeof dto.target_frontend_version === 'string'
+      ? { targetFrontendVersion: dto.target_frontend_version }
+      : {}),
   };
 }
 

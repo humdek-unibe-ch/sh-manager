@@ -38,6 +38,8 @@ export interface FakeClientOptions {
   operations?: OperationRecord[];
   /** Plan returned by updateDryRun (shape mirrors @shm/core UpdatePlan). */
   dryRunPlan?: unknown;
+  /** Plan returned by frontendUpdateDryRun (shape mirrors @shm/core FrontendUpdatePlan). */
+  frontendDryRunPlan?: unknown;
   /** When set, every mutating instance call rejects with this ApiError. */
   failMutations?: ApiError;
   /** getAuthMeta().operatorsConfigured (default true; false = first-run setup). */
@@ -165,6 +167,18 @@ export const FAKE_DRY_RUN_PLAN = {
   pluginEvaluations: [],
   preflight: null,
   steps: ['backup', 'pull images', 'recreate containers', 'run migrations', 'health check'],
+};
+
+/** Default frontend-only dry-run plan (mirrors @shm/core FrontendUpdatePlan). */
+export const FAKE_FRONTEND_DRY_RUN_PLAN = {
+  instanceId: 'clinic-a',
+  kind: 'frontend',
+  currentFrontendVersion: '0.1.5',
+  targetFrontendVersion: '0.1.7',
+  status: 'ok',
+  frontend: { id: 'selfhelp-frontend-0.1.7', version: '0.1.7' },
+  reasons: [],
+  steps: ['snapshot config', 'pull frontend image (0.1.7)', 'recreate frontend container', 'health check'],
 };
 
 /** Manager version baked into every fake snapshot (asserted by header tests). */
@@ -359,6 +373,9 @@ export function makeFakeClient(opts: FakeClientOptions = {}): ApiClient {
     async updateDryRun() {
       return { plan: opts.dryRunPlan ?? FAKE_DRY_RUN_PLAN };
     },
+    async frontendUpdateDryRun() {
+      return { plan: opts.frontendDryRunPlan ?? FAKE_FRONTEND_DRY_RUN_PLAN };
+    },
     async listOperations(instanceId) {
       return instanceId ? operations.filter((o) => o.instanceId === instanceId) : [...operations];
     },
@@ -385,6 +402,9 @@ export function makeFakeClient(opts: FakeClientOptions = {}): ApiClient {
     },
     async executeUpdate(instanceId) {
       return startFakeOperation('instance_update', instanceId);
+    },
+    async executeFrontendUpdate(instanceId) {
+      return startFakeOperation('instance_frontend_update', instanceId);
     },
     async createBackup(instanceId) {
       return startFakeOperation('instance_backup', instanceId);

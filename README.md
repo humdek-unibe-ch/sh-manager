@@ -211,6 +211,11 @@ sh-manager instance health website1
 sh-manager instance update --dry-run website1
 sh-manager instance update website1 --accept-migration-risk
 
+# frontend-only update (instance already on the newest core, newer frontend
+# available): stateless swap of just the frontend container, no migration/backup
+sh-manager instance update-frontend website1 --dry-run
+sh-manager instance update-frontend website1 --version 0.1.7
+
 # outbound mail (SMTP) per instance: show / set / back to default
 sh-manager instance mailer website1
 sh-manager instance mailer website1 --set smtp://user:pass@mail.example.org:587

@@ -55,6 +55,24 @@ describe('HttpBackendOperationsClient', () => {
     expect(op).toMatchObject({ operationId: 'op_9', targetVersion: '8.0.1', acceptedMigrationRisk: true });
   });
 
+  it('defaults an operation without an explicit kind to a core update (back-compat)', async () => {
+    const captured: Captured[] = [];
+    const c = client(captured, { status: 200, body: { status: 200, data: pendingDto } });
+    const op = await c.fetchPending('inst-a');
+    expect(op?.kind).toBe('core');
+    expect(op?.targetFrontendVersion).toBeUndefined();
+  });
+
+  it('maps a frontend-only operation (kind + target_frontend_version)', async () => {
+    const captured: Captured[] = [];
+    const c = client(captured, {
+      status: 200,
+      body: { status: 200, data: { ...pendingDto, kind: 'frontend', target_frontend_version: '0.1.7' } },
+    });
+    const op = await c.fetchPending('inst-a');
+    expect(op).toMatchObject({ operationId: 'op_9', kind: 'frontend', targetFrontendVersion: '0.1.7' });
+  });
+
   it('returns null when nothing is pending (404 or empty data)', async () => {
     const captured: Captured[] = [];
     expect(await client(captured, { status: 404 }).fetchPending('inst-a')).toBeNull();

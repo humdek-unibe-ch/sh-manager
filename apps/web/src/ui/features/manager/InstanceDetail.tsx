@@ -20,13 +20,14 @@ import { BackupManager } from './BackupManager';
 import { CloneInstanceDialog } from './CloneInstanceDialog';
 import { EnvDialog } from './EnvDialog';
 import { InstanceUpdateDialog } from './InstanceUpdateDialog';
+import { InstanceFrontendUpdateDialog } from './InstanceFrontendUpdateDialog';
 import { MailerDialog } from './MailerDialog';
 import { OperationLog, operationTone } from './OperationLog';
 import { RemoveInstanceDialog } from './RemoveInstanceDialog';
 import { SetAddressDialog } from './SetAddressDialog';
 import { instanceStatusTone } from './InstancesList';
 
-type DialogKind = 'update' | 'clone' | 'address' | 'mailer' | 'env' | 'remove' | null;
+type DialogKind = 'update' | 'frontend-update' | 'clone' | 'address' | 'mailer' | 'env' | 'remove' | null;
 
 function healthTone(overall: InstanceHealthReport['overall']): 'ok' | 'warning' | 'error' | 'neutral' {
   switch (overall) {
@@ -108,6 +109,9 @@ export function InstanceDetail({ client, instanceId }: InstanceDetailProps): JSX
           </Button>
           <Button variant="primary" disabled={busy} onClick={() => setDialog('update')}>
             Update…
+          </Button>
+          <Button variant="secondary" disabled={busy} onClick={() => setDialog('frontend-update')}>
+            Update frontend…
           </Button>
           <Button variant="secondary" disabled={busy} onClick={() => setDialog('clone')}>
             Clone…
@@ -259,6 +263,13 @@ export function InstanceDetail({ client, instanceId }: InstanceDetailProps): JSX
         client={client}
         instanceId={instanceId}
         opened={dialog === 'update'}
+        onClose={() => setDialog(null)}
+        onStarted={onStarted}
+      />
+      <InstanceFrontendUpdateDialog
+        client={client}
+        instanceId={instanceId}
+        opened={dialog === 'frontend-update'}
         onClose={() => setDialog(null)}
         onStarted={onStarted}
       />

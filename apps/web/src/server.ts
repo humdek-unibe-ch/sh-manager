@@ -57,6 +57,7 @@ import {
 import type {
   CloneInstanceRequest,
   CreateInstanceRequest,
+  FrontendUpdateInstanceRequest,
   ManagerInstanceActions,
   RemoveInstanceRequest,
   SetAddressRequest,
@@ -470,6 +471,16 @@ export function createManagerServer(options: ManagerServerOptions): ManagerServe
     if (rest === '/update' && ctx.method === 'POST') {
       const body = (ctx.body ?? {}) as UpdateInstanceRequest;
       await start('instance_update', instanceId, (opCtx) => im.instances.update(instanceId, body, opCtx));
+      return true;
+    }
+    if (rest === '/frontend-update/dry-run' && ctx.method === 'POST') {
+      const body = (ctx.body ?? {}) as FrontendUpdateInstanceRequest;
+      sendJson(res, 200, { plan: await im.instances.frontendUpdateDryRun(instanceId, body) });
+      return true;
+    }
+    if (rest === '/frontend-update' && ctx.method === 'POST') {
+      const body = (ctx.body ?? {}) as FrontendUpdateInstanceRequest;
+      await start('instance_frontend_update', instanceId, (opCtx) => im.instances.frontendUpdate(instanceId, body, opCtx));
       return true;
     }
     if (rest === '/backups' && ctx.method === 'POST') {

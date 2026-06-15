@@ -5,10 +5,13 @@ import type { CoreRelease, FrontendRelease, PluginRelease } from '@shm/schemas';
 import { RecordingComposeRunner } from '@shm/docker';
 import {
   evaluateMysqlMajorUpgrade,
+  executeFrontendUpdate,
   executeUpdate,
   imageMajor,
+  planFrontendUpdate,
   planUpdate,
   resolveTargetRuntimeImages,
+  type FrontendUpdatePlan,
   type UpdatePlan,
 } from './update.js';
 import type { RuntimeServicePolicy } from '@shm/schemas';
@@ -354,5 +357,114 @@ describe('executeUpdate', () => {
         runMigrations: async () => undefined, checkHealth: async () => healthy, rollback: async () => undefined,
       }),
     ).rejects.toThrow(/blocked/i);
+  });
+});
+
+describe('planFrontendUpdate', () => {
+  const frontendReleases = [
+    mkFrontend('1.5.0', '>=1.4.0 <1.6.0'),
+    mkFrontend('1.5.3', '>=1.4.0 <1.6.0'),
+  ];
+
+  it('selects the newest compatible frontend newer than the installed one', () => {
+    const plan = planFrontendUpdate({
+      instanceId: 'website1', currentFrontendVersion: '1.5.0', coreVersion: '1.4.0', frontendReleases,
+    });
+    expect(plan.kind).toBe('frontend');
+    expect(plan.status).toBe('ok');
+    expect(plan.targetFrontendVersion).toBe('1.5.3');
+    expect(plan.steps.length).toBeGreaterThan(3);
+  });
+
+  it('reports up_to_date when the installed frontend is already newest', () => {
+    const plan = planFrontendUpdate({
+      instanceId: 'website1', currentFrontendVersion: '1.5.3', coreVersion: '1.4.0', frontendReleases,
+    });
+    expect(plan.status).toBe('up_to_date');
+    expect(plan.frontend).toBeNull();
+    expect(plan.steps).toEqual([]);
+  });
+
+  it('blocks an unavailable specific target', () => {
+    const plan = planFrontendUpdate({
+      instanceId: 'website1', currentFrontendVersion: '1.5.0', coreVersion: '1.4.0', frontendReleases, target: '9.9.9',
+    });
+    expect(plan.status).toBe('blocked');
+    expect(plan.targetFrontendVersion).toBeNull();
+  });
+});
+
+describe('executeFrontendUpdate', () => {
+  const okPlan = (): FrontendUpdatePlan =>
+    planFrontendUpdate({
+      instanceId: 'website1', currentFrontendVersion: '1.5.0', coreVersion: '1.4.0',
+      frontendReleases: [mkFrontend('1.5.3', '>=1.4.0 <1.6.0')],
+    });
+  const healthy: HealthReport = { instanceId: 'website1', overall: 'healthy', services: [], checkedAt: 'now' };
+  const unhealthy: HealthReport = { instanceId: 'website1', overall: 'unhealthy', services: [], checkedAt: 'now' };
+
+  it('runs snapshot -> apply -> pull frontend -> up frontend -> health, recreating only the frontend', async () => {
+    const runner = new RecordingComposeRunner();
+    const order: string[] = [];
+    const report = await executeFrontendUpdate(okPlan(), {
+      runner, instanceDir: '/tmp/website1',
+      snapshot: async () => { order.push('snapshot'); },
+      applyArtifacts: async () => { order.push('apply'); },
+      checkHealth: async () => { order.push('health'); return healthy; },
+      rollback: async () => { order.push('rollback'); },
+    });
+    expect(report.ok).toBe(true);
+    expect(report.rolledBack).toBe(false);
+    expect(report.targetFrontendVersion).toBe('1.5.3');
+    expect(order).toEqual(['snapshot', 'apply', 'health']);
+    // Only the frontend service is pulled and recreated; never the whole stack.
+    expect(runner.calls.map((c) => c.args)).toEqual([
+      ['pull', 'frontend'],
+      ['up', '-d', '--no-deps', 'frontend'],
+    ]);
+  });
+
+  it('aborts before any mutation when the snapshot fails', async () => {
+    const runner = new RecordingComposeRunner();
+    let applied = false;
+    const report = await executeFrontendUpdate(okPlan(), {
+      runner, instanceDir: '/tmp/website1',
+      snapshot: async () => { throw new Error('snap failed'); },
+      applyArtifacts: async () => { applied = true; },
+      checkHealth: async () => healthy,
+      rollback: async () => undefined,
+    });
+    expect(report.ok).toBe(false);
+    expect(report.rolledBack).toBe(false);
+    expect(applied).toBe(false);
+    expect(runner.calls).toHaveLength(0);
+  });
+
+  it('rolls back the config when health fails after the swap', async () => {
+    let rolledBackReason = '';
+    const report = await executeFrontendUpdate(okPlan(), {
+      runner: new RecordingComposeRunner(), instanceDir: '/tmp/website1',
+      snapshot: async () => undefined,
+      applyArtifacts: async () => undefined,
+      checkHealth: async () => unhealthy,
+      rollback: async (reason) => { rolledBackReason = reason; },
+    });
+    expect(report.ok).toBe(false);
+    expect(report.rolledBack).toBe(true);
+    expect(rolledBackReason).toMatch(/health/);
+  });
+
+  it('refuses to execute a non-ok plan', async () => {
+    const blocked = planFrontendUpdate({
+      instanceId: 'website1', currentFrontendVersion: '1.5.3', coreVersion: '1.4.0',
+      frontendReleases: [mkFrontend('1.5.3', '>=1.4.0 <1.6.0')],
+    });
+    await expect(
+      executeFrontendUpdate(blocked, {
+        runner: new RecordingComposeRunner(), instanceDir: '/tmp/x',
+        snapshot: async () => undefined, applyArtifacts: async () => undefined,
+        checkHealth: async () => healthy, rollback: async () => undefined,
+      }),
+    ).rejects.toThrow(/not ok/i);
   });
 });

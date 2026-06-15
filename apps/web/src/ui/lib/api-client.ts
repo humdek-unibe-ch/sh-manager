@@ -17,6 +17,7 @@ import type {
   BackupSummary,
   CloneInstanceRequest,
   CreateInstanceRequest,
+  FrontendUpdateInstanceRequest,
   InstanceDetail,
   InstanceEnvConfig,
   InstanceSummary,
@@ -107,10 +108,14 @@ export interface ApiClient {
   /** Effective non-secret environment of an instance (read-only). */
   getInstanceEnv(instanceId: string): Promise<InstanceEnvConfig>;
   updateDryRun(instanceId: string, req: UpdateInstanceRequest): Promise<{ plan: unknown }>;
+  /** Plan-only frontend-only update preview (never mutates). */
+  frontendUpdateDryRun(instanceId: string, req: FrontendUpdateInstanceRequest): Promise<{ plan: unknown }>;
   listOperations(instanceId?: string): Promise<OperationRecord[]>;
   getOperation(operationId: string): Promise<OperationRecord>;
   createInstance(req: CreateInstanceRequest): Promise<StartedOperation>;
   executeUpdate(instanceId: string, req: UpdateInstanceRequest): Promise<StartedOperation>;
+  /** Update ONLY the frontend (stateless swap; core + data untouched). */
+  executeFrontendUpdate(instanceId: string, req: FrontendUpdateInstanceRequest): Promise<StartedOperation>;
   createBackup(instanceId: string): Promise<StartedOperation>;
   restoreBackup(instanceId: string, backupId: string): Promise<StartedOperation>;
   cloneInstance(instanceId: string, req: CloneInstanceRequest): Promise<StartedOperation>;
@@ -223,6 +228,8 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       request<InstanceEnvConfig>(`/api/instances/${encodeURIComponent(instanceId)}/env`, 'GET'),
     updateDryRun: (instanceId, req) =>
       request<{ plan: unknown }>(`/api/instances/${encodeURIComponent(instanceId)}/update/dry-run`, 'POST', req),
+    frontendUpdateDryRun: (instanceId, req) =>
+      request<{ plan: unknown }>(`/api/instances/${encodeURIComponent(instanceId)}/frontend-update/dry-run`, 'POST', req),
     listOperations: async (instanceId) =>
       (
         await request<{ operations: OperationRecord[] }>(
@@ -234,6 +241,8 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     createInstance: (req) => request<StartedOperation>('/api/instances', 'POST', req),
     executeUpdate: (instanceId, req) =>
       request<StartedOperation>(`/api/instances/${encodeURIComponent(instanceId)}/update`, 'POST', req),
+    executeFrontendUpdate: (instanceId, req) =>
+      request<StartedOperation>(`/api/instances/${encodeURIComponent(instanceId)}/frontend-update`, 'POST', req),
     createBackup: (instanceId) =>
       request<StartedOperation>(`/api/instances/${encodeURIComponent(instanceId)}/backups`, 'POST'),
     restoreBackup: (instanceId, backupId) =>

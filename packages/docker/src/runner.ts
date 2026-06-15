@@ -51,6 +51,14 @@ export const composeCommands = {
   stop: (): string[] => ['stop'],
   restart: (): string[] => ['restart'],
   pull: (): string[] => ['pull'],
+  /** Pull a single service's image (used by the frontend-only update). */
+  pullService: (service: string): string[] => ['pull', service],
+  /**
+   * Recreate a single service without touching its dependencies. Used by the
+   * frontend-only update to swap just the frontend container after its image
+   * tag changed, leaving backend/worker/scheduler/db running untouched.
+   */
+  upService: (service: string): string[] => ['up', '-d', '--no-deps', service],
   ps: (): string[] => ['ps', '--format', 'json'],
   logs: (tail = 200): string[] => ['logs', '--no-color', `--tail=${tail}`],
 } as const;

@@ -39,6 +39,7 @@ import {
   instanceSetMailer,
   instanceSupportBundle,
   instanceUpdate,
+  instanceFrontendUpdate,
   drainInstanceOperations,
   drainInstancePluginOperations,
   serverInit,
@@ -426,6 +427,53 @@ instance
       });
       if (res.plan.preflight) console.log(formatPreflight(res.plan.preflight));
       else console.log(`Update status: ${res.plan.status} - ${res.plan.reasons.join('; ')}`);
+      if (res.executed && res.report) {
+        console.log(`\nExecution: ${res.report.ok ? 'OK' : res.report.rolledBack ? 'ROLLED BACK' : 'FAILED'}`);
+        for (const s of res.report.steps) console.log(`  ${s.status.padEnd(7)} ${s.name}${s.detail ? ` (${s.detail})` : ''}`);
+      }
+
+      // Smooth path: the core is up to date, but the frontend ships
+      // independently, so a newer compatible frontend may still be available.
+      // Surface it (and apply it unless this was a dry run / a specific core
+      // version was requested) so `instance update` never silently leaves a
+      // stale frontend behind.
+      if (res.plan.status === 'up_to_date' && !opts.version) {
+        const fe = await instanceFrontendUpdate(d, id, { dryRun: opts.dryRun, channel: opts.channel as ReleaseChannel | undefined });
+        if (fe.plan.status === 'ok' && fe.plan.frontend) {
+          console.log(
+            `\nFrontend update ${opts.dryRun ? 'available' : 'applied'}: ${fe.plan.currentFrontendVersion} -> ${fe.plan.targetFrontendVersion}`,
+          );
+          if (fe.executed && fe.report) {
+            console.log(`Execution: ${fe.report.ok ? 'OK' : fe.report.rolledBack ? 'ROLLED BACK' : 'FAILED'}`);
+            for (const s of fe.report.steps) console.log(`  ${s.status.padEnd(7)} ${s.name}${s.detail ? ` (${s.detail})` : ''}`);
+          }
+        }
+      }
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+instance
+  .command('update-frontend <id>')
+  .description('Plan (dry-run) or execute a frontend-only update (leaves the core stack + all data untouched)')
+  .option('--dry-run', 'only show the plan', false)
+  .option('--channel <channel>', 'stable|beta|nightly')
+  .option('--version <version>', "target frontend version or 'latest'")
+  .action(async (id: string, opts) => {
+    try {
+      const d = await deps(program.opts().root as string);
+      const res = await instanceFrontendUpdate(d, id, {
+        dryRun: opts.dryRun,
+        channel: opts.channel as ReleaseChannel | undefined,
+        target: opts.version,
+      });
+      if (res.plan.status === 'ok' && res.plan.frontend) {
+        console.log(`Frontend update: ${res.plan.currentFrontendVersion} -> ${res.plan.targetFrontendVersion}`);
+        for (const step of res.plan.steps) console.log(`  - ${step}`);
+      } else {
+        console.log(`Frontend update status: ${res.plan.status} - ${res.plan.reasons.join('; ') || 'no newer frontend available'}`);
+      }
       if (res.executed && res.report) {
         console.log(`\nExecution: ${res.report.ok ? 'OK' : res.report.rolledBack ? 'ROLLED BACK' : 'FAILED'}`);
         for (const s of res.report.steps) console.log(`  ${s.status.padEnd(7)} ${s.name}${s.detail ? ` (${s.detail})` : ''}`);

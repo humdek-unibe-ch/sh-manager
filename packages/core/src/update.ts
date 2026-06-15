@@ -22,6 +22,7 @@ import {
   evaluatePluginAgainstTargetCore,
   pickFrontendForCore,
   resolveCoreTarget,
+  resolveFrontendUpdate,
   type PluginUpdateBlock,
 } from '@shm/resolver';
 import { composeCommands, type ComposeRunner } from '@shm/docker';
@@ -497,4 +498,190 @@ export function evaluateMysqlMajorUpgrade(
   const isMajorUpgrade = fromMajor !== null && toMajor !== null && toMajor > fromMajor;
   const requiresApproval = isMajorUpgrade && (runtime?.mysql.majorUpgradeRequiresManualApproval ?? false);
   return { isMajorUpgrade, requiresApproval, fromMajor, toMajor };
+}
+
+// ---------------------------------------------------------------------------
+// Frontend-only update (plan + execute)
+// ---------------------------------------------------------------------------
+//
+// The frontend is released independently of the core: a new frontend image can
+// target the same core range, so an instance on the latest core can still have
+// a newer frontend available. The core-driven `planUpdate` reports `up_to_date`
+// in that case, so this is the dedicated, lightweight path that swaps ONLY the
+// frontend container. It is deliberately simpler than a core update: the
+// frontend is stateless, so there is no database migration, no full backup, and
+// no maintenance window — just snapshot config (for rollback), recreate the one
+// container from the new image, and health-check.
+
+/** The single Compose service a frontend-only update recreates. */
+export const FRONTEND_UPDATE_SERVICE = 'frontend';
+
+export interface FrontendUpdatePlanInput {
+  instanceId: string;
+  /** The frontend version currently installed. */
+  currentFrontendVersion: string;
+  /** The instance's installed core version (never changed here). */
+  coreVersion: string;
+  /** The current core release, when known, so its required frontend range is enforced. */
+  currentCore?: CoreRelease | null;
+  frontendReleases: FrontendRelease[];
+  channel?: ReleaseChannel;
+  target?: 'latest' | string;
+  advisories?: SecurityAdvisory[];
+}
+
+export interface FrontendUpdatePlan {
+  instanceId: string;
+  kind: 'frontend';
+  currentFrontendVersion: string;
+  targetFrontendVersion: string | null;
+  /** No 'warning' here: a frontend swap runs no migrations. */
+  status: Exclude<UpdateStatus, 'warning'>;
+  frontend: FrontendRelease | null;
+  reasons: string[];
+  steps: string[];
+}
+
+/** Resolves a frontend-only update target and produces a (non-mutating) plan. */
+export function planFrontendUpdate(input: FrontendUpdatePlanInput): FrontendUpdatePlan {
+  const result = resolveFrontendUpdate({
+    currentFrontendVersion: input.currentFrontendVersion,
+    coreVersion: input.coreVersion,
+    currentCore: input.currentCore ?? null,
+    available: input.frontendReleases,
+    target: input.target ?? 'latest',
+    channel: input.channel ?? 'stable',
+    advisories: input.advisories ?? [],
+  });
+
+  const base = {
+    instanceId: input.instanceId,
+    kind: 'frontend' as const,
+    currentFrontendVersion: input.currentFrontendVersion,
+    reasons: result.reasons,
+  };
+
+  if (result.status !== 'ok' || result.selected === null) {
+    return { ...base, status: result.status, targetFrontendVersion: null, frontend: null, steps: [] };
+  }
+
+  return {
+    ...base,
+    status: 'ok',
+    targetFrontendVersion: result.selected.version,
+    frontend: result.selected,
+    steps: buildFrontendSteps(input.currentFrontendVersion, result.selected),
+  };
+}
+
+function buildFrontendSteps(current: string, frontend: FrontendRelease): string[] {
+  return [
+    'verify signature + checksum of the target frontend image',
+    'snapshot the current compose/manifest/lock/.env (for rollback)',
+    `write new manifest + lock + .env + compose (frontend ${current} -> ${frontend.version})`,
+    `pull frontend image (${frontend.version})`,
+    `recreate only the frontend container (docker compose up -d --no-deps ${FRONTEND_UPDATE_SERVICE})`,
+    'run health checks',
+    'on failure: restore the previous config and recreate the previous frontend container',
+  ];
+}
+
+export interface FrontendUpdateExecutionDeps {
+  runner: ComposeRunner;
+  instanceDir: string;
+  /**
+   * Capture the pre-update config (compose/manifest/lock/.env) BEFORE any
+   * mutation, so a failure can be restored exactly. A failure here aborts the
+   * update before anything is mutated.
+   */
+  snapshot: () => Promise<void>;
+  /** Rewrite the instance artifacts with the new frontend image + version. */
+  applyArtifacts: () => Promise<void>;
+  checkHealth: () => Promise<HealthReport>;
+  /** Restore the snapshot config and recreate the previous frontend container. */
+  rollback: (reason: string) => Promise<void>;
+  now?: () => string;
+}
+
+export interface FrontendUpdateExecutionReport {
+  instanceId: string;
+  targetFrontendVersion: string;
+  ok: boolean;
+  rolledBack: boolean;
+  steps: UpdateStepResult[];
+}
+
+/**
+ * Executes an approved, non-blocked frontend-only plan. No backup, no
+ * migrations, no maintenance window: the frontend is stateless, so the path is
+ * snapshot -> apply -> pull -> recreate frontend -> health, with a config
+ * rollback (and a previous-image recreate) on any failure. The MySQL/uploads/
+ * plugin volumes are never touched.
+ */
+export async function executeFrontendUpdate(
+  plan: FrontendUpdatePlan,
+  deps: FrontendUpdateExecutionDeps,
+): Promise<FrontendUpdateExecutionReport> {
+  if (plan.status !== 'ok' || plan.frontend === null || plan.targetFrontendVersion === null) {
+    throw new Error('Refusing to execute a frontend update plan that is not ok.');
+  }
+
+  const steps: UpdateStepResult[] = [];
+  const report: FrontendUpdateExecutionReport = {
+    instanceId: plan.instanceId,
+    targetFrontendVersion: plan.targetFrontendVersion,
+    ok: false,
+    rolledBack: false,
+    steps,
+  };
+
+  // Snapshot first — before any mutation. A failure here aborts without rollback.
+  try {
+    await deps.snapshot();
+    steps.push({ name: 'snapshot', status: 'done' });
+  } catch (err) {
+    steps.push({ name: 'snapshot', status: 'failed', detail: errMessage(err) });
+    return report;
+  }
+
+  try {
+    await deps.applyArtifacts();
+    steps.push({ name: 'apply-artifacts', status: 'done' });
+
+    await deps.runner.run(deps.instanceDir, composeCommands.pullService(FRONTEND_UPDATE_SERVICE));
+    steps.push({ name: 'pull', status: 'done', detail: plan.targetFrontendVersion });
+
+    await deps.runner.run(deps.instanceDir, composeCommands.upService(FRONTEND_UPDATE_SERVICE));
+    steps.push({ name: 'up', status: 'done', detail: FRONTEND_UPDATE_SERVICE });
+
+    const health = await deps.checkHealth();
+    if (!isHealthy(health)) {
+      steps.push({ name: 'health', status: 'failed', detail: `overall=${health.overall}` });
+      await runFrontendRollback(deps, steps, report, `health ${health.overall}`);
+      return report;
+    }
+    steps.push({ name: 'health', status: 'done', detail: 'healthy' });
+
+    report.ok = true;
+    return report;
+  } catch (err) {
+    steps.push({ name: 'update', status: 'failed', detail: errMessage(err) });
+    await runFrontendRollback(deps, steps, report, errMessage(err));
+    return report;
+  }
+}
+
+async function runFrontendRollback(
+  deps: FrontendUpdateExecutionDeps,
+  steps: UpdateStepResult[],
+  report: FrontendUpdateExecutionReport,
+  reason: string,
+): Promise<void> {
+  try {
+    await deps.rollback(reason);
+    report.rolledBack = true;
+    steps.push({ name: 'rollback', status: 'done', detail: reason });
+  } catch (rollbackErr) {
+    steps.push({ name: 'rollback', status: 'failed', detail: errMessage(rollbackErr) });
+  }
 }

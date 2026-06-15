@@ -8,7 +8,7 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `1.4.2`). Registry releases
+- **The manager tool** uses its own semver (currently `1.4.3`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
@@ -16,7 +16,33 @@ The manager has two version axes (see
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
 
-## [1.4.3] - Unreleased
+## [1.4.3] - 2026-06-15
+
+### Added
+- **Frontend-only updates.** The frontend ships on its own cadence in the
+  registry, so an instance already on the newest **core** can still have a newer
+  compatible **frontend** (e.g. core `0.1.4` + frontend `0.1.5` → `0.1.7`).
+  The manager can now update the frontend independently:
+  - New resolver `resolveFrontendUpdate()` picks the newest registry frontend
+    that satisfies both the instance's current core range and the frontend's own
+    `requiredCoreRange`, honouring channel + security advisories and refusing
+    downgrades.
+  - New engine `planFrontendUpdate()` / `executeFrontendUpdate()` do the
+    **lightweight** swap: snapshot config → pull **only** the frontend image →
+    recreate **only** the frontend container (`--no-deps`) → health-check, with
+    automatic rollback. No database migration, no full backup, no maintenance
+    window (the frontend is stateless); the core stack and all volumes are left
+    untouched.
+  - New CLI command **`instance update-frontend <id>`** (with `--version`,
+    `--channel`, `--dry-run`). The existing **`instance update`** now also offers
+    a frontend-only update automatically when the core is already up to date.
+  - New BFF routes `POST /api/instances/:id/frontend-update/dry-run` and
+    `POST /api/instances/:id/frontend-update`, and a dedicated **Update
+    frontend…** dialog on the instance detail page (dry-run first, execute
+    second).
+  - The CMS → manager operation protocol (`PendingOperation`) gained
+    `kind: 'core' | 'frontend'` + `targetFrontendVersion`, so a frontend-only
+    update can also be requested from the CMS and drained by the manager.
 
 ### Fixed
 - **Health check service badges now show correct colors** — the service badge color check was looking for state `'running'` but the health check API returns `'healthy'`, `'degraded'`, etc. Changed the condition to check for `'healthy'` so healthy services display teal (green) instead of red.

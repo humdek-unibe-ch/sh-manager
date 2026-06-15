@@ -59,6 +59,17 @@ export interface PendingOperation {
   approvedByUserId: number;
   acceptedMigrationRisk: boolean;
   destructiveMigration: boolean;
+  /**
+   * What the operation updates. `core` (default, back-compat) updates the core
+   * stack (and its compatible frontend); `frontend` is the lightweight,
+   * stateless frontend-only swap. A backend that omits it is treated as `core`.
+   */
+  kind?: 'core' | 'frontend';
+  /**
+   * The frontend version a `frontend`-kind operation targets. Ignored for
+   * `core` operations (which resolve the compatible frontend themselves).
+   */
+  targetFrontendVersion?: string;
 }
 
 export interface OperationStatusUpdate {

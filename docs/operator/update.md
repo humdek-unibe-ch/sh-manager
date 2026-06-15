@@ -3,8 +3,8 @@
 Audience: Server operators
 Status: Active
 Applies to: `sh-manager` (manager tool `0.1.6+`)
-Last verified: 2026-06-12
-Source of truth: `apps/cli/src/bin.ts`, `apps/cli/src/actions.ts`, `packages/core/src/update.ts`
+Last verified: 2026-06-15
+Source of truth: `apps/cli/src/bin.ts`, `apps/cli/src/actions.ts`, `packages/core/src/update.ts`, `packages/resolver/src/core.ts`
 
 Updates are **backup-first** and **rollback-on-failure**. The manager resolves a
 compatible target version (honouring security advisories and core ⇄ frontend ⇄
@@ -63,6 +63,40 @@ Take a manual backup and read the release notes before using this flag.
 ```bash
 sh-manager instance health website1
 ```
+
+## Frontend-only updates
+
+The frontend is released on its own cadence in the registry. An instance that is
+already on the newest **core** can still have a newer compatible **frontend**
+(for example core `0.1.4` with frontend `0.1.5`, while the registry already ships
+frontend `0.1.7` for that core). A normal `instance update` reports the core as
+up to date and, when so, automatically offers the frontend-only update; you can
+also run it explicitly.
+
+This is the **lightweight** path. The frontend is stateless, so the manager:
+
+- pulls **only** the frontend image and recreates **only** the frontend
+  container (`--no-deps`),
+- takes a config snapshot (not a full database backup),
+- runs **no** database migration and needs **no** maintenance window,
+- leaves the core stack and every volume untouched,
+- health-checks and **rolls back** the frontend on failure.
+
+```bash
+# Preview (pure read): resolves the newest compatible frontend.
+sh-manager instance update-frontend website1 --dry-run
+
+# Apply (optionally pin a version / pick a channel):
+sh-manager instance update-frontend website1
+sh-manager instance update-frontend website1 --version 0.1.7
+sh-manager instance update-frontend website1 --channel beta
+```
+
+The resolver refuses a downgrade or any frontend whose `requiredCoreRange` does
+not include the instance's current core, and honours security advisories. In the
+GUI, use **Update frontend…** on the instance detail page (dry-run first, then
+execute). A frontend-only update can also be requested from the CMS (it records a
+`kind: frontend` operation the manager drains — see below).
 
 ## CMS-requested updates (instance-scoped)
 

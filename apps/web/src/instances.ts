@@ -48,10 +48,12 @@ import {
   instanceSetEnv,
   instanceSetMailer,
   instanceUpdate,
+  instanceFrontendUpdate,
   serverInit,
   type ActionDeps,
   type BackupScheduleStatus,
   type InstanceEnvConfig,
+  type InstanceFrontendUpdateOptions,
   type InstanceInstallOptions,
   type InstanceUpdateOptions,
   type MailerStatus,
@@ -122,6 +124,12 @@ export interface UpdateInstanceRequest {
   approveMysqlMajor?: boolean;
 }
 
+export interface FrontendUpdateInstanceRequest {
+  /** Target frontend version, or 'latest' (default). */
+  target?: string;
+  channel?: string;
+}
+
 export interface RestoreInstanceRequest {
   backupId: string;
 }
@@ -180,9 +188,13 @@ export interface ManagerInstanceActions {
   envConfig(instanceId: string): Promise<InstanceEnvConfig>;
   /** Plan-only update preview (never mutates). */
   updateDryRun(instanceId: string, req: UpdateInstanceRequest): Promise<unknown>;
+  /** Plan-only frontend-only update preview (never mutates). */
+  frontendUpdateDryRun(instanceId: string, req: FrontendUpdateInstanceRequest): Promise<unknown>;
 
   create(req: CreateInstanceRequest, ctx: OperationContext): Promise<unknown>;
   update(instanceId: string, req: UpdateInstanceRequest, ctx: OperationContext): Promise<unknown>;
+  /** Update ONLY the frontend (stateless swap; core + data untouched). */
+  frontendUpdate(instanceId: string, req: FrontendUpdateInstanceRequest, ctx: OperationContext): Promise<unknown>;
   backup(instanceId: string, ctx: OperationContext): Promise<unknown>;
   /** Takes an automatic pre-restore backup, then applies the restore. */
   restore(instanceId: string, req: RestoreInstanceRequest, ctx: OperationContext): Promise<unknown>;
@@ -357,6 +369,15 @@ export function buildInstanceActions(opts: BuildInstanceActionsOptions): Manager
       return res.plan;
     },
 
+    async frontendUpdateDryRun(instanceId, req) {
+      const res = await instanceFrontendUpdate(deps, instanceId, {
+        dryRun: true,
+        ...(req.target ? { target: req.target } : {}),
+        ...(req.channel ? { channel: req.channel as InstanceFrontendUpdateOptions['channel'] } : {}),
+      });
+      return res.plan;
+    },
+
     async create(req, ctx) {
       // First instance on a fresh state root: initialize the server (proxy +
       // inventory) inline so the GUI needs no separate "server init" step. The
@@ -432,6 +453,29 @@ export function buildInstanceActions(opts: BuildInstanceActionsOptions): Manager
         ok: res.report?.ok ?? false,
         rolledBack: res.report?.rolledBack ?? false,
         toVersion: res.plan.core?.version ?? null,
+      };
+    },
+
+    async frontendUpdate(instanceId, req, ctx) {
+      await ctx.setPhase('plan');
+      const res = await instanceFrontendUpdate(deps, instanceId, {
+        ...(req.target ? { target: req.target } : {}),
+        ...(req.channel ? { channel: req.channel as InstanceFrontendUpdateOptions['channel'] } : {}),
+      });
+      if (!res.executed) {
+        await ctx.log(
+          `Frontend update not executed (${res.plan.status}): ${res.plan.reasons.join('; ') || 'no newer frontend available'}`,
+        );
+        return { executed: false, plan: res.plan };
+      }
+      for (const step of res.report?.steps ?? []) {
+        await ctx.log(`${step.name}: ${step.status}${step.detail ? ` — ${step.detail}` : ''}`);
+      }
+      return {
+        executed: true,
+        ok: res.report?.ok ?? false,
+        rolledBack: res.report?.rolledBack ?? false,
+        toVersion: res.plan.targetFrontendVersion,
       };
     },
 

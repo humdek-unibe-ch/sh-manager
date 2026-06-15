@@ -47,9 +47,11 @@ import {
   buildServerBootstrap,
   evaluateHealth,
   evaluateMysqlMajorUpgrade,
+  executeFrontendUpdate,
   executeUpdate,
   finalizePluginOperations,
   installInstance,
+  planFrontendUpdate,
   planUpdate,
   reinstallPluginsForCore,
   resolveTargetRuntimeImages,
@@ -58,10 +60,14 @@ import {
   drainOperations,
   provisionInstance,
   runPreflight,
+  type ApprovedUpdate,
   type BackendOperationsClient,
   type BootstrapTargetFacts,
+  type FrontendUpdatePlan,
   type HealthReport,
   type OperationExecutor,
+  type PendingOperation,
+  type PhaseReporter,
   type PluginDrainReport,
   type PluginExecDeps,
   type PreflightResourceFacts,
@@ -69,6 +75,7 @@ import {
   type ProvisionReport,
   type ProvisionStepName,
   type ServiceProbeResult,
+  type UpdateExecutionReport,
   type UpdatePlan,
 } from '@shm/core';
 import {
@@ -1081,6 +1088,154 @@ export async function instanceUpdate(deps: ActionDeps, instanceId: string, opts:
 }
 
 // ---------------------------------------------------------------------------
+// instance frontend update (frontend-only, dry-run + execute)
+// ---------------------------------------------------------------------------
+
+export interface InstanceFrontendUpdateOptions {
+  dryRun?: boolean;
+  channel?: ReleaseChannel;
+  /** 'latest' (default) or a specific frontend version. */
+  target?: string;
+}
+
+/**
+ * Update ONLY the frontend of an instance to a newer compatible release,
+ * leaving the core stack (backend/worker/scheduler) and every volume untouched.
+ *
+ * The frontend ships independently of the core, so an instance already on the
+ * latest core can still have a newer frontend available — the core-driven
+ * {@link instanceUpdate} reports `up_to_date` and never picks it up. This is the
+ * lightweight path: it resolves the newest compatible frontend, rewrites the
+ * instance artifacts with the new image, pulls it, recreates ONLY the frontend
+ * container, health-checks, and restores the previous config + container on
+ * failure. No backup, no migration, no maintenance window are needed because
+ * the frontend is stateless.
+ */
+export async function instanceFrontendUpdate(
+  deps: ActionDeps,
+  instanceId: string,
+  opts: InstanceFrontendUpdateOptions,
+): Promise<{ plan: FrontendUpdatePlan; executed: boolean; report?: Awaited<ReturnType<typeof executeFrontendUpdate>> }> {
+  const manifestStore = new ManifestStore(instanceId, deps.root);
+  const lockStore = new LockStore(instanceId, deps.root);
+  const manifest = await readManifestFriendly(deps, instanceId);
+  const lock = await lockStore.read();
+  const channel = opts.channel ?? manifest.registry.channel;
+  const client = registryClient(deps, manifest.registry.url);
+  const index = await client.getIndex();
+
+  const frontendReleases = await fetchAllFrontends(client, index.frontend, channel);
+
+  // Best-effort: fetch the running core release so its required frontend range
+  // is enforced too (a frontend-only update must never move to a frontend the
+  // running core forbids). If the core is no longer published, fall back to the
+  // candidate frontend's own required-core-range check.
+  let currentCore: CoreRelease | null = null;
+  const coreRef = index.core.find(
+    (r) =>
+      r.channel === channel &&
+      !r.blocked &&
+      semver.eq(semver.coerce(r.version) ?? '0.0.0', semver.coerce(manifest.versions.selfhelp) ?? '0.0.0'),
+  );
+  if (coreRef) {
+    currentCore = (await client.getCoreRelease(coreRef)).release;
+  }
+
+  const plan = planFrontendUpdate({
+    instanceId,
+    currentFrontendVersion: manifest.versions.frontend,
+    coreVersion: manifest.versions.selfhelp,
+    currentCore,
+    frontendReleases,
+    channel,
+    ...(opts.target ? { target: opts.target } : {}),
+  });
+
+  if (opts.dryRun || plan.status !== 'ok' || plan.frontend === null) {
+    return { plan, executed: false };
+  }
+
+  const paths = instancePaths(instanceId, deps.root);
+  // The core stays EXACTLY as installed (pinned from the lock); only the
+  // frontend release moves to the resolved target.
+  const { core } = releaseShapesFromLock(manifest, lock, 'frontend-update');
+  const frontend = plan.frontend;
+
+  let preUpdateSnapshot:
+    | { compose: string; env: string; readme: string; manifest: InstanceManifest; lock: InstanceLock }
+    | null = null;
+
+  const report = await executeFrontendUpdate(plan, {
+    runner: deps.runner,
+    instanceDir: paths.dir,
+    snapshot: async () => {
+      preUpdateSnapshot = {
+        compose: await readFile(paths.composePath, 'utf8').catch(() => ''),
+        env: await readFile(paths.envPath, 'utf8').catch(() => ''),
+        readme: await readFile(paths.readmePath, 'utf8').catch(() => ''),
+        manifest: await manifestStore.read(),
+        lock: await lockStore.read(),
+      };
+    },
+    applyArtifacts: async () => {
+      const artifacts = buildInstanceInstallArtifacts({
+        instanceId,
+        displayName: manifest.displayName,
+        mode: manifest.mode,
+        ...(manifest.mode === 'production'
+          ? { domain: manifest.domain }
+          : { localPort: Number(new URL(manifest.routing.publicFrontendUrl).port) }),
+        root: deps.root,
+        ...(deps.engineRoot ? { engineRoot: deps.engineRoot } : {}),
+        managerVersion: deps.managerVersion,
+        channel,
+        registry: {
+          id: manifest.registry.id,
+          url: manifest.registry.url,
+          metadataSha256: client.lastSuccessfulCheck?.metadataSha256 ?? lock.registry.metadataSha256,
+        },
+        // Same core (pinned from lock), new frontend, same runtime services.
+        core,
+        frontend,
+        services: lock.services,
+        installedPlugins: manifest.installedPlugins,
+        pluginTrustedKeys: formatTrustedKeysEnv(deps.trustedKeys),
+        ...(manifest.envOverrides ? { envOverrides: manifest.envOverrides } : {}),
+      });
+      await writeFileAtomic(paths.composePath, artifacts.composeYaml);
+      await writeFileAtomic(paths.envPath, artifacts.envText);
+      await writeFileAtomic(paths.readmePath, artifacts.readme);
+      await manifestStore.write({
+        ...artifacts.manifest,
+        createdAt: manifest.createdAt,
+        updatedAt: deps.now?.() ?? new Date().toISOString(),
+      });
+      await lockStore.write(artifacts.lock);
+    },
+    checkHealth: async () =>
+      evaluateHealth(
+        instanceId,
+        await deps.probeHealth(manifest.routing.publicFrontendUrl, manifest.routing.browserApiPrefix),
+        deps.now,
+      ),
+    rollback: async () => {
+      if (preUpdateSnapshot) {
+        const snap = preUpdateSnapshot;
+        if (snap.compose) await writeFileAtomic(paths.composePath, snap.compose);
+        if (snap.env) await writeFileAtomic(paths.envPath, snap.env);
+        if (snap.readme) await writeFileAtomic(paths.readmePath, snap.readme);
+        await manifestStore.write(snap.manifest);
+        await lockStore.write(snap.lock);
+      }
+      // Recreate only the frontend from the restored (previous) compose.
+      await deps.runner.run(paths.dir, composeCommands.upService('frontend'));
+    },
+  });
+
+  return { plan, executed: true, report };
+}
+
+// ---------------------------------------------------------------------------
 // CMS <-> Manager update loop (consume backend-requested operations)
 // ---------------------------------------------------------------------------
 
@@ -1093,6 +1248,10 @@ export async function instanceUpdate(deps: ActionDeps, instanceId: string, opts:
  */
 export function buildOperationExecutor(deps: ActionDeps): OperationExecutor {
   return async (approved, op, phase) => {
+    if (op.kind === 'frontend') {
+      return executeFrontendOperation(deps, approved, op, phase);
+    }
+
     await phase('preflight_running', 10, `Resolving update to ${op.targetVersion}.`);
     await phase('backup_running', 25);
 
@@ -1113,6 +1272,44 @@ export function buildOperationExecutor(deps: ActionDeps): OperationExecutor {
 
     await phase('health_check_running', 90);
     return res.report;
+  };
+}
+
+/**
+ * Runs a CMS-requested FRONTEND-only operation. It reuses
+ * {@link instanceFrontendUpdate} and maps its lightweight report onto the
+ * shared {@link UpdateExecutionReport} shape (target = the frontend version)
+ * so the operations loop writes it back like any other update.
+ */
+async function executeFrontendOperation(
+  deps: ActionDeps,
+  approved: ApprovedUpdate,
+  op: PendingOperation,
+  phase: PhaseReporter,
+): Promise<UpdateExecutionReport> {
+  const targetFrontend = op.targetFrontendVersion ?? op.targetVersion;
+  await phase('preflight_running', 10, `Resolving frontend update to ${targetFrontend}.`);
+
+  const res = await instanceFrontendUpdate(deps, approved.instanceId, { target: targetFrontend });
+
+  if (!res.executed || !res.report) {
+    return {
+      instanceId: approved.instanceId,
+      targetVersion: targetFrontend,
+      ok: false,
+      rolledBack: false,
+      steps: [{ name: 'plan', status: 'failed', detail: `plan status: ${res.plan.status}` }],
+    };
+  }
+
+  await phase('update_running', 60);
+  await phase('health_check_running', 90);
+  return {
+    instanceId: res.report.instanceId,
+    targetVersion: res.report.targetFrontendVersion,
+    ok: res.report.ok,
+    rolledBack: res.report.rolledBack,
+    steps: res.report.steps,
   };
 }
 
