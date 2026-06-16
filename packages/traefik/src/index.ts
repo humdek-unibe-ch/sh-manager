@@ -66,7 +66,14 @@ export function buildProxyCompose(opts: ProxyComposeOptions): Record<string, unk
         logging: { driver: 'json-file', options: { 'max-size': '10m', 'max-file': '5' } },
       },
     },
-    networks: { [network]: { name: network } },
+    // The shared proxy network is manager-owned (created idempotently by
+    // `ensureNetwork` during server init, so it also exists in local mode where
+    // no proxy container runs) and referenced as `external` by every instance
+    // compose. The proxy compose must declare it `external` too: otherwise
+    // `docker compose up -d` tries to *own* a network it did not create and
+    // aborts with "network selfhelp_proxy was found but has incorrect label
+    // com.docker.compose.network set to "" (expected: ...)".
+    networks: { [network]: { external: true, name: network } },
   };
 }
 

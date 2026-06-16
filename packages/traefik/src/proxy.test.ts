@@ -27,6 +27,22 @@ describe('buildProxyCompose', () => {
     expect(proxyComposeToYaml({ mode: 'local' })).toContain('traefik');
   });
 
+  it('declares the shared proxy network as external so compose reuses the manager-created one', () => {
+    // Regression: server init creates `selfhelp_proxy` via `docker network
+    // create` (so it exists in local mode too) and then runs `docker compose
+    // up -d` for the proxy. A non-external network declaration made compose try
+    // to OWN that pre-existing network and abort with "network selfhelp_proxy
+    // was found but has incorrect label com.docker.compose.network set to ...".
+    for (const mode of ['production', 'local'] as const) {
+      const doc = buildProxyCompose(
+        mode === 'production' ? { mode, letsencryptEmail: 'ops@example.ch' } : { mode },
+      );
+      const net = (doc.networks as Record<string, { external?: boolean; name?: string }>)[PROXY_NETWORK];
+      expect(net).toEqual({ external: true, name: PROXY_NETWORK });
+    }
+    expect(proxyComposeToYaml({ mode: 'local' })).toContain('external: true');
+  });
+
   it('emits the Let\'s Encrypt bind absolute for the engine when hostBindDir is set', () => {
     const doc = buildProxyCompose({
       mode: 'production',

@@ -8,7 +8,7 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `1.5.0`). Registry releases
+- **The manager tool** uses its own semver (currently `1.5.1`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
@@ -16,7 +16,29 @@ The manager has two version axes (see
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
 
-## [1.5.0] - 2026-06-16
+## [1.5.1] - 2026-06-16
+
+### Fixed
+- **Production server init no longer fails at "server init" with a Traefik proxy
+  network label error.** Bootstrapping a server with a domain (production mode)
+  creates the shared `selfhelp_proxy` network with `docker network create` and
+  then runs `docker compose up -d` for the Traefik proxy. The proxy compose
+  declared that network as a *managed* (non-external) network, so Compose tried
+  to take ownership of the network it had not created and aborted the very first
+  bring-up with:
+
+  > network selfhelp_proxy was found but has incorrect label
+  > `com.docker.compose.network` set to "" (expected: "selfhelp_proxy")
+
+  The proxy compose now declares `selfhelp_proxy` as `external: true`, exactly
+  like every instance compose already does. The network is manager-owned
+  (created idempotently during server init so it also exists in local mode where
+  no proxy container runs) and merely *attached to* by the proxy and instances.
+  Existing servers left in this broken state are repaired automatically on the
+  next attempt — re-run the install/bootstrap with this version (after
+  `docker pull` of the new manager image); no manual `docker network rm` is
+  required. Covered by a new proxy-compose regression test asserting the network
+  is declared external in both production and local mode.
 
 ### Added
 - **Instances now have a dedicated Disable / Enable toggle — you can bring a
