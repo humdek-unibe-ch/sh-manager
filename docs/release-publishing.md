@@ -3,7 +3,7 @@
 Audience: Developers / maintainers
 Status: Active
 Applies to: `sh-manager` (manager tool `0.1.5`) and the SelfHelp 0.x pre-release platform line
-Last verified: 2026-06-11
+Last verified: 2026-06-16
 Source of truth: `packages/registry/src`, `packages/schemas/src`, `scripts/sign-fixtures.mts`, `package.json`, and (registry side) `sh2-plugin-registry/.github/workflows/publish-core-release.yml`
 
 This page explains how versions, signatures, and the registry fit together, and
@@ -95,6 +95,26 @@ container; on a source checkout it runs `git pull --ff-only && npm ci &&
 npm run build`). `sh-manager self-update --check` only reports (exit `2`
 when an update exists), and the "Manager version" card in the web operations
 console shows the same status.
+
+### Release notification email (optional)
+
+The `manager-release` workflow can email a maintainer when a tag is published
+(the image is built, scanned, signed, and the GitHub release is created). It is
+a best-effort, non-blocking step: it runs only when `NOTIFICATION_EMAIL` is set,
+and `continue-on-error` keeps an SMTP hiccup from failing an already-published
+release. Configure these repository **secrets** to enable it (leave them unset
+to skip mail entirely):
+
+| Secret | Purpose |
+| --- | --- |
+| `NOTIFICATION_EMAIL` | Recipient address; **unset = the step is skipped**. |
+| `MAIL_SERVER` | SMTP host (e.g. an authenticated relay reachable from GitHub runners). |
+| `MAIL_PORT` | SMTP port (`465` TLS or `587` STARTTLS). |
+| `MAIL_USERNAME` / `MAIL_PASSWORD` | SMTP credentials. |
+
+The mail body links to the release and the commit; no secrets are included.
+A passwordless campus relay will not work from GitHub-hosted runners — use an
+authenticated relay or a transactional-mail provider.
 
 ## Publishing platform artifacts (core / frontend / scheduler / worker / plugins)
 

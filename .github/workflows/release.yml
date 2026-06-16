@@ -125,8 +125,12 @@ jobs:
             trivy-results.sarif
             license-report.txt
 
+      # Best-effort: the release is already published by now, so a mail/SMTP
+      # hiccup must never mark the release run as failed. Only runs when the
+      # NOTIFICATION_EMAIL secret (and the MAIL_* SMTP secrets) are configured.
       - name: Send release notification email
         if: ${{ env.NOTIFICATION_EMAIL != '' }}
+        continue-on-error: true
         uses: dawidd6/action-send-mail@v4
         with:
           server_address: ${{ secrets.MAIL_SERVER }}
