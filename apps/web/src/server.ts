@@ -62,6 +62,7 @@ import type {
   LogService,
   ManagerInstanceActions,
   RemoveInstanceRequest,
+  SafeModeRequest,
   SetAddressRequest,
   SetEnvRequest,
   SetMailerRequest,
@@ -595,6 +596,21 @@ export function createManagerServer(options: ManagerServerOptions): ManagerServe
     if (rest === '/enable' && ctx.method === 'POST') {
       // Inverse of disable: bring the instance back online (status -> active).
       await start('instance_enable', instanceId, (opCtx) => im.instances.enable(instanceId, opCtx));
+      return true;
+    }
+    if (rest === '/safe-mode' && ctx.method === 'POST') {
+      // Toggle the backend safe-mode marker (plugins on/off). `enable` is
+      // mandatory and explicit so the operator chooses the direction.
+      const body = (ctx.body ?? {}) as Partial<SafeModeRequest>;
+      if (typeof body.enable !== 'boolean') throw new HttpError(400, 'enable (boolean) is required.');
+      const req: SafeModeRequest = { enable: body.enable };
+      await start('instance_safe_mode', instanceId, (opCtx) => im.instances.safeMode(instanceId, req, opCtx));
+      return true;
+    }
+    if (rest === '/plugin-recover' && ctx.method === 'POST') {
+      // Recover a backend crash-looping on a half-removed plugin (safe mode ->
+      // drain pending uninstall -> repair bundles -> verify a clean boot).
+      await start('instance_plugin_recover', instanceId, (opCtx) => im.instances.pluginRecover(instanceId, opCtx));
       return true;
     }
     if (rest === '/remove' && ctx.method === 'POST') {

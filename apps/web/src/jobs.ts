@@ -39,6 +39,8 @@ export type OperationKind =
   | 'instance_set_env'
   | 'instance_disable'
   | 'instance_enable'
+  | 'instance_safe_mode'
+  | 'instance_plugin_recover'
   | 'instance_remove'
   | 'cms_operations_drain';
 

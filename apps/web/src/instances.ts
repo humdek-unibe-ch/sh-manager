@@ -45,6 +45,8 @@ import {
   instanceEnable,
   instanceListInstalledPlugins,
   instanceLogs,
+  instancePluginRecover,
+  instanceSafeMode,
   LOG_SERVICES,
   instanceRemove,
   instanceRestore,
@@ -67,6 +69,7 @@ import {
   type InstanceUpdateOptions,
   type LogService,
   type MailerStatus,
+  type PluginRecoverResult,
   type ProxyLogsResult,
   type PruneExecutionReport,
 } from '../../cli/src/actions.js';
@@ -190,6 +193,14 @@ export interface SetMailerRequest {
   clear?: boolean;
 }
 
+export interface SafeModeRequest {
+  /**
+   * `true` enables safe mode (the backend boots with core bundles only, plugins
+   * disabled); `false` disables it (plugins load again on the next boot).
+   */
+  enable: boolean;
+}
+
 export interface SetNameRequest {
   /** New operator-facing display name (the instanceId is never changed). */
   displayName: string;
@@ -262,6 +273,20 @@ export interface ManagerInstanceActions {
    * remount plugins, status -> `active`). The inverse of {@link disable}.
    */
   enable(instanceId: string, ctx: OperationContext): Promise<unknown>;
+  /**
+   * Toggles the backend's safe-mode marker. While enabled the kernel boots with
+   * core bundles only (plugins disabled) — the one toggle that revives a backend
+   * crash-looping on a half-removed plugin, since it works even when the PHP
+   * console is unbootable.
+   */
+  safeMode(instanceId: string, req: SafeModeRequest, ctx: OperationContext): Promise<unknown>;
+  /**
+   * Recovers a backend that crash-loops after a half-removed plugin
+   * (`Class "...Bundle" not found`): boot in safe mode, finalize the pending
+   * uninstall, repair the bundle registration from the database, then verify a
+   * clean (plugins-on) boot.
+   */
+  pluginRecover(instanceId: string, ctx: OperationContext): Promise<unknown>;
   remove(instanceId: string, req: RemoveInstanceRequest, ctx: OperationContext): Promise<unknown>;
   /**
    * Cheap read-only peek: what CMS-requested work is waiting for the manager?
@@ -746,6 +771,34 @@ export function buildInstanceActions(opts: BuildInstanceActionsOptions): Manager
           : `Enabled ${instanceId}: started the containers and marked it active.`,
       );
       return { executed: res.executed, recreated: res.recreated, health: res.health ?? null };
+    },
+
+    async safeMode(instanceId, req, ctx) {
+      await ctx.setPhase(req.enable ? 'safe-mode enable' : 'safe-mode disable');
+      await instanceSafeMode(deps, instanceId, req.enable);
+      await ctx.log(
+        req.enable
+          ? `Safe mode enabled for ${instanceId}: the backend now boots with core bundles only (plugins disabled). Restart it if it is currently crash-looping.`
+          : `Safe mode disabled for ${instanceId}: plugins load again on the next boot.`,
+      );
+      return { enabled: req.enable };
+    },
+
+    async pluginRecover(instanceId, ctx): Promise<PluginRecoverResult> {
+      await ctx.setPhase('plugin-recover');
+      // Fire the action's step log into the operation journal as it progresses
+      // (the callback is synchronous; the journal serializes the writes).
+      const res = await instancePluginRecover(deps, instanceId, {
+        log: (line) => {
+          void ctx.log(line);
+        },
+      });
+      await ctx.log(
+        res.recovered
+          ? `Recovered ${instanceId}: the backend booted cleanly with plugins enabled.`
+          : `Recovery incomplete for ${instanceId}: safe mode was left enabled to keep it up. Re-trigger the plugin uninstall from the CMS admin or restore a backup.`,
+      );
+      return res;
     },
 
     async remove(instanceId, req, ctx) {
