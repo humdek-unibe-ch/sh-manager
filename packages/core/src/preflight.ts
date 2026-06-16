@@ -110,7 +110,15 @@ export function runPreflight(input: PreflightInput): UpdatePreflightResult {
     checks.push({
       code: 'resources.ports',
       severity: 'error',
-      message: `Required port(s) already in use: ${busyPorts.join(', ')}.`,
+      // The shared Traefik proxy must bind these ports itself (it terminates TLS
+      // and routes every instance), so another web server holding them is the
+      // most common cause of "the domain does not load / no SSL". Name the usual
+      // suspects and the fix so the operator does not have to guess.
+      message:
+        `Required port(s) already in use: ${busyPorts.join(', ')}. ` +
+        `The shared SelfHelp Traefik proxy must own ${busyPorts.join(' and ')} on this host. ` +
+        `Stop or relocate any other web server using them — most often Apache or nginx, e.g. ` +
+        `"sudo systemctl disable --now apache2". Find the holder with "sudo ss -ltnp 'sport = :80'".`,
     });
   }
 

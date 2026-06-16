@@ -8,13 +8,48 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `1.5.1`). Registry releases
+- **The manager tool** uses its own semver (currently `1.5.2`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
   **`0.x`** line (core, frontend, scheduler, worker — all `0.1.0`).
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
+
+## [1.5.2] - 2026-06-16
+
+### Fixed
+- **A manager self-update is now picked up on the next page load instead of
+  still showing the old GUI.** The web console served its single-page-app shell
+  (`index.html`) with no `Cache-Control` header, so browsers cached it and kept
+  loading the previously-hashed JS bundle after `sh-manager self-update` — the
+  operator updated to a new version but the console header still showed the old
+  one until a manual hard refresh. The BFF now serves the app shell as
+  `Cache-Control: no-cache` (always revalidated) while content-hashed assets
+  under `assets/` are served `immutable`, so a new version loads automatically.
+  Covered by a new server test asserting the shell-vs-asset cache headers. (If
+  you are coming from an older manager, do one hard refresh to drop the
+  already-cached shell.)
+
+### Changed
+- **The "ports 80/443 already in use" preflight error is now actionable.** It
+  named only the busy port; on a real server the cause is almost always an
+  existing **Apache or nginx** holding 80/443, which the bundled Traefik proxy
+  must own (it terminates TLS and routes every instance). The message now
+  explains that the SelfHelp proxy must own those ports and gives the fix
+  (`sudo systemctl disable --now apache2`) and how to find the holder
+  (`sudo ss -ltnp 'sport = :80'`). Covered by an updated preflight test.
+
+### Added
+- **New operator guide:
+  [`docs/operator/reverse-proxy-and-apache.md`](docs/operator/reverse-proxy-and-apache.md).**
+  Answers "do we need Apache?" (no — Traefik is the web server/reverse proxy and
+  must own 80/443), how to free the ports from an existing Apache/nginx on
+  Ubuntu, the supported options when another web server must stay on the host,
+  and the DNS + Let's Encrypt checklists for the "domain does not load / no SSL"
+  symptom. Cross-linked from the docs index, install, domains-and-ports, and
+  troubleshooting runbooks (with a new troubleshooting entry for "updated the
+  manager but still see the old GUI").
 
 ## [1.5.1] - 2026-06-16
 

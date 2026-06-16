@@ -60,6 +60,10 @@ Task-based runbooks live under [`operator/`](operator/).
 - [Domains, DNS and local ports](operator/domains-and-ports.md) — set up DNS
   for a production instance and change an instance's domain or localhost port
   later (GUI dialog or `sh-manager instance set-address`).
+- [Reverse proxy, ports 80/443 and an existing Apache/nginx](operator/reverse-proxy-and-apache.md)
+  — why the bundled Traefik proxy must own 80/443, how to free them from an
+  existing Apache/nginx, the with/without-Apache options, and the DNS + TLS
+  checklists for "the domain does not load / no SSL".
 - [Windows quickstart](operator/windows-quickstart.md) — test the whole story
   on Windows + Docker Desktop using only the published manager image: local
   mode on ports (no domains/SSL), multiple side-by-side instances, the GUI,

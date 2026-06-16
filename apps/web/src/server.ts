@@ -114,6 +114,21 @@ const STATIC_CONTENT_TYPES: Record<string, string> = {
 };
 
 /**
+ * Cache policy for a built SPA asset. Vite emits content-hashed files under
+ * `assets/` (the hash changes whenever the bundle changes), so those are safe to
+ * cache forever. The SPA shell (`index.html`) and any other unhashed top-level
+ * file MUST be revalidated every load: otherwise a browser keeps the cached
+ * shell pointing at the OLD bundle after a manager update, and the operator sees
+ * the previous GUI version until a hard refresh (the "I updated but still see
+ * the old GUI" report).
+ */
+function cacheControlForAsset(rel: string): string {
+  const normalized = rel.replace(/\\/g, '/');
+  if (normalized.startsWith('assets/')) return 'public, max-age=31536000, immutable';
+  return 'no-cache';
+}
+
+/**
  * Serve a file from the built SPA directory. Resolves within `clientDir` only
  * (no path traversal) and returns false when there is nothing to serve so the
  * caller can fall back to the inline shell or a 404.
@@ -126,6 +141,7 @@ async function serveStatic(clientDir: string, urlPath: string, res: ServerRespon
   const body = await readFile(full);
   res.statusCode = 200;
   res.setHeader('Content-Type', STATIC_CONTENT_TYPES[extname(full).toLowerCase()] ?? 'application/octet-stream');
+  res.setHeader('Cache-Control', cacheControlForAsset(rel));
   res.end(body);
   return true;
 }
@@ -296,6 +312,7 @@ export function createManagerServer(options: ManagerServerOptions): ManagerServe
   async function serveAppShell(res: ServerResponse): Promise<void> {
     if (clientDir && (await serveStatic(clientDir, 'index.html', res))) return;
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache');
     res.statusCode = 200;
     res.end(FALLBACK_SHELL);
   }

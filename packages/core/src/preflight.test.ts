@@ -51,7 +51,12 @@ describe('runPreflight', () => {
       database: safeDb,
     });
     expect(r.status).toBe('blocked');
-    expect(r.checks.find((c) => c.code === 'resources.ports')?.message).toMatch(/443/);
+    const portMsg = r.checks.find((c) => c.code === 'resources.ports')?.message ?? '';
+    expect(portMsg).toMatch(/443/);
+    // The message must be actionable: name the usual culprit (another web
+    // server) and the fix, since a busy 80/443 is the #1 "domain doesn't load".
+    expect(portMsg).toMatch(/apache/i);
+    expect(portMsg).toMatch(/Traefik proxy/i);
   });
 
   it('blocks an impossible direct-upgrade path', () => {

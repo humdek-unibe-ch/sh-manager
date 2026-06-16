@@ -18,7 +18,9 @@ isolated SelfHelp site). You can do both from the **web wizard** or the **CLI**.
 
 - A Linux server with **Docker Engine + Docker Compose v2**.
 - For a production install: a **domain name** whose DNS points at this server,
-  and ports **80/443** free.
+  and ports **80/443** free. The bundled Traefik proxy must own them — an
+  existing **Apache/nginx** on 80/443 is the usual reason a domain does not load
+  or has no TLS; see [reverse proxy & Apache](reverse-proxy-and-apache.md).
 - The manager runs as the only privileged tool. Do not expose the wizard to the
   internet — it binds to `127.0.0.1`; reach it over an **SSH tunnel** for a
   remote server.

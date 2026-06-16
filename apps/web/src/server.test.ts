@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
@@ -54,12 +54,23 @@ function testServer(
 }
 
 let handles: ManagerServerHandle[] = [];
+let tmpDirs: string[] = [];
 
 async function start(handle: ManagerServerHandle): Promise<string> {
   handles.push(handle);
   const { host, port } = await handle.listen();
   const h = host === '::1' ? '[::1]' : host;
   return `http://${h}:${port}`;
+}
+
+/** A throwaway built-SPA directory (index.html + a hashed asset) for cache tests. */
+async function makeSpaDir(): Promise<string> {
+  const dir = await mkdtemp(path.join(tmpdir(), 'shm-spa-'));
+  tmpDirs.push(dir);
+  await writeFile(path.join(dir, 'index.html'), '<!doctype html><title>shell</title>');
+  await mkdir(path.join(dir, 'assets'));
+  await writeFile(path.join(dir, 'assets', 'app-abc123.js'), 'console.log(1)');
+  return dir;
 }
 
 async function login(base: string, email = 'owner@example.com', password = 'correct horse battery staple') {
@@ -76,6 +87,8 @@ async function login(base: string, email = 'owner@example.com', password = 'corr
 afterEach(async () => {
   await Promise.all(handles.map((h) => h.close().catch(() => undefined)));
   handles = [];
+  await Promise.all(tmpDirs.map((d) => rm(d, { recursive: true, force: true }).catch(() => undefined)));
+  tmpDirs = [];
 });
 
 describe('isLoopbackHost', () => {
@@ -149,6 +162,23 @@ describe('authentication', () => {
     expect(JSON.stringify(body)).not.toContain('owner@example.com');
 
     expect((await fetch(base + '/')).status).toBe(200);
+  });
+
+  it('serves the SPA shell as no-cache but hashed assets immutable (so a manager update is picked up)', async () => {
+    // Regression: serveStatic set no Cache-Control, so browsers cached
+    // index.html and kept loading the OLD hashed bundle after a manager update
+    // ("I ran the update but still see the old GUI"). The shell must revalidate;
+    // content-hashed files under assets/ are safe to cache forever.
+    const dir = await makeSpaDir();
+    const base = await start(testServer({ actions: fakeActions(), clientDir: dir }));
+
+    const shell = await fetch(base + '/');
+    expect(shell.status).toBe(200);
+    expect(shell.headers.get('cache-control')).toBe('no-cache');
+
+    const asset = await fetch(base + '/assets/app-abc123.js');
+    expect(asset.status).toBe(200);
+    expect(asset.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
   });
 
   it('allows access after login and enforces CSRF on mutations', async () => {

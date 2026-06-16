@@ -65,7 +65,8 @@ Certificates are issued by the shared Traefik proxy via Let's Encrypt.
 
 - **Ports 80 and 443 must be free and reachable** from the internet — `sh-manager
   doctor` checks they are free locally; also confirm no upstream firewall blocks
-  them.
+  them. An existing Apache/nginx on 80/443 is the usual blocker — see
+  [reverse proxy & Apache](reverse-proxy-and-apache.md).
 - **DNS must resolve first** (see above) — Let's Encrypt validates over the
   domain.
 - A bootstrap `--email` must have been provided to `server init` for production.
@@ -73,13 +74,19 @@ Certificates are issued by the shared Traefik proxy via Let's Encrypt.
 - Let's Encrypt rate-limits repeated failures; fix DNS/ports first, then retry
   rather than looping.
 
-## Ports 80/443 already in use
+## Ports 80/443 already in use (often Apache/nginx)
 
-`sh-manager doctor` reports the port check as failed.
+`sh-manager doctor` reports the port check as failed, and a production domain
+does not load / has no TLS. The most common cause is an existing **Apache or
+nginx** holding 80/443 — the shared SelfHelp Traefik proxy must own them.
 
 - Find the holder: `sudo ss -ltnp 'sport = :80'` (and `:443`).
-- Stop the conflicting service (another web server) or free the port. Only the
-  shared SelfHelp Traefik proxy should own 80/443 on this host.
+- If it is Apache/nginx and this host is dedicated to SelfHelp, disable it:
+  `sudo systemctl disable --now apache2` (or `nginx`), then re-run `doctor`.
+- If you must keep the other web server, you cannot share 80/443 — see the
+  options in [reverse proxy & Apache](reverse-proxy-and-apache.md).
+- After freeing the ports, re-apply the instance address to bring the stack
+  back: `sh-manager instance set-address <id> --domain <your-domain>`.
 
 ## Out of disk space
 
@@ -173,6 +180,12 @@ Components reported `not_configured` are optional and not failures.
   [security hardening](security-hardening.md)).
 - A blocked request may be the Host-header (DNS-rebinding) guard — use the tunnel
   and `http://127.0.0.1:8765`, not a public hostname.
+- **Updated the manager but still see the old GUI?** Manager `1.5.2+` serves the
+  app shell as `no-cache`, so a `self-update` shows up on the next load. Coming
+  from an older manager, do one hard refresh (`Ctrl`/`Cmd`+`Shift`+`R`) to drop
+  the cached shell, and make sure only **one** `sh-manager web` process is
+  running (a leftover container still bound to `127.0.0.1:8765` keeps serving the
+  old version). See [reverse proxy & Apache](reverse-proxy-and-apache.md#i-updated-the-manager-but-still-see-the-old-gui).
 
 ## "DENIED (cross-instance)" from the manager
 

@@ -128,6 +128,9 @@ network.
 
 ## See also
 
+- [Reverse proxy & Apache](reverse-proxy-and-apache.md) — why the bundled
+  Traefik proxy must own ports 80/443, and what to do when an existing
+  Apache/nginx is already on them (the usual "domain does not load / no SSL").
 - [GUI instance management](gui-instance-management.md) — the operations
   console, including the Change address dialog.
 - [Install](install.md) — choosing production vs local mode at install time.
