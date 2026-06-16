@@ -3467,6 +3467,38 @@ export async function instanceLogs(
   };
 }
 
+export interface ProxyLogsResult {
+  /** Number of trailing lines requested (after clamping). */
+  tail: number;
+  /** Redacted Traefik log text. */
+  text: string;
+  /** ISO timestamp the logs were read at. */
+  readAt: string;
+}
+
+/**
+ * Reads the shared Traefik proxy's recent logs via
+ * `docker compose -f <root>/proxy/compose.yaml logs --tail=<n>`, redacted.
+ *
+ * Surfaced in the manager (CLI `server logs`, web console) so an operator can
+ * diagnose edge/routing/TLS problems — e.g. the Docker-provider "client version
+ * 1.24 is too old" failure, ACME/Let's Encrypt errors, or "no router for host" —
+ * without shelling into the server. A no-op-safe message is returned (never a
+ * throw) when the proxy has not been started yet.
+ */
+export async function serverProxyLogs(deps: ActionDeps, opts: { tail?: number } = {}): Promise<ProxyLogsResult> {
+  const tail = clampLogTail(opts.tail);
+  const raw = await deps.runner
+    .run(proxyDir(deps.root), composeCommands.logs(tail))
+    .then((r) => r.stdout || r.stderr)
+    .catch((err: unknown) => `Could not read proxy logs: ${err instanceof Error ? err.message : String(err)}`);
+  return {
+    tail,
+    text: redactString(raw),
+    readAt: deps.now?.() ?? new Date().toISOString(),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // instance repair (reconstruct a missing/invalid manifest)
 // ---------------------------------------------------------------------------

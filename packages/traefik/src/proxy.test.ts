@@ -1,9 +1,25 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
 import { describe, expect, it } from 'vitest';
-import { buildProxyCompose, PROXY_NETWORK, proxyComposeToYaml } from './index.js';
+import { buildProxyCompose, PROXY_NETWORK, TRAEFIK_IMAGE, proxyComposeToYaml } from './index.js';
 
 describe('buildProxyCompose', () => {
+  it('pins a Traefik image new enough to negotiate the Docker API (Engine 29+ needs >= v3.6.1)', () => {
+    // Regression: Docker Engine 29 enforces a MINIMUM Docker API version of 1.44.
+    // Traefik < 3.6.1 hardcoded API 1.24, so its Docker provider failed on Engine
+    // 29+ ("client version 1.24 is too old"), discovered no containers, and 404'd
+    // every request. v3.6.1 added API auto-negotiation. Guard the floor so a
+    // future edit cannot regress the pin below it.
+    const doc = buildProxyCompose({ mode: 'local' });
+    const image = (doc.services as { traefik: { image: string } }).traefik.image;
+    expect(image).toBe(TRAEFIK_IMAGE);
+    const m = /^traefik:v(\d+)\.(\d+)\.(\d+)$/.exec(image);
+    expect(m).not.toBeNull();
+    const [major, minor, patch] = [Number(m![1]), Number(m![2]), Number(m![3])];
+    const atLeast361 = major > 3 || (major === 3 && (minor > 6 || (minor === 6 && patch >= 1)));
+    expect(atLeast361).toBe(true);
+  });
+
   it('configures Let\'s Encrypt + HTTPS redirect in production', () => {
     const doc = buildProxyCompose({ mode: 'production', letsencryptEmail: 'ops@example.ch' });
     const cmd = (doc.services as { traefik: { command: string[] } }).traefik.command.join(' ');

@@ -49,6 +49,7 @@ import {
   drainInstancePluginOperations,
   serverInit,
   serverStartProxy,
+  serverProxyLogs,
   serverPurge,
   serverRunScheduledBackups,
   type BackupScheduleStatus,
@@ -287,6 +288,21 @@ server
       } else {
         console.log('No production instance on this server — the shared proxy is only used in production (local instances route via published ports).');
       }
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+server
+  .command('logs')
+  .description('Show recent (redacted) logs from the shared Traefik proxy — edge routing, ACME/TLS, and Docker-provider errors.')
+  .option('-n, --tail <lines>', 'number of trailing lines (1-2000)', '200')
+  .action(async (opts: { tail?: string }) => {
+    try {
+      const d = await deps(program.opts().root as string);
+      const res = await serverProxyLogs(d, { tail: opts.tail !== undefined ? Number(opts.tail) : undefined });
+      console.log(`# proxy (traefik) logs (last ${res.tail} lines) — ${res.readAt}`);
+      console.log(res.text.trimEnd());
     } catch (err) {
       fail(err);
     }

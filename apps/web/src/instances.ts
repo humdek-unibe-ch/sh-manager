@@ -56,6 +56,7 @@ import {
   instanceUpdate,
   instanceFrontendUpdate,
   serverInit,
+  serverProxyLogs,
   type ActionDeps,
   type BackupScheduleStatus,
   type InstanceEnvConfig,
@@ -66,13 +67,14 @@ import {
   type InstanceUpdateOptions,
   type LogService,
   type MailerStatus,
+  type ProxyLogsResult,
   type PruneExecutionReport,
 } from '../../cli/src/actions.js';
 import { ComposeExecBackendOperationsClient } from '../../cli/src/operations-client.js';
 
 /** Re-exported so the BFF can validate the `?service=` query without reaching into the CLI package. */
 export { LOG_SERVICES };
-export type { LogService, InstanceLogsResult };
+export type { LogService, InstanceLogsResult, ProxyLogsResult };
 import type { InstanceLocks, OperationContext } from './jobs.js';
 
 export interface InstanceSummary {
@@ -227,6 +229,8 @@ export interface ManagerInstanceActions {
   envConfig(instanceId: string): Promise<InstanceEnvConfig>;
   /** Recent (redacted) container logs for one service of an instance. */
   logs(instanceId: string, opts: { service?: LogService; tail?: number }): Promise<InstanceLogsResult>;
+  /** Recent (redacted) logs from the shared Traefik proxy (edge routing / TLS / Docker provider). */
+  proxyLogs(opts: { tail?: number }): Promise<ProxyLogsResult>;
   /** Plan-only update preview (never mutates). */
   updateDryRun(instanceId: string, req: UpdateInstanceRequest): Promise<unknown>;
   /** Plan-only frontend-only update preview (never mutates). */
@@ -464,6 +468,10 @@ export function buildInstanceActions(opts: BuildInstanceActionsOptions): Manager
 
     async logs(instanceId, opts) {
       return instanceLogs(deps, instanceId, opts);
+    },
+
+    async proxyLogs(opts) {
+      return serverProxyLogs(deps, opts);
     },
 
     async updateDryRun(instanceId, req) {

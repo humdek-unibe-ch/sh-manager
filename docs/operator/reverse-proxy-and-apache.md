@@ -7,9 +7,9 @@ SPDX-License-Identifier: MPL-2.0
 
 Audience: Server operators
 Status: Active
-Applies to: `sh-manager` (manager tool `1.5.3+`, production mode with real domains + TLS)
+Applies to: `sh-manager` (manager tool `1.5.5+`, production mode with real domains + TLS)
 Last verified: 2026-06-16
-Source of truth: `packages/traefik/src/index.ts`, `packages/docker/src/compose.ts`, `apps/cli/src/actions.ts` (`serverInit`, `ensureProxyRunning`, `serverStartProxy`), `packages/core/src/preflight.ts`
+Source of truth: `packages/traefik/src/index.ts`, `packages/docker/src/compose.ts`, `apps/cli/src/actions.ts` (`serverInit`, `ensureProxyRunning`, `serverStartProxy`, `serverProxyLogs`), `packages/core/src/preflight.ts`
 
 > Command names: on a Docker-only install you run the manager through the `shm`
 > alias/wrapper from [install](install.md) (e.g. `shm server start`). The
@@ -164,12 +164,19 @@ dig +short your-domain.example.org    # must return THIS server's public IP
   the internet — check any cloud/security-group/UFW firewall too, not just the
   host.
 - DNS must resolve to this server first (above).
-- Watch issuance in the proxy log:
+- Watch issuance in the proxy log — from the manager (no SSH needed) via the web
+  console → **Server operations** → **Reverse proxy (TLS & routing)** →
+  **View proxy logs** (filter `acme`), or `shm server logs` (`1.5.5+`); the raw
+  command remains:
 
   ```bash
   docker compose -f /opt/selfhelp/proxy/compose.yaml logs --tail=200 | grep -i acme
   ```
 
+- On **Docker Engine 29+** the proxy must run **`traefik:v3.7.5`** (manager
+  `1.5.5+`). Older Traefik can't talk to the newer Docker API, discovers no
+  containers, and returns `404` for every domain with no certificate ever issued
+  — update the manager and run `shm server start`.
 - Let's Encrypt rate-limits repeated failures — fix DNS/ports first, then retry,
   rather than reloading in a loop.
 

@@ -41,6 +41,7 @@ import {
   instanceSupportBundle,
   serverInit,
   serverStartProxy,
+  serverProxyLogs,
   ensureProxyRunning,
   serverPurge,
   serverRunScheduledBackups,
@@ -225,6 +226,39 @@ describe('CLI actions (offline)', () => {
     const res = await serverStartProxy(d);
     expect(res.started).toBe(true);
     expect(proxyUps()).toBe(before + 1);
+  });
+
+  it('server logs reads the shared proxy logs from the proxy dir, clamps the tail, and redacts secrets', async () => {
+    // Surfaced so an operator can diagnose the edge (the Docker-provider "client
+    // version 1.24 is too old" 404, ACME failures) from the manager. It must read
+    // the PROXY compose (not an instance), clamp an out-of-range tail, and never
+    // leak a secret that happens to appear in a log line.
+    const d = await makeDeps();
+    const logRunner = new RecordingComposeRunner(() => ({
+      stdout:
+        'traefik  | level=info msg="Configuration loaded"\n' +
+        'traefik  | DATABASE_URL=mysql://app:supersecret@mysql:3306/db\n',
+      stderr: '',
+    }));
+    d.runner = logRunner;
+
+    const res = await serverProxyLogs(d, { tail: 99999 });
+
+    expect(res.tail).toBe(2000);
+    expect(logRunner.calls[0]?.cwd).toBe(path.join(root, 'proxy'));
+    expect(logRunner.calls[0]?.args).toEqual(['logs', '--no-color', '--tail=2000']);
+    expect(res.text).toContain('Configuration loaded');
+    expect(res.text).not.toContain('supersecret');
+    expect(res.readAt).toBe('2026-06-05T10:00:00.000Z');
+  });
+
+  it('server logs never throws when the proxy has not been started yet (returns a readable message)', async () => {
+    const d = await makeDeps();
+    d.runner = new RecordingComposeRunner(() => {
+      throw new Error('no such service: traefik');
+    });
+    const res = await serverProxyLogs(d, {});
+    expect(res.text).toMatch(/Could not read proxy logs/i);
   });
 
   it('ensureProxyRunning self-heals a stale (pre-1.5.1, non-external) proxy compose before starting it', async () => {

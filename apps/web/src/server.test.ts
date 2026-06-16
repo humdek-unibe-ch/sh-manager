@@ -334,7 +334,12 @@ describe('authenticated manager endpoints', () => {
   it('answers /api/state with the manager version and the session identity', async () => {
     const base = await start(testServer({ actions: fakeActions(), managerVersion: '1.0.6' }));
     const { cookie } = await login(base);
-    const body = (await (await fetch(base + '/api/state', { headers: { cookie } })).json()) as {
+    const res = await fetch(base + '/api/state', { headers: { cookie } });
+    // The version-bearing state response must be uncacheable, or a browser keeps
+    // showing the previous managerVersion after an update (the "still see the old
+    // GUI version" report) even across a hard refresh.
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    const body = (await res.json()) as {
       mode: string;
       managerVersion?: string;
       session?: { email: string };
@@ -409,6 +414,13 @@ describe('instance management APIs', () => {
           service: opts.service ?? 'backend',
           tail: opts.tail ?? 200,
           text: `[${opts.service ?? 'backend'}] sample log line\n`,
+          readAt: '2026-06-01T12:00:00.000Z',
+        };
+      },
+      async proxyLogs(opts) {
+        return {
+          tail: opts.tail ?? 200,
+          text: 'traefik  | level=info msg="Configuration loaded"\n',
           readAt: '2026-06-01T12:00:00.000Z',
         };
       },
@@ -847,6 +859,25 @@ describe('instance management APIs', () => {
 
       // An unknown service is rejected at the BFF (clean 400, never a 500).
       const bad = await fetch(base + '/api/instances/clinic-a/logs?service=bogus', { headers: { cookie } });
+      expect(bad.status).toBe(400);
+    } finally {
+      await rm(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('reads the shared reverse-proxy (Traefik) logs and rejects a non-numeric tail', async () => {
+    const tmpRoot = await mkdtemp(path.join(tmpdir(), 'shm-mgmt-'));
+    try {
+      const { base, cookie } = await managementBase(tmpRoot);
+
+      const ok = await fetch(base + '/api/server/proxy-logs?tail=50', { headers: { cookie } });
+      expect(ok.status).toBe(200);
+      const body = (await ok.json()) as { tail: number; text: string };
+      expect(body.tail).toBe(50);
+      expect(body.text).toContain('Configuration loaded');
+
+      // A non-numeric tail is rejected at the BFF (clean 400, never a 500).
+      const bad = await fetch(base + '/api/server/proxy-logs?tail=abc', { headers: { cookie } });
       expect(bad.status).toBe(400);
     } finally {
       await rm(tmpRoot, { recursive: true, force: true });

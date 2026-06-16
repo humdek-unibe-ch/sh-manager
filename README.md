@@ -33,25 +33,33 @@ this source repo (development).
 
 ### Linux server (production)
 
+Generate the **wrapper script** once into your state folder and use it for
+everything. The wrapper bakes in the Docker socket + state mounts **and** the
+GUI port publishing, and it adds the lifecycle verbs (`up`/`down`/`update`/
+`reinstall`/`web`); anything else is passed straight to the `sh-manager` CLI.
+
 ```bash
 docker pull ghcr.io/humdek-unibe-ch/sh-manager:latest
 
-# every run mounts the Docker socket + the state root
-alias shm='docker run --rm \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -v /opt/selfhelp:/opt/selfhelp \
-  ghcr.io/humdek-unibe-ch/sh-manager:latest'
+mkdir -p /opt/selfhelp
+docker run --rm ghcr.io/humdek-unibe-ch/sh-manager:latest wrapper --shell bash > /opt/selfhelp/shm.sh
+chmod +x /opt/selfhelp/shm.sh
+alias shm='/opt/selfhelp/shm.sh'   # `shm` now means the wrapper (NOT bare `docker run`)
 
 shm server init --server-id srv-001 --mode production --email ops@example.ch
 shm instance install --id website1 --domain website1.example.ch \
   --version latest --provision --admin-email ops@example.ch
+shm up                              # start the web GUI at http://127.0.0.1:8765
 ```
 
 (The official registry is the default; pass `--registry <url>` for dev/test
-registries.) Instead of the alias, the image can also generate a persistent
-wrapper script: `docker run --rm ghcr.io/humdek-unibe-ch/sh-manager:latest
-wrapper --shell bash > /opt/selfhelp/shm.sh`.
-Full guide: [docs/operator/install.md](docs/operator/install.md).
+registries.) Full guide: [docs/operator/install.md](docs/operator/install.md).
+
+> If you instead alias `shm` to a bare `docker run … sh-manager` (CLI only),
+> the lifecycle verbs do **not** exist — `shm up` / `shm down` / `shm reinstall`
+> fail with `unknown command`, and `shm web` will **not** publish the GUI port
+> (so an SSH tunnel can't reach it). Use the wrapper above for the GUI, or
+> publish the port yourself (see [Web UI](#web-ui)).
 
 ### Windows machine (testing)
 
@@ -79,29 +87,40 @@ npm install && npm run build
 npm run cli -- --help
 ```
 
-## Manager lifecycle (update / remove / reinstall / purge)
+## Manager lifecycle (the GUI container)
 
-The generated wrapper script (`shm.ps1` / `shm.sh`) carries the whole manager
-lifecycle. All state lives in the mounted state folder
-(`/opt/selfhelp`, `D:\selfhelp`, …), so the manager container itself is
-**disposable**: removing and reinstalling it never touches instances, and a
-fresh manager reconnects to every existing instance automatically.
+These verbs are provided by the generated **wrapper script** (`shm.sh` /
+`shm.ps1`) — they manage the single long-running `sh-manager-web` GUI container.
+They are **not** `sh-manager` CLI subcommands, so they only work through the
+wrapper (or an alias that points at it). All state lives in the mounted state
+folder, so the manager container itself is **disposable**: removing and
+reinstalling it never touches instances, and a fresh manager reconnects to every
+existing instance automatically.
 
 ```bash
-./shm.sh up           # start the web GUI in the background (http://127.0.0.1:8765)
-./shm.sh down         # stop + remove the GUI container (instances keep running)
-./shm.sh update       # self-update: pull the new image + restart the GUI on it
-./shm.sh reinstall    # down + docker pull + up (fresh container, same state)
-./shm.sh web          # run the GUI in the foreground (Ctrl-C stops it)
+shm up           # start the web GUI in the background (http://127.0.0.1:8765)
+shm down         # stop + remove the GUI container (instances keep running)
+shm update       # self-update: pull the new image + restart the GUI on it
+shm reinstall    # down + docker pull + up (fresh container, same state)
+shm web          # run the GUI in the foreground (Ctrl-C stops it)
 ```
 
-(Windows: the same verbs on `.\shm.ps1`.) Equivalent low-level commands:
+(`shm` = your alias to the wrapper; on Windows use `.\shm.ps1 <verb>`.) After an
+`update`/`reinstall`, hard-refresh the browser **once** so it drops the old SPA
+shell; from then on the new GUI version shows without a refresh.
+
+Everything else is a normal `sh-manager` CLI subcommand (run through the wrapper
+or the image directly). The lifecycle-relevant ones:
 
 ```bash
-sh-manager self-update           # check + APPLY (wrapper: ./shm.sh update)
-sh-manager self-update --check   # check only (exit code 2 = update available)
-sh-manager server status         # initialized? which instances are managed?
-sh-manager server purge --confirm "purge selfhelp"   # DANGER: delete everything
+shm self-update                 # check + APPLY the manager update (same as `shm update`)
+shm self-update --check         # check only (exit code 2 = update available)
+shm server status               # initialized? which instances are managed?
+shm server start                # (re)start the shared Traefik proxy (production) — repair routing/TLS
+shm server logs [--tail 200]    # recent reverse-proxy (Traefik) logs — redacted; diagnose 404 / TLS
+shm instance remove <id> --mode disable   # "down" ONE instance (stop containers, keep all data)
+shm instance enable <id>                   # "up" that instance again
+shm server purge --confirm "purge selfhelp"   # DANGER: delete everything
 ```
 
 `self-update` checks the official GitHub releases and applies the update for
@@ -110,6 +129,12 @@ your runtime: on the Docker image it pulls the new tags and **restarts the
 arguments); on a source checkout it runs `git pull --ff-only && npm ci &&
 npm run build`. Long-running `process-operations` loops must be restarted
 after an update.
+
+`server start` (re)starts the shared proxy that terminates TLS and routes every
+production instance. Use it when instances are installed but unreachable / health
+shows `backend fetch failed` / `frontend unreachable` (e.g. after a failed first
+bootstrap or a host that booted before Docker). See
+[reverse proxy & Apache](docs/operator/reverse-proxy-and-apache.md).
 
 `server purge` is the full tear-down: it removes **every instance**
 (containers, volumes, data, secrets), the shared Traefik proxy, and all server
@@ -190,55 +215,104 @@ Other scripts: `npm run build`, `npm run fixtures:sign`, `npm run license:report
 
 ## CLI
 
+Examples use `shm` — your alias to the wrapper script (see
+[Install](#linux-server-production)). The underlying binary is `sh-manager`, so
+`shm server status` runs the image's `sh-manager server status`. Run `shm --help`
+or `shm <group> --help` for the full, authoritative option list.
+
+### Complete command reference
+
+Top-level:
+
+| Command | What it does |
+| --- | --- |
+| `wrapper --shell bash\|powershell` | Print the `shm` wrapper script (socket+state mounts, GUI port, lifecycle verbs). |
+| `web [--host <h>] [--port <n>]` | Serve the localhost web UI (operations console + create wizard). |
+| `self-update [--check]` | Update the manager image/checkout. `--check`: report only (exit 2 = update available). |
+| `doctor` | Host resource preflight (Docker, internet, ports 80/443, disk/memory/CPU). |
+
+`server` (server-level):
+
+| Command | What it does |
+| --- | --- |
+| `server init --server-id <id> --mode production\|local [--email <e>] [--import]` | One-time bootstrap: shared Traefik proxy + inventory. `--import` re-applies/repairs an existing server. |
+| `server status` | Is the server initialized, and which instances does it manage? |
+| `server start` | (Re)start the shared Traefik proxy (production). Repairs unreachable instances / missing TLS. |
+| `server logs [--tail <n>]` | Recent shared-proxy (Traefik) logs, secret-redacted. Diagnose 404 / no-certificate from the edge. Also in the web console → Reverse proxy → View proxy logs. |
+| `server run-scheduled-backups` | Run any due scheduled backups once (for cron/systemd). |
+| `server purge --confirm "purge selfhelp" [--delete-backups]` | DANGER: remove every instance, the proxy, and all server state. |
+
+`instance` (instance-level — `<id>` is the instance id):
+
+| Command | What it does |
+| --- | --- |
+| `instance install --id <id> [--mode production\|local] [--domain <d>\|--port <p>] [--version latest] [--up] [--provision --admin-email <e>] [--registry <url>]` | Install an instance from the official registry (optionally start + fully provision). |
+| `instance list` | List installed instances (id, domain, status, project). |
+| `instance health <id>` | Health-check an instance. |
+| `instance enable <id>` | **"up"**: bring a disabled / removed-keep-data instance back online. |
+| `instance remove <id> --mode disable\|remove_containers_keep_data\|full_delete` | **"down" / delete**: `disable` stops it (keeps all data); `full_delete` needs `--confirm "delete <id>"`. |
+| `instance update <id> [--dry-run] [--version <v>] [--accept-migration-risk] [--approve-mysql-major]` | Plan or run a core update (backup-first, rollback on failure; also pulls a newer compatible frontend). |
+| `instance update-frontend <id> [--dry-run] [--version <v>]` | Frontend-only swap (no migration/backup; core + data untouched). |
+| `instance set-address <id> --domain <d>\|--port <p>` | Re-point an instance to a new domain/port and recreate routing. |
+| `instance rename <id> <displayName>` | Change only the display name. |
+| `instance mailer <id> [--set <dsn>\|--clear]` | Show / set / reset the outbound SMTP DSN (returned redacted). |
+| `instance env <id> [--set K=V ...] [--unset K ...]` | Show / override / reset non-secret environment. |
+| `instance backup <id>` | Take a manual backup. |
+| `instance backup-schedule <id> --enable --time HH:MM` | Configure nightly backups (GFS retention). |
+| `instance backup-prune <id> [--dry-run]` | Apply the retention policy. |
+| `instance restore <id> <backupId> [--apply]` | Restore a backup in place (or as a clone). |
+| `instance clone <source> <target> --domain <d>\|--port <p> [--apply]` | Copy an instance into a new, isolated one. |
+| `instance logs <id> [-s <service>] [-n <lines>]` | Recent, redacted container logs. |
+| `instance support-bundle <id>` | Collect a redacted support bundle. |
+| `instance repair <id>` | Reconstruct a missing/corrupt manifest and re-register. |
+| `instance safe-mode enable\|disable <id>` | Boot the backend with core bundles only (no plugins) / restore. |
+| `instance process-operations <id> [--watch] [--interval <s>]` | Drain CMS-requested update/plugin operations (supervised loop with `--watch`). |
+
+`admin` (manager operators — local email + password):
+
+| Command | What it does |
+| --- | --- |
+| `admin create --email <e> --roles server_owner,instance_operator,read_only [--name <n>]` | Create an operator (password generated + shown once if omitted). |
+| `admin list` | List operators (digests never shown). |
+| `admin disable <email>` | Block an operator's login (keeps the record). |
+| `admin role grant <email> <role>` | Grant a role. |
+| `admin bootstrap-token [--ttl <s>]` | Issue a one-time first-run operator-creation token. |
+
+### Common flows
+
 ```bash
 # one-time server bootstrap (shared proxy + inventory)
-sh-manager server init --server-id srv-001 --mode production --email ops@example.ch
-
-# install an isolated instance (official registry is the default;
-# --registry <url> overrides it for dev/test registries)
-sh-manager instance install --id website1 --domain website1.example.ch \
-  --version latest --up
+shm server init --server-id srv-001 --mode production --email ops@example.ch
 
 # install AND fully provision (wait for DB -> migrate -> create admin ->
 # install plugins -> warm caches -> health). A generated admin password is
 # printed once and saved to <instance>/secrets/admin_password (0600, never in
 # the manifest/lock/logs); delete the file after the first sign-in.
-sh-manager instance install --id website1 --domain website1.example.ch \
+shm instance install --id website1 --domain website1.example.ch \
   --version latest --provision --admin-email ops@example.ch
 
-sh-manager instance list
-sh-manager instance health website1
-sh-manager instance update --dry-run website1
-sh-manager instance update website1 --accept-migration-risk
+shm instance list
+shm instance health website1
+shm instance update website1 --dry-run
+shm instance update website1 --accept-migration-risk
 
-# frontend-only update (instance already on the newest core, newer frontend
-# available): stateless swap of just the frontend container, no migration/backup
-sh-manager instance update-frontend website1 --dry-run
-sh-manager instance update-frontend website1 --version 0.1.7
+# stop / start ONE instance (no data is ever deleted)
+shm instance remove website1 --mode disable   # "down"
+shm instance enable website1                   # "up"
 
-# outbound mail (SMTP) per instance: show / set / back to default
-sh-manager instance mailer website1
-sh-manager instance mailer website1 --set smtp://user:pass@mail.example.org:587
-sh-manager instance mailer website1 --clear
+# routing/TLS not working? (re)start the shared proxy
+shm server start
 
-# non-secret environment per instance: show / override / add / reset
-sh-manager instance env website1
-sh-manager instance env website1 --set JWT_TOKEN_TTL=7200 --set MY_FLAG=on
-sh-manager instance env website1 --unset JWT_TOKEN_TTL
+# manual + scheduled backups
+shm instance backup website1
+shm instance backup-schedule website1 --enable --time 02:00
 
-# manual backups + automatic nightly backups with GFS retention
-sh-manager instance backup website1
-sh-manager instance backup-schedule website1 --enable --time 02:00
-sh-manager instance backup-prune website1 --dry-run
-sh-manager server run-scheduled-backups   # one-shot for cron/systemd hosts
-
-sh-manager server status    # initialized? which instances?
-sh-manager doctor
-sh-manager self-update      # update the manager (--check: report only, exit 2 = update available)
-sh-manager web              # serve the web UI (operations console + create wizard)
+shm server status
+shm doctor
+shm self-update                 # --check: report only (exit 2 = update available)
 
 # DANGER: remove everything the manager created (keeps backups unless --delete-backups)
-sh-manager server purge --confirm "purge selfhelp"
+shm server purge --confirm "purge selfhelp"
 ```
 
 Configuration via env: `SELFHELP_ROOT` (default `/opt/selfhelp`),
@@ -280,10 +354,12 @@ must be opted into explicitly), and serves the built SPA from `dist-web` (fallin
 back to an inline shell if unbuilt). Reach it remotely via an SSH tunnel:
 
 ```bash
-# on the server (equivalent: sh-manager-web)
-sh-manager web --root /opt/selfhelp        # operations console (first-run setup on a fresh server)
+# on the server — the wrapper publishes the GUI port for you
+shm up          # background (http://127.0.0.1:8765); `shm web` runs it in the foreground
+shm down        # stop it
 
-# from the Docker image (bind 0.0.0.0 inside; published loopback-only)
+# equivalent explicit docker run (bind 0.0.0.0 inside; published loopback-only).
+# NOTE the `-p` — a bare `docker run … web` WITHOUT it leaves the GUI unreachable.
 docker run --rm -p 127.0.0.1:8765:8765 \
   -v /var/run/docker.sock:/var/run/docker.sock -v /opt/selfhelp:/opt/selfhelp \
   ghcr.io/humdek-unibe-ch/sh-manager:latest web --host 0.0.0.0

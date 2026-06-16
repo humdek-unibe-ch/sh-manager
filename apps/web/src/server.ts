@@ -375,6 +375,14 @@ export function createManagerServer(options: ManagerServerOptions): ManagerServe
       sendJson(res, 200, await im.instances.serverStatus());
       return true;
     }
+    if (path === '/api/server/proxy-logs' && ctx.method === 'GET') {
+      const tail = ctx.url.searchParams.has('tail') ? Number(ctx.url.searchParams.get('tail')) : undefined;
+      if (tail !== undefined && !Number.isFinite(tail)) {
+        throw new HttpError(400, 'tail must be a number.');
+      }
+      sendJson(res, 200, await im.instances.proxyLogs({ tail }));
+      return true;
+    }
     if (path === '/api/server/preflight' && ctx.method === 'POST') {
       await handlePreflight(ctx, res);
       return true;
@@ -842,5 +850,10 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const text = JSON.stringify(body);
   res.statusCode = status;
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  // Every /api response is dynamic (server state, manager version, health,
+  // sessions) and must NEVER be cached. Without this a browser could keep a
+  // stale /api/state — which carries `managerVersion` — and the GUI kept showing
+  // the previous version after a manager update even across a hard refresh.
+  res.setHeader('Cache-Control', 'no-store');
   res.end(text);
 }

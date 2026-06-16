@@ -75,9 +75,32 @@ Certificates are issued by the shared Traefik proxy via Let's Encrypt.
 - **DNS must resolve first** (see above) — Let's Encrypt validates over the
   domain.
 - A bootstrap `--email` must have been provided to `server init` for production.
-- Inspect the proxy: `docker compose -f <root>/proxy/compose.yaml logs --tail=200`.
+- Inspect the proxy logs without SSH: open the manager web console → **Server
+  operations** → the **Reverse proxy (TLS & routing)** card → **View proxy logs**
+  (filter by `acme` for certificate activity), or run `sh-manager server logs`
+  (`1.5.5+`). The raw command is still
+  `docker compose -f <root>/proxy/compose.yaml logs --tail=200`.
 - Let's Encrypt rate-limits repeated failures; fix DNS/ports first, then retry
   rather than looping.
+
+## Every domain returns "404 page not found" (proxy can't see containers)
+
+The instances are healthy and correctly labelled, but every hostname (and the
+ACME/TLS challenge) returns a Traefik `404 page not found`. This is the
+**Docker Engine 29+ × old-Traefik** incompatibility:
+
+- Docker Engine 29 raised the daemon's *minimum* API version to **1.44**.
+  Traefik **before v3.6.1** hardcoded Docker API **1.24** in its Docker provider,
+  so on Engine 29+ it fails every poll (`client version 1.24 is too old. Minimum
+  supported API version is 1.44`), discovers **no containers**, has zero routers,
+  and 404s everything.
+- **Fix:** update the manager to **`1.5.5+`** (the shared proxy now pins
+  `traefik:v3.7.5`, which auto-negotiates the Docker API), then recreate the
+  proxy once: `sh-manager server start`. Verify with
+  `sh-manager server logs` (or the GUI **View proxy logs**) — the "client version
+  1.24 is too old" lines stop and routers appear.
+- Setting `DOCKER_API_VERSION` does **not** help — Traefik ignores it; the image
+  version is the fix.
 
 ## Ports 80/443 already in use (often Apache/nginx)
 

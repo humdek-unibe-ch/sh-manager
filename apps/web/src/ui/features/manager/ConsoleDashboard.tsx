@@ -8,7 +8,7 @@
  * mount, sequentially) so the operator sees real statuses instead of a wall
  * of "Pending" — re-running any check stays one click away.
  */
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Anchor, Group, SimpleGrid, Stack, Text, Title } from '@mantine/core';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import {
@@ -27,6 +27,7 @@ import { CHECK_META } from '../../lib/wizard-view';
 import type { CheckResult, InstanceSummary, PreflightResult } from '../../lib/types';
 import { InstancesList } from './InstancesList';
 import { OperationLog } from './OperationLog';
+import { ProxyLogsDialog } from './ProxyLogsDialog';
 
 const CHECKS = ['docker', 'internet', 'registry', 'resources'] as const;
 export const CONSOLE_STATE_KEY = ['manager', 'console', 'state'] as const;
@@ -102,6 +103,8 @@ export function ConsoleDashboard({
 
   const activeCount = instances.filter((i) => i.status === 'active').length;
   const brokenCount = instances.filter((i) => i.status === 'broken').length;
+
+  const [proxyLogsOpen, setProxyLogsOpen] = useState(false);
 
   return (
     <Stack gap="xl">
@@ -187,6 +190,24 @@ export function ConsoleDashboard({
       </Card>
 
       <Card
+        title="Reverse proxy (TLS & routing)"
+        description="One shared Traefik proxy sits in front of every instance: it terminates HTTPS (Let's Encrypt) and routes each domain to its containers. When a site shows 404 or has no certificate, its logs explain why."
+        aside={
+          <Button variant="secondary" onClick={() => setProxyLogsOpen(true)}>
+            View proxy logs
+          </Button>
+        }
+      >
+        <Stack gap="sm">
+          <Text size="sm" c="dimmed">
+            If the proxy is stopped or its config drifted, (re)start it safely — this is idempotent and never
+            deletes data:
+          </Text>
+          <CommandPreview value="sh-manager server start" label="Start / repair the reverse proxy" />
+        </Stack>
+      </Card>
+
+      <Card
         title="Manager version"
         description="The manager checks the official GitHub releases for newer versions."
         aside={
@@ -255,6 +276,8 @@ export function ConsoleDashboard({
           ))}
         </SimpleGrid>
       </Card>
+
+      <ProxyLogsDialog client={client} opened={proxyLogsOpen} onClose={() => setProxyLogsOpen(false)} />
     </Stack>
   );
 }

@@ -23,6 +23,7 @@ import type {
   MailerStatus,
   OperationRecord,
   PreflightResult,
+  ProxyLogsResult,
   PruneExecutionReport,
   ServerStatus,
   Snapshot,
@@ -59,6 +60,8 @@ export interface FakeClientOptions {
   envConfigs?: Record<string, InstanceEnvConfig>;
   /** Log text per `${instanceId}:${service}` (default: a representative line). */
   logs?: Record<string, string>;
+  /** Shared Traefik proxy log text (default: a representative line). */
+  proxyLogs?: string;
   /** Instance manifest per instance id (default: null = manifest not read). */
   manifests?: Record<string, InstanceManifest | null>;
   /** Backup schedule status per instance id (default: nothing configured). */
@@ -433,6 +436,10 @@ export function makeFakeClient(opts: FakeClientOptions = {}): ApiClient {
         opts.logs?.[`${instanceId}:${service}`] ??
         `${service}-1  | [${service}] sample log line for ${instanceId}\n`;
       return { instanceId, service, tail, text, readAt: '2026-06-01T12:00:00.000Z' };
+    },
+    async getProxyLogs(tail = 200): Promise<ProxyLogsResult> {
+      const text = opts.proxyLogs ?? 'traefik  | time="2026-06-01T12:00:00Z" level=info msg="Configuration loaded"\n';
+      return { tail, text, readAt: '2026-06-01T12:00:00.000Z' };
     },
     async updateDryRun() {
       return { plan: opts.dryRunPlan ?? FAKE_DRY_RUN_PLAN };

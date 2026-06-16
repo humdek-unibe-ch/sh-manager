@@ -13,6 +13,20 @@ import { stringify } from 'yaml';
 
 export const PROXY_NETWORK = 'selfhelp_proxy';
 
+/**
+ * Pinned Traefik image for the shared proxy.
+ *
+ * MUST stay >= v3.6.1: Docker Engine 29 raised the daemon's MINIMUM API version
+ * to 1.44, and Traefik < 3.6.1 hardcoded Docker API 1.24 in its Docker provider.
+ * On Engine 29+ that provider then fails every poll with "client version 1.24 is
+ * too old. Minimum supported API version is 1.44" and discovers NO containers —
+ * so Traefik has zero routers and answers every request with a 404, even though
+ * the instances are healthy and correctly labelled. v3.6.1 added Docker API
+ * version auto-negotiation (traefik/traefik#12256); we pin a current v3.7 patch.
+ * The DOCKER_API_VERSION env var does NOT help — Traefik ignores it (#12420).
+ */
+export const TRAEFIK_IMAGE = 'traefik:v3.7.5';
+
 export interface ProxyComposeOptions {
   mode: 'production' | 'local';
   network?: string;
@@ -57,7 +71,7 @@ export function buildProxyCompose(opts: ProxyComposeOptions): Record<string, unk
     name: 'selfhelp_proxy',
     services: {
       traefik: {
-        image: 'traefik:v3.1',
+        image: TRAEFIK_IMAGE,
         restart: 'unless-stopped',
         command,
         ports,

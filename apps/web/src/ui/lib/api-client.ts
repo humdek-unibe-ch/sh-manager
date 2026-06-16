@@ -29,6 +29,7 @@ import type {
   ManagerUpdateCheck,
   OperationRecord,
   PreflightResult,
+  ProxyLogsResult,
   PruneExecutionReport,
   RegistryVersions,
   RemoveInstanceRequest,
@@ -122,6 +123,8 @@ export interface ApiClient {
   getInstanceEnv(instanceId: string): Promise<InstanceEnvConfig>;
   /** Recent (redacted) container logs for one service of an instance. */
   getInstanceLogs(instanceId: string, service: LogService, tail?: number): Promise<InstanceLogsResult>;
+  /** Recent (redacted) logs from the shared Traefik proxy (edge routing / TLS / Docker provider). */
+  getProxyLogs(tail?: number): Promise<ProxyLogsResult>;
   updateDryRun(instanceId: string, req: UpdateInstanceRequest): Promise<{ plan: unknown }>;
   /** Plan-only frontend-only update preview (never mutates). */
   frontendUpdateDryRun(instanceId: string, req: FrontendUpdateInstanceRequest): Promise<{ plan: unknown }>;
@@ -263,6 +266,12 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
         `/api/instances/${encodeURIComponent(instanceId)}/logs?${params.toString()}`,
         'GET',
       );
+    },
+    getProxyLogs: (tail) => {
+      const params = new URLSearchParams();
+      if (tail !== undefined) params.set('tail', String(tail));
+      const qs = params.toString();
+      return request<ProxyLogsResult>(`/api/server/proxy-logs${qs ? `?${qs}` : ''}`, 'GET');
     },
     updateDryRun: (instanceId, req) =>
       request<{ plan: unknown }>(`/api/instances/${encodeURIComponent(instanceId)}/update/dry-run`, 'POST', req),

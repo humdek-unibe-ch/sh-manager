@@ -8,13 +8,62 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `1.5.3`). Registry releases
+- **The manager tool** uses its own semver (currently `1.5.5`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
   **`0.x`** line (core, frontend, scheduler, worker — all `0.1.0`).
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
+
+## [1.5.5] - 2026-06-16
+
+### Fixed
+- **Every instance domain answered `404 page not found` over HTTPS even though the
+  containers were healthy and correctly labelled.** Root cause: Docker Engine 29
+  raised the daemon's *minimum* API version to 1.44, and the pinned Traefik
+  (`v3.1`) hardcoded Docker API `1.24` in its Docker provider. On Engine 29+ that
+  provider failed every poll (`client version 1.24 is too old. Minimum supported
+  API version is 1.44`) and discovered **no containers** — so Traefik had zero
+  routers and returned a 404 for every request, with no certificate ever issued.
+  The shared proxy now pins **`traefik:v3.7.5`**, which auto-negotiates the Docker
+  API version (added in Traefik 3.6.1). Note: setting `DOCKER_API_VERSION` does
+  **not** help — Traefik ignores it; the image floor is the fix. A regression test
+  guards the pin at `>= v3.6.1`. After updating the manager, run
+  `sh-manager server start` once to recreate the proxy on the new image.
+
+### Added
+- **Reverse-proxy (Traefik) logs are now visible from the manager — CLI and
+  GUI — so diagnosing a 404 / missing-certificate no longer needs SSH and
+  remembering compose paths.** New `sh-manager server logs` command (with
+  `--tail`) and a **"Reverse proxy (TLS & routing)"** card on the operations
+  dashboard with a **View proxy logs** dialog (tail + filter, plus quick filters
+  for TLS/`acme`, errors, and routing). Logs are read via `docker compose logs`
+  and **redacted** before they reach the terminal or browser, mirroring the
+  existing per-instance logs. The card also surfaces the `server start` repair
+  command. Covered by new BFF, fake-client, and dialog tests.
+
+## [1.5.4] - 2026-06-16
+
+### Fixed
+- **GUI kept showing the previous manager version after an update, even across a
+  hard refresh.** The BFF served `/api/*` responses with no cache directive, so a
+  browser could cache `/api/state` (which carries `managerVersion`). API
+  responses are now sent with `Cache-Control: no-store` (the SPA shell already
+  used `no-cache`). New web test asserts `/api/state` is `no-store`.
+
+### Changed
+- **`README.md` rewritten to match the actual CLI surface.** The biggest source
+  of confusion: `up` / `down` / `update` / `reinstall` / `web` are verbs of the
+  generated **wrapper script** (`shm.sh` / `shm.ps1`), not `sh-manager` CLI
+  subcommands — and a bare `docker run … sh-manager` alias also never publishes
+  the GUI port, so `shm web` through it is unreachable (the "I see the old GUI /
+  can't reach it" report). The Linux quickstart now generates and uses the
+  wrapper (consistent with Windows), the lifecycle section states these are
+  wrapper-only verbs, and a **complete command reference** documents every
+  `server` / `instance` / `admin` command from the code — including the
+  instance "up/down" (`instance enable` / `instance remove --mode disable`) and
+  `server start`. Examples use `shm`.
 
 ## [1.5.3] - 2026-06-16
 
