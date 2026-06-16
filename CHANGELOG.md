@@ -8,13 +8,54 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `1.4.6`). Registry releases
+- **The manager tool** uses its own semver (currently `1.4.7`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
   **`0.x`** line (core, frontend, scheduler, worker — all `0.1.0`).
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
+
+## [1.4.7] - 2026-06-16
+
+### Changed
+- **The console is event-driven — background polling is gone.** Every manager
+  view (instance list, instance workspace, operation history, the live
+  operation log, backups) used to refresh on a fixed `refetchInterval` timer,
+  so an idle console kept hammering the BFF. The views are now driven by the
+  `GET /api/events` Server-Sent-Events stream from `1.4.6`: they refresh the
+  instant the backend journals a change and otherwise make **no repeating
+  requests**. A short **fallback poll** activates **only** while the stream is
+  disconnected (and, for per-operation views, only while an operation is still
+  `running`) and stops the moment the stream reconnects. On reconnect the
+  console invalidates the manager-scoped queries once to reconcile anything
+  missed while the stream was down — so you no longer need a manual full-page
+  refresh to see current state after a blip. (New shared connection store
+  `manager-sse-status.ts`; `manager-events.ts` now reports stream `open`.)
+
+### Added
+- **Components & versions and Installed plugins, per instance.** The instance
+  workspace now shows a **Components & versions** card (the resolved
+  core / frontend / scheduler / worker versions and the exact container images
+  this instance runs, read from its manifest) and an **Installed plugins** card
+  (each plugin with its installed version), so an operator can confirm what a
+  given instance is actually running without SSHing in.
+- **Step tracking for every operation.** Opening an operation in the history now
+  shows a **step checklist** for its kind — update, frontend update, backup,
+  restore, clone, address / email / env change, restart, remove — that advances
+  with the real journaled phase (the same treatment the install wizard already
+  had), with the journaled log streaming underneath. Driven by a new
+  `operation-steps.ts` map; the install wizard keeps rendering its own checklist
+  (the embedded log opts out via a `showSteps` prop) so steps are never doubled.
+- **Pagination for long tables.** The operation history, the backups list and
+  the instance list now paginate once they grow past a page, via a shared
+  `usePagination` hook + `PaginationFooter`, so a busy server stays navigable.
+
+### Fixed
+- **Status pills are no longer clipped.** Instance status, "operation running",
+  operation status, backup origin and per-service health pills in the manager
+  tables now render their **full label** instead of truncating — they use the
+  non-truncating `StatusBadge` with consistent tones.
 
 ## [1.4.6] - 2026-06-15
 
