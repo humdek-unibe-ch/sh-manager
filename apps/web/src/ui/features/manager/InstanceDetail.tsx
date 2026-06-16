@@ -28,6 +28,8 @@ import { OperationLog, operationTone } from './OperationLog';
 import { operationKindLabel } from '../../lib/operation-steps';
 import { RemoveInstanceDialog } from './RemoveInstanceDialog';
 import { ToggleEnabledDialog } from './ToggleEnabledDialog';
+import { SafeModeDialog } from './SafeModeDialog';
+import { PluginRecoverDialog } from './PluginRecoverDialog';
 import { RenameInstanceDialog } from './RenameInstanceDialog';
 import { SetAddressDialog } from './SetAddressDialog';
 import { INSTANCES_KEY, instanceStatusTone } from './InstancesList';
@@ -43,6 +45,8 @@ type DialogKind =
   | 'logs'
   | 'disable'
   | 'enable'
+  | 'safe-mode'
+  | 'plugin-recover'
   | 'remove'
   | null;
 
@@ -304,6 +308,15 @@ export function InstanceDetail({ client, instanceId }: InstanceDetailProps): JSX
           {/* Read-only — useful even while an operation runs, so never disabled. */}
           <Button variant="secondary" onClick={() => setDialog('logs')}>
             Logs…
+          </Button>
+          {/* Recovery actions: toggle safe mode (plugins off) and finalize a
+              half-removed plugin that crash-loops the backend. Safe mode works
+              even when the backend is unbootable, so it is never disabled. */}
+          <Button variant="secondary" onClick={() => setDialog('safe-mode')}>
+            Safe mode…
+          </Button>
+          <Button variant="secondary" onClick={() => setDialog('plugin-recover')}>
+            Plugin recover…
           </Button>
           {/* Lifecycle toggle: a disabled/stopped instance can be brought back
               online (Enable); a running one can be quiesced (Disable, reversible). */}
@@ -641,6 +654,20 @@ export function InstanceDetail({ client, instanceId }: InstanceDetailProps): JSX
         client={client}
         instanceId={instanceId}
         action={dialog === 'disable' ? 'disable' : dialog === 'enable' ? 'enable' : null}
+        onClose={() => setDialog(null)}
+        onStarted={onStarted}
+      />
+      <SafeModeDialog
+        client={client}
+        instanceId={instanceId}
+        opened={dialog === 'safe-mode'}
+        onClose={() => setDialog(null)}
+        onStarted={onStarted}
+      />
+      <PluginRecoverDialog
+        client={client}
+        instanceId={instanceId}
+        opened={dialog === 'plugin-recover'}
         onClose={() => setDialog(null)}
         onStarted={onStarted}
       />

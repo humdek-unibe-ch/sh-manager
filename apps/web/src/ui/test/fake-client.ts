@@ -571,6 +571,19 @@ export function makeFakeClient(opts: FakeClientOptions = {}): ApiClient {
       target.status = 'active';
       return started;
     },
+    async setSafeMode(instanceId, req) {
+      if (!instances.some((i) => i.instanceId === instanceId)) {
+        throw new ApiError(404, `Instance "${instanceId}" not found.`);
+      }
+      if (typeof req.enable !== 'boolean') throw new ApiError(400, 'enable (boolean) is required.');
+      return startFakeOperation('instance_safe_mode', instanceId);
+    },
+    async pluginRecover(instanceId) {
+      if (!instances.some((i) => i.instanceId === instanceId)) {
+        throw new ApiError(404, `Instance "${instanceId}" not found.`);
+      }
+      return startFakeOperation('instance_plugin_recover', instanceId);
+    },
     async removeInstance(instanceId) {
       return startFakeOperation('instance_remove', instanceId);
     },

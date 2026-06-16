@@ -84,6 +84,8 @@ const STEP_MAPS: Record<OperationKind, StepDef[]> = {
   instance_set_env: [{ id: 'apply environment', label: 'Apply environment & recreate containers' }],
   instance_disable: [{ id: 'disable', label: 'Stop containers (all data kept)' }],
   instance_enable: [{ id: 'enable', label: 'Start containers & restore plugins' }],
+  instance_safe_mode: [{ id: 'safe-mode', label: 'Toggle safe mode (plugins on/off)' }],
+  instance_plugin_recover: [{ id: 'plugin-recover', label: 'Recover plugins (safe mode → repair → verify boot)' }],
   instance_remove: [{ id: 'remove', label: 'Remove instance' }],
   cms_operations_drain: [{ id: 'drain', label: 'Process pending CMS & plugin operations' }],
 };
@@ -100,6 +102,8 @@ export function operationKindLabel(kind: OperationKind | string): string {
   // Spell out the core update so it is unmistakably a core-stack update (vs. the
   // `instance_frontend_update` frontend-only swap) in the operation history.
   if (kind === 'instance_update') return 'instance core update';
+  if (kind === 'instance_plugin_recover') return 'plugin recovery';
+  if (kind === 'instance_safe_mode') return 'safe mode';
   return kind.replace(/_/g, ' ');
 }
 

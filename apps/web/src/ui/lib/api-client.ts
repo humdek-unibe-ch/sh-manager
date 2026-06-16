@@ -33,6 +33,7 @@ import type {
   PruneExecutionReport,
   RegistryVersions,
   RemoveInstanceRequest,
+  SafeModeRequest,
   ServerStatus,
   SetAddressRequest,
   SetEnvRequest,
@@ -149,6 +150,10 @@ export interface ApiClient {
   disableInstance(instanceId: string): Promise<StartedOperation>;
   /** Bring a disabled (or removed-keep-data) instance back online. */
   enableInstance(instanceId: string): Promise<StartedOperation>;
+  /** Toggle the backend safe-mode marker (boot with core bundles only / plugins on). */
+  setSafeMode(instanceId: string, req: SafeModeRequest): Promise<StartedOperation>;
+  /** Recover a backend crash-looping on a half-removed plugin. */
+  pluginRecover(instanceId: string): Promise<StartedOperation>;
   removeInstance(instanceId: string, req: RemoveInstanceRequest): Promise<StartedOperation>;
 }
 
@@ -311,6 +316,10 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       request<StartedOperation>(`/api/instances/${encodeURIComponent(instanceId)}/disable`, 'POST'),
     enableInstance: (instanceId) =>
       request<StartedOperation>(`/api/instances/${encodeURIComponent(instanceId)}/enable`, 'POST'),
+    setSafeMode: (instanceId, req) =>
+      request<StartedOperation>(`/api/instances/${encodeURIComponent(instanceId)}/safe-mode`, 'POST', req),
+    pluginRecover: (instanceId) =>
+      request<StartedOperation>(`/api/instances/${encodeURIComponent(instanceId)}/plugin-recover`, 'POST'),
     removeInstance: (instanceId, req) =>
       request<StartedOperation>(`/api/instances/${encodeURIComponent(instanceId)}/remove`, 'POST', req),
   };
