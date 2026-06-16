@@ -95,6 +95,9 @@ const STEP_MAPS: Record<OperationKind, StepDef[]> = {
  */
 export function operationKindLabel(kind: OperationKind | string): string {
   if (kind === 'cms_operations_drain') return 'Plugin / CMS operation';
+  // Spell out the core update so it is unmistakably a core-stack update (vs. the
+  // `instance_frontend_update` frontend-only swap) in the operation history.
+  if (kind === 'instance_update') return 'instance core update';
   return kind.replace(/_/g, ' ');
 }
 

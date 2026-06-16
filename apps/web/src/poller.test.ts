@@ -33,7 +33,8 @@ function summary(overrides: Partial<InstanceSummary> = {}): InstanceSummary {
 
 interface FakeBehaviour {
   summaries: InstanceSummary[];
-  pending: Record<string, boolean>;
+  /** Per-instance pending work: `true` = plugin op, or a system update kind. */
+  pending: Record<string, boolean | 'core' | 'frontend'>;
   drained: string[];
   pendingError?: Error;
 }
@@ -63,9 +64,11 @@ function fakeInstances(b: FakeBehaviour): ManagerInstanceActions {
     setName: unsupported,
     setEnv: unsupported,
     remove: unsupported,
-    async hasPendingCmsOperation(id) {
+    async peekPendingCmsWork(id) {
       if (b.pendingError) throw b.pendingError;
-      return b.pending[id] ?? false;
+      const entry = b.pending[id] ?? false;
+      if (entry === 'core' || entry === 'frontend') return { systemUpdate: entry, pluginOps: false };
+      return { systemUpdate: null, pluginOps: entry };
     },
     async drainCmsOperations(id, ctx) {
       b.drained.push(id);
@@ -107,6 +110,27 @@ describe('CmsOperationsPoller', () => {
     expect(ops[0]?.kind).toBe('cms_operations_drain');
     expect(ops[0]?.status).toBe('succeeded');
     expect(ops[0]?.log.some((l) => l.includes('drained clinic-a'))).toBe(true);
+  });
+
+  it('journals a CMS-requested core update under its real kind, not the generic drain', async () => {
+    const b: FakeBehaviour = { summaries: [summary()], pending: { 'clinic-a': 'core' }, drained: [] };
+    const { poller, journal } = makePoller(b);
+
+    await poller.tick();
+
+    expect(b.drained).toEqual(['clinic-a']);
+    const ops = await journal.list({ instanceId: 'clinic-a' });
+    expect(ops[0]?.kind).toBe('instance_update');
+  });
+
+  it('journals a CMS-requested frontend update under the frontend-update kind', async () => {
+    const b: FakeBehaviour = { summaries: [summary()], pending: { 'clinic-a': 'frontend' }, drained: [] };
+    const { poller, journal } = makePoller(b);
+
+    await poller.tick();
+
+    const ops = await journal.list({ instanceId: 'clinic-a' });
+    expect(ops[0]?.kind).toBe('instance_frontend_update');
   });
 
   it('does not create journal noise for idle instances', async () => {

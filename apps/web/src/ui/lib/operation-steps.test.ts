@@ -100,8 +100,31 @@ describe('operationKindLabel', () => {
     expect(operationKindLabel('cms_operations_drain')).toBe('Plugin / CMS operation');
   });
 
+  it('spells out the core update so it is not confused with a plugin/CMS op', () => {
+    // Regression: a CMS-requested core update was journaled as the generic drain
+    // and shown as "Plugin / CMS operation"; it must read as a core update now.
+    expect(operationKindLabel('instance_update')).toBe('instance core update');
+  });
+
   it('humanises other kinds by replacing underscores', () => {
-    expect(operationKindLabel('instance_update')).toBe('instance update');
+    expect(operationKindLabel('instance_backup')).toBe('instance backup');
     expect(operationKindLabel('instance_frontend_update')).toBe('instance frontend update');
+  });
+});
+
+describe('CMS-drained update phase ids drive real checklist rows', () => {
+  // Contract with cmsUpdatePhaseStep() in instances.ts: each step id it emits
+  // for a drained CMS update MUST be a real row, or the live operation history
+  // would fall back to row 0 and never advance.
+  it('instance_update has rows for every core-update phase id', () => {
+    const ids = buildOperationSteps({ kind: 'instance_update', phase: 'plan', status: 'running' }).map((s) => s.id);
+    for (const id of ['plan', 'backup', 'pull', 'migrations', 'health']) expect(ids).toContain(id);
+  });
+
+  it('instance_frontend_update has rows for every frontend-update phase id', () => {
+    const ids = buildOperationSteps({ kind: 'instance_frontend_update', phase: 'plan', status: 'running' }).map(
+      (s) => s.id,
+    );
+    for (const id of ['plan', 'pull', 'health']) expect(ids).toContain(id);
   });
 });

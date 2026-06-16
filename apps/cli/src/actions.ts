@@ -66,6 +66,7 @@ import {
   type FrontendUpdatePlan,
   type HealthReport,
   type OperationExecutor,
+  type OperationLifecycleStatus,
   type PendingOperation,
   type PendingPluginOperation,
   type PhaseReporter,
@@ -1394,6 +1395,12 @@ export async function drainInstanceOperations(
   deps: ActionDeps,
   instanceId: string,
   client: BackendOperationsClient,
+  onPhase?: (
+    op: PendingOperation,
+    status: OperationLifecycleStatus,
+    progressPercent: number,
+    detail?: string,
+  ) => void | Promise<void>,
 ): Promise<ProcessOutcome[]> {
   const manifest = await readManifestFriendly(deps, instanceId);
   return drainOperations({
@@ -1401,6 +1408,7 @@ export async function drainInstanceOperations(
     client,
     execute: buildOperationExecutor(deps),
     ...(deps.now ? { now: deps.now } : {}),
+    ...(onPhase ? { onPhase } : {}),
   });
 }
 

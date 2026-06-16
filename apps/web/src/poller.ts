@@ -12,7 +12,7 @@
  * `sh-manager instance process-operations <id> --watch`.
  */
 import { InstanceLockedError, type OperationRunner } from './jobs.js';
-import { isPollable, type ManagerInstanceActions } from './instances.js';
+import { isPollable, type ManagerInstanceActions, type PendingCmsWork } from './instances.js';
 
 export interface CmsOperationsPollerOptions {
   instances: ManagerInstanceActions;
@@ -81,9 +81,9 @@ export class CmsOperationsPoller {
   }
 
   private async pollInstance(instanceId: string): Promise<void> {
-    let pending = false;
+    let work: PendingCmsWork;
     try {
-      pending = await this.instances.hasPendingCmsOperation(instanceId);
+      work = await this.instances.peekPendingCmsWork(instanceId);
       this.lastError.delete(instanceId);
     } catch (err) {
       // Backend down / token missing / legacy instance: log each distinct
@@ -91,11 +91,22 @@ export class CmsOperationsPoller {
       this.logOnce(instanceId, `CMS poll for ${instanceId} failed: ${err instanceof Error ? err.message : String(err)}`);
       return;
     }
-    if (!pending) return;
+    if (!work.systemUpdate && !work.pluginOps) return;
+
+    // Journal a CMS-requested core/frontend update under its REAL kind so the
+    // operation history reads "instance core update" / "instance frontend
+    // update" with the matching live step checklist — not the opaque
+    // "Plugin / CMS operation" drain (which stays for plugin-only work).
+    const kind =
+      work.systemUpdate === 'frontend'
+        ? 'instance_frontend_update'
+        : work.systemUpdate === 'core'
+          ? 'instance_update'
+          : 'cms_operations_drain';
 
     try {
       const { done } = await this.runner.start(
-        { kind: 'cms_operations_drain', instanceId, operator: 'system (cms poller)', sourceIp: null },
+        { kind, instanceId, operator: 'system (cms poller)', sourceIp: null },
         (ctx) => this.instances.drainCmsOperations(instanceId, ctx),
       );
       // Serialize within the pass: an update can take minutes and the next

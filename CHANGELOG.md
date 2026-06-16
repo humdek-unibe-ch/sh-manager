@@ -8,7 +8,7 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `1.4.8`). Registry releases
+- **The manager tool** uses its own semver (currently `1.4.9`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
@@ -16,7 +16,23 @@ The manager has two version axes (see
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
 
-## [1.4.8] - 2026-06-16
+## [1.4.9] - 2026-06-16
+
+### Changed
+- **A CMS-requested core/frontend update now appears as a *core update* in the
+  operation history, with its real live step checklist.** When an operator
+  requested an update from the SelfHelp CMS, the background poller drained it
+  inside a single `cms_operations_drain` operation, so the manager's operation
+  history labelled a core update as the opaque **"Plugin / CMS operation"** and
+  showed only one "Process pending CMS & plugin operations" row — the actual
+  resolve → backup → pull → recreate → migrate → health steps never lit up while
+  it ran. The poller now peeks what is pending (`peekPendingCmsWork`) and
+  journals a core update as `instance_update` ("instance core update") and a
+  frontend update as `instance_frontend_update`, keeping `cms_operations_drain`
+  only for plugin-only drains. The drain mirrors the update's live lifecycle
+  phases into the operation journal (`@shm/core` gained an optional `onPhase`
+  write-back mirror), so the checklist advances in real time just like a direct
+  `instance update`. Covered by new poller + phase-mapping + label tests.
 
 ### Changed
 - **Update, clone, restore and backup now show their steps live, one by one.**

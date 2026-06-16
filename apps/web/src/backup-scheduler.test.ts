@@ -79,8 +79,8 @@ function fakeInstances(b: FakeBehaviour): ManagerInstanceActions {
     setBackupSchedule: unsupported,
     backupPrunePlan: unsupported,
     backupPrune: unsupported,
-    async hasPendingCmsOperation(id) {
-      return b.cmsPending?.[id] ?? false;
+    async peekPendingCmsWork(id) {
+      return { systemUpdate: null, pluginOps: b.cmsPending?.[id] ?? false };
     },
     async drainCmsOperations(id, ctx) {
       (b.drained ??= []).push(id);

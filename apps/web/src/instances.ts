@@ -95,6 +95,17 @@ export interface InstanceDetail {
   instanceDir: string;
 }
 
+/**
+ * What the CMS has parked for the manager on one instance, as a cheap peek.
+ * `systemUpdate` is the kind of a requested core/frontend update (so the poller
+ * can journal it under its real operation kind); `pluginOps` flags parked
+ * managed-mode plugin install/update/uninstall/purge work.
+ */
+export interface PendingCmsWork {
+  systemUpdate: 'core' | 'frontend' | null;
+  pluginOps: boolean;
+}
+
 export interface BackupSummary {
   backupId: string;
   createdAt: string;
@@ -238,10 +249,12 @@ export interface ManagerInstanceActions {
   setEnv(instanceId: string, req: SetEnvRequest, ctx: OperationContext): Promise<unknown>;
   remove(instanceId: string, req: RemoveInstanceRequest, ctx: OperationContext): Promise<unknown>;
   /**
-   * Cheap read-only peek: is a CMS-requested operation waiting? Lets the
-   * poller avoid creating a journal row on every idle tick.
+   * Cheap read-only peek: what CMS-requested work is waiting for the manager?
+   * Lets the poller avoid creating a journal row on every idle tick AND journal
+   * a core/frontend update under its real kind (so the operation history reads
+   * "instance core update", not the opaque "Plugin / CMS operation" drain).
    */
-  hasPendingCmsOperation(instanceId: string): Promise<boolean>;
+  peekPendingCmsWork(instanceId: string): Promise<PendingCmsWork>;
   /** Drain pending CMS-requested update operations (used by the poller). */
   drainCmsOperations(instanceId: string, ctx: OperationContext): Promise<{ processed: number; outcomes: string[] }>;
 
@@ -705,16 +718,22 @@ export function buildInstanceActions(opts: BuildInstanceActionsOptions): Manager
       return { mode: req.mode, executed: res.executed };
     },
 
-    async hasPendingCmsOperation(instanceId) {
+    async peekPendingCmsWork(instanceId) {
       const client = new ComposeExecBackendOperationsClient({
         runner: deps.runner,
         instanceDir: instancePaths(instanceId, deps.root).dir,
         instanceId,
       });
-      if ((await client.fetchPending(instanceId)) !== null) return true;
-      // Managed-mode plugin installs/updates/uninstalls parked by the CMS for
-      // the operator (the manager) count as pending work for the poller too.
-      return hasPendingPluginOperations(deps, instanceId);
+      const pending = await client.fetchPending(instanceId);
+      const systemUpdate: PendingCmsWork['systemUpdate'] = pending
+        ? pending.kind === 'frontend'
+          ? 'frontend'
+          : 'core'
+        : null;
+      // Managed-mode plugin installs/updates/uninstalls/purges parked by the CMS
+      // for the operator (the manager) count as pending work for the poller too.
+      const pluginOps = await hasPendingPluginOperations(deps, instanceId);
+      return { systemUpdate, pluginOps };
     },
 
     async drainCmsOperations(instanceId, ctx) {
@@ -723,7 +742,15 @@ export function buildInstanceActions(opts: BuildInstanceActionsOptions): Manager
         instanceDir: instancePaths(instanceId, deps.root).dir,
         instanceId,
       });
-      const outcomes = await drainInstanceOperations(deps, instanceId, client);
+      // Mirror the update's live lifecycle phases into the manager journal so a
+      // CMS-requested core/frontend update lights up its real step checklist
+      // (resolve → backup → pull → recreate → migrate → health) AS IT RUNS,
+      // instead of only showing the steps after the fact.
+      const outcomes = await drainInstanceOperations(deps, instanceId, client, async (op, status, _percent, detail) => {
+        const step = cmsUpdatePhaseStep(op.kind, status);
+        if (step) await ctx.setPhase(step);
+        if (detail) await ctx.log(`Update to ${op.targetVersion}: ${detail}`);
+      });
       const lines: string[] = [];
       for (const outcome of outcomes) {
         if (outcome.result === 'noop') continue;
@@ -801,4 +828,30 @@ export function buildInstanceActions(opts: BuildInstanceActionsOptions): Manager
 /** True when an inventory entry should be drained by the CMS poller. */
 export function isPollable(summary: InstanceSummary): boolean {
   return summary.status === 'active' && summary.busy === null;
+}
+
+/**
+ * Maps a CMS update's coarse lifecycle status onto the manager journal step id
+ * for {@link buildOperationSteps} (the `instance_update` /
+ * `instance_frontend_update` step maps), so the operator's live checklist
+ * advances row-by-row. Returns `null` for statuses with no dedicated row
+ * (terminal states are reflected by the operation's own success/failure).
+ */
+export function cmsUpdatePhaseStep(kind: 'core' | 'frontend' | undefined, status: string): string | null {
+  const frontend = kind === 'frontend';
+  switch (status) {
+    case 'accepted':
+    case 'preflight_running':
+      return 'plan';
+    case 'backup_running':
+      return frontend ? null : 'backup';
+    case 'update_running':
+      return 'pull';
+    case 'migration_running':
+      return 'migrations';
+    case 'health_check_running':
+      return 'health';
+    default:
+      return null;
+  }
 }

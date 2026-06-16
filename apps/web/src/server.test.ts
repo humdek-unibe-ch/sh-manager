@@ -421,8 +421,8 @@ describe('instance management APIs', () => {
       async remove() {
         return { executed: true };
       },
-      async hasPendingCmsOperation() {
-        return false;
+      async peekPendingCmsWork() {
+        return { systemUpdate: null, pluginOps: false };
       },
       async drainCmsOperations() {
         return { processed: 0, outcomes: [] };

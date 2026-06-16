@@ -116,6 +116,19 @@ export interface ProcessOperationsDeps {
   client: BackendOperationsClient;
   execute: OperationExecutor;
   now?: () => string;
+  /**
+   * Optional mirror of every lifecycle write-back (accept + each live phase), so
+   * a caller (the persistent BFF poller) can reflect the SAME progress into its
+   * own operation journal — i.e. show a CMS-requested update as a live "core
+   * update" checklist instead of an opaque "drain". Best-effort: a throwing hook
+   * never aborts the drain, because the backend write-back stays authoritative.
+   */
+  onPhase?: (
+    op: PendingOperation,
+    status: OperationLifecycleStatus,
+    progressPercent: number,
+    detail?: string,
+  ) => void | Promise<void>;
 }
 
 export type ProcessOutcome =
@@ -178,6 +191,7 @@ export async function processNextOperation(deps: ProcessOperationsDeps): Promise
     progressPercent: 5,
     message: `Accepted update to ${op.targetVersion}.`,
   });
+  await mirrorPhase(deps, op, 'accepted', 5, `Accepted update to ${op.targetVersion}.`);
 
   const phase: PhaseReporter = async (status, progressPercent, detail) => {
     await client.postStatus({
@@ -186,6 +200,7 @@ export async function processNextOperation(deps: ProcessOperationsDeps): Promise
       progressPercent,
       ...(detail !== undefined ? { message: detail } : {}),
     });
+    await mirrorPhase(deps, op, status, progressPercent, detail);
   };
 
   let report: UpdateExecutionReport;
@@ -231,6 +246,23 @@ export async function drainOperations(
     outcomes.push(outcome);
   }
   return outcomes;
+}
+
+/** Best-effort mirror of a lifecycle write-back to the caller's journal hook. */
+async function mirrorPhase(
+  deps: ProcessOperationsDeps,
+  op: PendingOperation,
+  status: OperationLifecycleStatus,
+  progressPercent: number,
+  detail?: string,
+): Promise<void> {
+  if (!deps.onPhase) return;
+  try {
+    await deps.onPhase(op, status, progressPercent, detail);
+  } catch {
+    // The backend write-back above is authoritative; mirroring must never break
+    // the drain.
+  }
 }
 
 /** Maps an {@link UpdateExecutionReport} to the terminal lifecycle status. */
