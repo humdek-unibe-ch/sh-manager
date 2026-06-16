@@ -8,13 +8,90 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `1.4.7`). Registry releases
+- **The manager tool** uses its own semver (currently `1.4.8`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
   **`0.x`** line (core, frontend, scheduler, worker — all `0.1.0`).
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
+
+## [1.4.8] - 2026-06-16
+
+### Changed
+- **Update, clone, restore and backup now show their steps live, one by one.**
+  Previously the operation step checklist sat on the first row until the whole
+  operation finished and then ticked every row green at once ("I was on the
+  first one… then waited a lot and then it fully finished all"). The core
+  update/rollback, the clone, the restore and the backup now report each phase
+  to the operation journal **as it starts**, so the checklist advances in real
+  time and the live log streams the matching detail:
+  - **Update** threads a new `onStep` callback from `@shm/core`
+    (`executeUpdate` / `executeFrontendUpdate`) through the CLI action into the
+    BFF, which maps each step to a journal phase (plan → backup → pull →
+    recreate → migrations → health).
+  - **Clone** reports `plan → secrets → volumes → database → recreate → health`
+    via an `onPhase` callback (the clone step checklist was expanded to match).
+  - **Backup** reports `database → metadata → volumes → manifest`; **restore**
+    reports `pre-restore backup → verify → stop → volumes → database → config →
+    recreate → migrate → health`.
+- **Plugin / CMS operations are self-describing.** A drained CMS-requested
+  operation used to appear only as the opaque kind `cms operations drain`, so an
+  operator who installed/updated a plugin in the admin UI "had no idea this was
+  a plugin installation". The journaled operation now sets a human phase
+  (e.g. *Installing plugin sh2-shp-survey-js 0.2.22*) and logs the requested
+  plugin work before any composer step runs, and the manager displays the kind
+  as **"Plugin / CMS operation"** instead of the internal name.
+
+### Added
+- **Installed plugins are read live from the running instance.** The instance
+  workspace's **Installed plugins** card now queries the instance's own
+  `plugins` table (the durable source of truth) instead of only the manifest's
+  recorded list — which lags CMS-driven installs and showed *"No plugins
+  installed"* even when plugins were installed (e.g. on `localhost:9111`). Each
+  plugin shows its version and an **Enabled/Disabled** status; when the instance
+  is unreachable the card transparently falls back to the manifest list. Served
+  by a new `GET /api/instances/:id/plugins` endpoint and a dedicated react-query
+  key so the chatty SSE log stream doesn't re-run the heavier live read.
+- **"Latest version" column with update-available badges.** The Components &
+  versions card now has a **Latest version** column for SelfHelp/backend,
+  frontend, scheduler and worker (resolved from the registry dry-run), with an
+  **Update available** badge so an operator can see at a glance that an update
+  is possible — and it lists **every** container image, including Mailpit (local
+  instances), MySQL, Redis and Mercure, for a consistent picture.
+- **Click an operation to see its full detail.** Operation-history rows are now
+  clickable and open a modal with the operation's step checklist, the full
+  (redacted) journaled log and its result payload — previously clicking a row
+  did nothing.
+- **Log tools: "errors only" filter + copy to clipboard.** The live operation
+  log can be filtered to just the problem lines (errors/failures/warnings) and
+  copied to the clipboard in one click (the copy always grabs the full redacted
+  log, regardless of the on-screen filter).
+- **Pagination on the Installed plugins table** too, alongside the existing
+  paginated operation-history, backups and instance tables.
+
+### Fixed
+- **Cloning sets the clone's own display name.** A clone now records the target
+  instance's name as its display name instead of inheriting the source's, and an
+  optional **Display name** field in the clone dialog lets you set it up front.
+- **A parked plugin `purge` is handled like an uninstall.** If the backend parks
+  a managed-mode `purge` operation for the operator, the manager now runs the
+  composer **remove** path (never an accidental install) and labels it as a
+  purge, instead of mis-mapping the unknown type to "install".
+
+### Notes (require the SelfHelp backend/frontend, not the manager)
+These reported issues live in the platform repositories and are tracked
+separately; the manager cannot fix them on its own:
+- The maintenance **system message** does not refresh after editing (cache is
+  not cleared on change) and its HTML renders as literal `<p>` tags — backend
+  cache invalidation + frontend HTML rendering.
+- The maintenance alert **`{{system.maintenance_message}}` interpolation** and
+  the default maintenance page seed belong in the backend version DB migration.
+- **Uninstalling a plugin signs the operator out** (the session is dropped) —
+  backend/frontend session handling, not a manager action.
+- Plugin **purge** only produces a visible manager operation if the backend
+  **parks** it for the operator the way install/uninstall are parked; the
+  manager side is now ready to drain + label it once it is.
 
 ## [1.4.7] - 2026-06-16
 
