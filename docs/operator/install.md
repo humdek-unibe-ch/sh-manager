@@ -3,7 +3,7 @@
 Audience: Server operators
 Status: Active
 Applies to: `sh-manager` (manager tool `0.1.6+`, installs the SelfHelp 0.x pre-release line)
-Last verified: 2026-06-12
+Last verified: 2026-06-16
 Source of truth: `apps/cli/src/bin.ts`, `apps/web/src/bin.ts`, `apps/web/src/server.ts`
 
 This installs SelfHelp on a fresh server in two stages: **bootstrap the server**
@@ -28,28 +28,28 @@ isolated SelfHelp site). You can do both from the **web wizard** or the **CLI**.
 ## Get the manager
 
 The recommended way to run the manager is the published Docker image — nothing
-to build or install beyond Docker itself:
+to build or install beyond Docker itself. Install the image's generated wrapper
+script as a **permanent `shm` command** on your `PATH`. The wrapper bakes in the
+Docker socket + state mounts, publishes the GUI port for `shm web`, and adds the
+lifecycle verbs (`up`/`down`/`update`/`reinstall`/`web`). `--state-root` bakes
+`/opt/selfhelp` into the script so it works from any directory:
 
 ```bash
 docker pull ghcr.io/humdek-unibe-ch/sh-manager:latest
 
-# define once per shell; every command below then reads `shm ...`
-alias shm='docker run --rm \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -v /opt/selfhelp:/opt/selfhelp \
-  ghcr.io/humdek-unibe-ch/sh-manager:latest'
+mkdir -p /opt/selfhelp
+docker run --rm ghcr.io/humdek-unibe-ch/sh-manager:latest \
+  wrapper --shell bash --state-root /opt/selfhelp | sudo tee /usr/local/bin/shm >/dev/null
+sudo chmod +x /usr/local/bin/shm
 shm --version
 ```
 
-Alternatively, let the image generate a persistent wrapper script into the
-state folder (same effect as the alias, plus it handles the GUI port for
-`shm web` and survives new shells):
-
-```bash
-mkdir -p /opt/selfhelp && cd /opt/selfhelp
-docker run --rm ghcr.io/humdek-unibe-ch/sh-manager:latest wrapper --shell bash > shm.sh && chmod +x shm.sh
-./shm.sh --version
-```
+> **Use the installed command, not a shell `alias`.** A shell `alias shm=...`
+> only lives in the shell that defined it, so the next SSH session fails with
+> `shm: command not found` — the most common "it's broken" report. Installing the
+> script to `/usr/local/bin/shm` makes `shm` permanent for every shell and user.
+> Do not *symlink* the script onto `PATH` either: without `--state-root` it would
+> look for state next to the symlink. Always generate it with `--state-root`.
 
 The state mount must be present on **every** invocation — without it commands
 fail with `ENOENT ... selfhelp.server.json` ("not initialized"). Mounting it
@@ -58,8 +58,23 @@ at `/opt/selfhelp` on both sides is the documented default; if you mount a
 inspecting its own container and translates generated bind mounts
 automatically (override with `SELFHELP_ENGINE_ROOT`, see Configuration).
 Where this page says `sh-manager ...`, run `shm ...`; for the web UI run
-`./shm.sh up` (background) or `./shm.sh web` (foreground). Running from a
+`shm up` (background) or `shm web` (foreground). Running from a
 source checkout (`npm run cli -- ...`) is for development.
+
+### Reinstall / rebuild the manager cleanly
+
+The manager container is **disposable** — removing and recreating it never
+touches instances or state. To rebuild the GUI on the latest published image:
+
+```bash
+shm reinstall    # remove the old GUI container, docker pull, start fresh; state survives
+shm server status
+```
+
+`shm update` does the same pull + recreate via `self-update`. Both keep every
+instance, volume, secret, backup and manifest intact. (To recover a wrapper that
+went missing — e.g. `shm: command not found` after a rebuild — just re-run the
+install block above; it is idempotent.)
 
 ## Option A — the web UI (recommended)
 
@@ -67,7 +82,7 @@ source checkout (`npm run cli -- ...`) is for development.
 
 ```bash
 # via the wrapper (recommended; runs in the background):
-./shm.sh up
+shm up
 
 # or directly from the Docker image (binds 0.0.0.0 inside the container; the
 # published port stays loopback-only on the server):

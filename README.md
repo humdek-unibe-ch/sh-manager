@@ -33,18 +33,21 @@ this source repo (development).
 
 ### Linux server (production)
 
-Generate the **wrapper script** once into your state folder and use it for
-everything. The wrapper bakes in the Docker socket + state mounts **and** the
-GUI port publishing, and it adds the lifecycle verbs (`up`/`down`/`update`/
-`reinstall`/`web`); anything else is passed straight to the `sh-manager` CLI.
+Install the **wrapper script** once as a real command on your `PATH`
+(`/usr/local/bin/shm`). The wrapper bakes in the Docker socket + state mounts
+**and** the GUI port publishing, and it adds the lifecycle verbs
+(`up`/`down`/`update`/`reinstall`/`web`); anything else is passed straight to the
+`sh-manager` CLI. `--state-root` bakes `/opt/selfhelp` into the script so it works
+from any directory and **survives new SSH sessions** (unlike a shell `alias`).
 
 ```bash
 docker pull ghcr.io/humdek-unibe-ch/sh-manager:latest
 
 mkdir -p /opt/selfhelp
-docker run --rm ghcr.io/humdek-unibe-ch/sh-manager:latest wrapper --shell bash > /opt/selfhelp/shm.sh
-chmod +x /opt/selfhelp/shm.sh
-alias shm='/opt/selfhelp/shm.sh'   # `shm` now means the wrapper (NOT bare `docker run`)
+docker run --rm ghcr.io/humdek-unibe-ch/sh-manager:latest \
+  wrapper --shell bash --state-root /opt/selfhelp | sudo tee /usr/local/bin/shm >/dev/null
+sudo chmod +x /usr/local/bin/shm
+shm --version                       # `shm` is now a permanent command, every shell
 
 shm server init --server-id srv-001 --mode production --email ops@example.ch
 shm instance install --id website1 --domain website1.example.ch \
@@ -55,8 +58,15 @@ shm up                              # start the web GUI at http://127.0.0.1:8765
 (The official registry is the default; pass `--registry <url>` for dev/test
 registries.) Full guide: [docs/operator/install.md](docs/operator/install.md).
 
-> If you instead alias `shm` to a bare `docker run … sh-manager` (CLI only),
-> the lifecycle verbs do **not** exist — `shm up` / `shm down` / `shm reinstall`
+> **Do not use a shell `alias` for `shm`.** An alias only exists in the one
+> shell that defined it, so a new SSH session fails with
+> `shm: command not found`. Installing the script to `/usr/local/bin/shm` as
+> above makes it permanent for every shell and user. (You also cannot just
+> *symlink* the script onto `PATH`: without `--state-root` it would look for
+> state next to the symlink — always generate it with `--state-root`.)
+>
+> If you instead point `shm` at a bare `docker run … sh-manager` (CLI only), the
+> lifecycle verbs do **not** exist — `shm up` / `shm down` / `shm reinstall`
 > fail with `unknown command`, and `shm web` will **not** publish the GUI port
 > (so an SSH tunnel can't reach it). Use the wrapper above for the GUI, or
 > publish the port yourself (see [Web UI](#web-ui)).
@@ -92,7 +102,7 @@ npm run cli -- --help
 These verbs are provided by the generated **wrapper script** (`shm.sh` /
 `shm.ps1`) — they manage the single long-running `sh-manager-web` GUI container.
 They are **not** `sh-manager` CLI subcommands, so they only work through the
-wrapper (or an alias that points at it). All state lives in the mounted state
+installed `shm` wrapper command. All state lives in the mounted state
 folder, so the manager container itself is **disposable**: removing and
 reinstalling it never touches instances, and a fresh manager reconnects to every
 existing instance automatically.
@@ -101,13 +111,22 @@ existing instance automatically.
 shm up           # start the web GUI in the background (http://127.0.0.1:8765)
 shm down         # stop + remove the GUI container (instances keep running)
 shm update       # self-update: pull the new image + restart the GUI on it
-shm reinstall    # down + docker pull + up (fresh container, same state)
+shm reinstall    # down + docker pull + up (fresh container, latest image, same state)
 shm web          # run the GUI in the foreground (Ctrl-C stops it)
 ```
 
-(`shm` = your alias to the wrapper; on Windows use `.\shm.ps1 <verb>`.) After an
+(`shm` is the wrapper command you installed to `/usr/local/bin/shm`; on Windows
+use `.\shm.ps1 <verb>`.) **`shm reinstall` is the clean rebuild**: it removes the
+old GUI container, pulls the latest published image, and starts a fresh
+`sh-manager-web` on it — so the GUI is rebuilt with the latest manager release
+while every instance and all state survive untouched. After an
 `update`/`reinstall`, hard-refresh the browser **once** so it drops the old SPA
 shell; from then on the new GUI version shows without a refresh.
+
+> `update`/`reinstall` run the latest **published** image. If you are testing
+> unreleased changes, run the manager from a source checkout instead (see
+> [From source](#from-source-development)), where `self-update` does
+> `git pull --ff-only && npm ci && npm run build` and you restart `shm web`.
 
 Everything else is a normal `sh-manager` CLI subcommand (run through the wrapper
 or the image directly). The lifecycle-relevant ones:

@@ -66,6 +66,13 @@ A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instanc
   update runbook notes that self-update waits for in-flight operations.
 - The release/publishing runbook documents the optional release-notification email
   and the repository secrets it needs.
+- **Install docs now make `shm` a permanent command instead of a shell `alias`.**
+  The README + operator install guide install the wrapper to `/usr/local/bin/shm`
+  with `wrapper --shell bash --state-root /opt/selfhelp`, because a shell `alias`
+  is session-scoped and disappears in a new SSH session (`shm: command not found`
+  — the most common "it broke" report). Added a clean reinstall/rebuild section
+  (`shm reinstall`) and a note that `update`/`reinstall` run the latest *published*
+  image (run from source to test unreleased changes).
 
 ## [1.5.7] - 2026-06-16
 
