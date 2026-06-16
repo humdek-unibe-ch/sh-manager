@@ -38,6 +38,7 @@ import {
   instanceRepair,
   instanceRestore,
   instanceSafeMode,
+  instancePluginRecover,
   instanceSetMailer,
   instanceSupportBundle,
   instanceLogs,
@@ -59,6 +60,7 @@ import { ComposeExecBackendOperationsClient, HttpBackendOperationsClient } from 
 import { MANAGER_VERSION, loadTrustedKeys, realDeps } from './env.js';
 import { formatHealth, formatPreflight, formatSteps, formatTable } from './output.js';
 import { applySelfUpdate, checkSelfUpdate, formatSelfUpdate } from './self-update.js';
+import { describeRunningOperation, findRunningOperations } from './server-busy.js';
 import { generateWrapperScript, type WrapperShell } from './wrapper.js';
 import type { ManagerRole } from '@shm/auth';
 import {
@@ -140,6 +142,7 @@ program
   .command('self-update')
   .description('Update the manager to the latest release (Docker: pull image + restart the web GUI container; source: git pull + npm ci + build)')
   .option('--check', 'only check and print what would happen; do not apply', false)
+  .option('--force', 'apply even while instance operations are running (use only if the journal is stale)', false)
   .action(async (opts) => {
     try {
       const check = await checkSelfUpdate({ currentVersion: MANAGER_VERSION });
@@ -154,8 +157,25 @@ program
         // the latest release could not be determined.
         return;
       }
+      // Refuse to recreate the GUI container while a mutating operation is in
+      // flight: doing so kills it half-way (this is how a half-removed plugin /
+      // half-applied update happens). `--force` is the escape for stale entries.
+      const ensureIdle = async (): Promise<boolean> => {
+        if (opts.force) return true;
+        const running = await findRunningOperations(program.opts().root as string);
+        if (running.length === 0) return true;
+        console.error('\nRefusing to self-update: instance operations are in progress.');
+        console.error('A self-update recreates the manager web container and would interrupt them,');
+        console.error('which can leave an instance half-updated (e.g. a half-removed plugin).');
+        for (const op of running) console.error(`  - ${describeRunningOperation(op)}`);
+        console.error('\nWait for them to finish and retry. If these entries are stale (a crashed');
+        console.error('manager left them behind), re-run with --force.');
+        process.exitCode = 1;
+        return false;
+      };
       if (!check.updateAvailable) {
         if (check.runtime !== 'docker') return;
+        if (!(await ensureIdle())) return;
         // The manager version is current, but the long-running GUI container
         // may still run an older image (created before the last pull) —
         // reconcile it so "self-update says up to date" implies "the GUI is
@@ -169,6 +189,7 @@ program
         }
         return;
       }
+      if (!(await ensureIdle())) return;
       console.log('\nApplying update...');
       const result = await applySelfUpdate(check);
       for (const step of result.steps) console.log(`  done    ${step}`);
@@ -1013,6 +1034,33 @@ safeMode
     try {
       await instanceSafeMode(await deps(program.opts().root as string), id, false);
       console.log(`Safe mode disabled for ${id}.`);
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+instance
+  .command('plugin-recover <id>')
+  .description('Recover a backend that crash-loops after a half-removed plugin ("Class ...Bundle not found"): boot in safe mode, finalize the pending uninstall, repair the bundle registration from the database, then verify a clean boot')
+  .option('--keep-safe-mode', 'leave safe mode enabled at the end (inspect before re-enabling plugins)', false)
+  .action(async (id: string, opts) => {
+    try {
+      const d = await deps(program.opts().root as string);
+      const res = await instancePluginRecover(d, id, {
+        log: (l) => console.log(l),
+        keepSafeMode: opts.keepSafeMode as boolean,
+      });
+      console.log(`\nPlugin recovery for ${id}:`);
+      for (const step of res.steps) console.log(`  ${step}`);
+      if (res.recovered) {
+        console.log('\nThe backend now boots cleanly with plugins enabled.');
+      } else if (res.safeModeLeftEnabled) {
+        console.log(
+          `\nThe backend is UP in safe mode (plugins disabled) but does not yet boot cleanly with plugins.\n` +
+            `Re-trigger the plugin uninstall from the CMS admin (reachable now), then run this command again,\n` +
+            `or restore a backup. When fixed, run: sh-manager instance safe-mode disable ${id}`,
+        );
+      }
     } catch (err) {
       fail(err);
     }

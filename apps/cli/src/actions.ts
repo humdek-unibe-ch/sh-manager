@@ -3761,19 +3761,136 @@ async function reconstructManifestFromState(
 // instance safe-mode (delegates to the canonical backend console command)
 // ---------------------------------------------------------------------------
 
+// The backend's safe-mode marker file: while it exists the kernel boots with
+// core bundles only (no plugins). `selfhelp:safe-mode --enable/--disable`
+// creates/removes it — but that console command cannot run when a half-removed
+// plugin makes the kernel fatal at boot ("Class ...Bundle not found"). So when
+// the console call fails we toggle the marker directly over a shell; that is the
+// one step that revives a crash-looping backend (see instancePluginRecover).
+const SAFE_MODE_MARKER = '/app/var/plugin_safe_mode.lock';
+
 // System safe mode boots the backend with core bundles only (no plugins).
 // `selfhelp:safe-mode` is the canonical command; it is a thin alias over the
 // plugin safe-mode mechanism (var/plugin_safe_mode.lock), so the legacy
-// `selfhelp:plugin:safe-mode` keeps working too.
+// `selfhelp:plugin:safe-mode` keeps working too. Resilient: if the console
+// cannot boot (a dangling plugin bundle fatals the kernel), the marker file is
+// created/removed directly so safe mode can still be toggled.
 export async function instanceSafeMode(deps: ActionDeps, instanceId: string, enable: boolean): Promise<void> {
   const paths = instancePaths(instanceId, deps.root);
-  await deps.runner.run(paths.dir, [
-    'exec',
-    '-T',
-    'backend',
-    'php',
-    'bin/console',
-    'selfhelp:safe-mode',
-    enable ? '--enable' : '--disable',
-  ]);
+  try {
+    await deps.runner.run(paths.dir, [
+      'exec',
+      '-T',
+      'backend',
+      'php',
+      'bin/console',
+      'selfhelp:safe-mode',
+      enable ? '--enable' : '--disable',
+    ]);
+  } catch {
+    await deps.runner.run(paths.dir, [
+      'exec',
+      '-T',
+      'backend',
+      'sh',
+      '-c',
+      enable ? `mkdir -p /app/var && : > ${SAFE_MODE_MARKER}` : `rm -f ${SAFE_MODE_MARKER}`,
+    ]);
+  }
+}
+
+export interface PluginRecoverResult {
+  /** Ordered, human-readable record of what the recovery did. */
+  steps: string[];
+  /** Per-operation outcomes of the drained plugin operations (if any). */
+  drained: Awaited<ReturnType<typeof drainInstancePluginOperations>>['outcomes'];
+  /** True when the backend booted cleanly (plugins on) at the end. */
+  recovered: boolean;
+  /** True when safe mode was deliberately left enabled (recovery incomplete). */
+  safeModeLeftEnabled: boolean;
+}
+
+/**
+ * Recover a backend that crash-loops because a plugin was only half-removed:
+ * the generated bundles file still registers the plugin's bundle but its classes
+ * are gone, so the Symfony kernel fatals with `Class "...Bundle" not found` on
+ * EVERY request — and `bin/console` cannot boot either. This is the state left
+ * when a plugin uninstall is interrupted (e.g. the manager was self-updated
+ * mid-drain).
+ *
+ * Flow: force SAFE MODE so the kernel boots with core bundles only (the marker
+ * is created directly when the console cannot boot — see {@link instanceSafeMode}),
+ * restart, drain the parked uninstall (`run-operation` removes the plugin row
+ * and regenerates the bundles file from the database) and reconcile with
+ * `selfhelp:plugin:repair`, then leave safe mode and PROBE a real boot. If the
+ * probe boots cleanly the instance is recovered; if it still fatals, safe mode
+ * is re-enabled so the instance stays up (plugins disabled) and the operator is
+ * told to re-trigger the uninstall from the CMS admin or restore a backup.
+ */
+export async function instancePluginRecover(
+  deps: ActionDeps,
+  instanceId: string,
+  opts: { log?: (line: string) => void; keepSafeMode?: boolean; drainOverrides?: PluginDrainOverrides } = {},
+): Promise<PluginRecoverResult> {
+  const log = (line: string): void => opts.log?.(line);
+  const paths = instancePaths(instanceId, deps.root);
+  await readManifestFriendly(deps, instanceId); // fail fast if the instance is unknown
+  const steps: string[] = [];
+  const exec = (cmd: string[]) => deps.runner.run(paths.dir, cmd);
+
+  log('Enabling safe mode so the backend boots without plugins…');
+  await instanceSafeMode(deps, instanceId, true);
+  steps.push('safe mode enabled');
+
+  log('Restarting backend in safe mode…');
+  await exec(['restart', 'backend']);
+  steps.push('backend restarted in safe mode');
+
+  log('Draining parked plugin operations (finalizes the interrupted uninstall)…');
+  const report = await drainInstancePluginOperations(deps, instanceId, { log: opts.log, ...opts.drainOverrides });
+  if (report.outcomes.length === 0) steps.push('no parked plugin operations to finalize');
+  for (const o of report.outcomes) {
+    steps.push(`plugin ${o.type} ${o.pluginId}: ${o.status}${o.detail ? ` (${o.detail})` : ''}`);
+  }
+
+  log('Reconciling the plugin bundle registration from the database (selfhelp:plugin:repair)…');
+  try {
+    await exec(['exec', '-T', 'backend', 'php', 'bin/console', 'selfhelp:plugin:repair']);
+    steps.push('selfhelp:plugin:repair done');
+  } catch (err) {
+    steps.push(`selfhelp:plugin:repair failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  if (opts.keepSafeMode) {
+    log('Leaving safe mode enabled as requested.');
+    return { steps, drained: report.outcomes, recovered: false, safeModeLeftEnabled: true };
+  }
+
+  log('Disabling safe mode and probing a clean boot…');
+  await instanceSafeMode(deps, instanceId, false);
+  steps.push('safe mode disabled');
+
+  // Probe a REAL (plugins-on) kernel boot: any console command triggers bundle
+  // registration, so a surviving dangling bundle still fatals here.
+  let recovered = false;
+  try {
+    await exec(['exec', '-T', 'backend', 'php', 'bin/console', 'about']);
+    recovered = true;
+  } catch {
+    recovered = false;
+  }
+
+  if (recovered) {
+    await exec(['restart', 'backend']);
+    steps.push('backend booted cleanly without safe mode and was restarted');
+    return { steps, drained: report.outcomes, recovered: true, safeModeLeftEnabled: false };
+  }
+
+  // Still broken (e.g. the plugin row remained because no uninstall was parked):
+  // keep the instance UP in safe mode rather than crash-looping.
+  log('Backend still fails to boot with plugins — re-enabling safe mode to keep the instance up.');
+  await instanceSafeMode(deps, instanceId, true);
+  await exec(['restart', 'backend']);
+  steps.push('backend still fatals with plugins — safe mode re-enabled to keep it up');
+  return { steps, drained: report.outcomes, recovered: false, safeModeLeftEnabled: true };
 }
