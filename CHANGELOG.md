@@ -8,7 +8,7 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `1.5.6`). Registry releases
+- **The manager tool** uses its own semver (currently `1.5.7`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
@@ -16,9 +16,20 @@ The manager has two version axes (see
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
 
-## [1.5.6] - 2026-06-16
+## [1.5.7] - 2026-06-16
 
 ### Fixed
+- **Admin/plugin actions failed with "CSRF validation failed" on production
+  domains (e.g. SurveyJS "Create survey"), while the same action worked on a
+  local Docker instance.** The generated `CORS_ALLOW_ORIGIN` allowed **only
+  localhost**, but the backend validates the browser `Origin` of state-changing
+  requests and the frontend BFF forwards the *real* origin — `http://localhost:<port>`
+  locally (allowed) versus `https://<domain>` in production (rejected). Production
+  instances now also allow their own public `https://<domain>` origin (local mode
+  keeps the strict localhost-only regex, since its origin already is localhost).
+  Apply to an existing instance by regenerating its `.env` — re-apply the address
+  (`instance set-address <id> --domain <same-domain>`), change an env var, or run
+  an update; `CORS_ALLOW_ORIGIN` stays operator-overridable. New env tests.
 - **"Could not read logs for mailpit … no such service: mailpit" confused
   operators trying to send real mail.** The log picker offered **Mailpit** for
   every instance, but Mailpit is the bundled local **test mailbox** that only
@@ -50,9 +61,14 @@ A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instanc
   cannot restart itself).
 
 ### Documentation
-- Troubleshooting gains **"Sending email / Mailpit vs a real SMTP relay"** and
-  **"Redis logs 'Memory overcommit must be enabled'"** sections; the reverse-proxy
-  runbook's old-GUI section now covers the SSH tunnel and the self-restart caveat.
+- Troubleshooting gains **"Sending email / Mailpit vs a real SMTP relay"**,
+  **"Redis logs 'Memory overcommit must be enabled'"**, **"Admin/plugin action
+  fails with 'CSRF validation failed' only on the live domain"**, and
+  **"Frontend logs `getaddrinfo ENOTFOUND backend`"** (the backend is
+  down/restarting, not a frontend bug) sections. The old-GUI guidance now adds the
+  **`reinstall`** escalation for a stale container/image and clarifies that the
+  dashboard Manager-card version reflects the *running* build. The reverse-proxy
+  runbook's old-GUI section covers the SSH tunnel and the self-restart caveat.
 
 ## [1.5.5] - 2026-06-16
 

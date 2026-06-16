@@ -102,6 +102,48 @@ export function buildInstanceRouting(input: InstanceEnvInput): InstanceRouting {
   };
 }
 
+/** Escapes a string so it can be embedded literally inside a regular expression. */
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Regex alternative matching any loopback origin (localhost/127.0.0.1, any port). */
+const LOCALHOST_ORIGIN_PATTERN = 'https?://(localhost|127\\.0\\.0\\.1)(:[0-9]+)?';
+
+/**
+ * The browser Origins the backend accepts (used for CORS AND the backend's
+ * Origin-based CSRF / cross-origin check).
+ *
+ * Localhost tooling is always allowed. A **production** instance must ALSO allow
+ * its own public origin (`https://<domain>`): the admin UI and plugins issue
+ * state-changing requests carrying the real site's `Origin`, and a backend that
+ * only trusts localhost rejects them as a failed origin/CSRF check. That is the
+ * "works on a local Docker instance, fails on the deployed domain" report — e.g.
+ * SurveyJS **Create survey -> "CSRF validation failed"**. Local mode keeps the
+ * strict localhost-only regex (its public origin already IS localhost).
+ *
+ * The value is single-quoted so neither compose's `${…}` interpolation nor
+ * Symfony dotenv eats the trailing `$` anchor.
+ */
+function corsAllowOriginValue(input: InstanceEnvInput): string {
+  const alternatives = [LOCALHOST_ORIGIN_PATTERN];
+  if (input.mode === 'production') {
+    let origin: string | null = null;
+    try {
+      origin = new URL(input.publicFrontendUrl).origin;
+    } catch {
+      origin = null;
+    }
+    // Add the public origin unless it is already a loopback form (covered above).
+    if (origin && !/^https?:\/\/(localhost|127\.0\.0\.1)(:|$)/.test(origin)) {
+      alternatives.push(escapeRegExp(origin));
+    }
+  }
+  const joined = alternatives.join('|');
+  const body = alternatives.length > 1 ? `(${joined})` : joined;
+  return `'^${body}$'`;
+}
+
 /**
  * Builds the non-secret env map. Secrets live in restricted secret files.
  *
@@ -167,12 +209,12 @@ export function buildInstanceEnv(input: InstanceEnvInput): Record<string, string
     // default exists for either, so they must be provided here.
     JWT_TOKEN_TTL: '3600',
     JWT_REFRESH_TOKEN_TTL: '2592000',
-    // Browser traffic reaches the API through the frontend BFF (same origin);
-    // direct cross-origin browser access stays locked to localhost tooling.
-    // Single-quoted so BOTH parsers (compose env_file + Symfony dotenv) take
-    // the regex literally — unquoted, the trailing `$` would be eaten by
-    // compose's `${…}` interpolation.
-    CORS_ALLOW_ORIGIN: "'^https?://(localhost|127\\.0\\.0\\.1)(:[0-9]+)?$'",
+    // Browser traffic normally reaches the API through the frontend BFF (same
+    // origin), but the backend ALSO validates the request Origin for CORS and
+    // CSRF. Localhost tooling is always allowed; a production instance also
+    // allows its own public origin so admin/plugin requests from the real domain
+    // are not rejected as a failed origin/CSRF check (see corsAllowOriginValue).
+    CORS_ALLOW_ORIGIN: corsAllowOriginValue(input),
     // Local mode ships a Mailpit container under this service name. An
     // operator-configured SMTP DSN may carry credentials, so it NEVER lands
     // here: it is written to secrets.env (0600), which compose loads after

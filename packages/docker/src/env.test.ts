@@ -99,8 +99,23 @@ describe('BFF URL invariant', () => {
     expect(env.CORS_ALLOW_ORIGIN).toBeTruthy();
   });
 
-  it('keeps the CORS regex single-quoted so compose interpolation cannot eat the `$` anchor', () => {
+  it('allows the public origin (plus localhost) for the backend CORS/CSRF origin check in production', () => {
+    // Regression: a production instance whose backend trusted ONLY localhost
+    // rejected every state-changing admin/plugin request coming from the real
+    // domain as a failed origin/CSRF check — the "works on a local Docker
+    // instance, fails on the deployed domain" report (e.g. SurveyJS
+    // "Create survey" -> "CSRF validation failed"). The public https origin must
+    // be allowed too. Still single-quoted so compose/dotenv cannot eat the `$`.
     const dotenv = renderDotEnv(buildInstanceEnv(input));
+    expect(dotenv).toContain(
+      "CORS_ALLOW_ORIGIN='^(https?://(localhost|127\\.0\\.0\\.1)(:[0-9]+)?|https://website1\\.example\\.ch)$'",
+    );
+  });
+
+  it('keeps the strict localhost-only CORS regex for local mode (its origin already IS localhost)', () => {
+    const dotenv = renderDotEnv(
+      buildInstanceEnv({ ...input, mode: 'local', publicFrontendUrl: 'http://localhost:9123' }),
+    );
     expect(dotenv).toContain("CORS_ALLOW_ORIGIN='^https?://(localhost|127\\.0\\.0\\.1)(:[0-9]+)?$'");
   });
 });

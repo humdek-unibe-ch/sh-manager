@@ -257,6 +257,64 @@ echo 'vm.overcommit_memory = 1' | sudo tee /etc/sysctl.d/99-selfhelp-redis.conf 
 same fix when it detects `vm.overcommit_memory=0`. No restart of the instances is
 required; the warning stops the next time Redis starts.
 
+## Admin/plugin action fails with "CSRF validation failed" only on the live domain
+
+Symptom: an admin or plugin action that **works on a local Docker instance**
+fails on the **deployed production domain** with `CSRF validation failed` — e.g.
+the SurveyJS plugin's **New survey → Create** dialog.
+
+Cause: the backend validates the browser **Origin** of state-changing requests.
+The frontend BFF forwards the real browser Origin to the backend, so locally that
+is `http://localhost:<port>` (allowed) but in production it is
+`https://<your-domain>`. Managers **before `1.5.6`** generated a
+`CORS_ALLOW_ORIGIN` that allowed **only localhost**, so the backend rejected
+every admin/plugin POST from the real domain as a failed origin/CSRF check.
+
+Fix:
+
+1. Update the manager to **`1.5.6+`** (the generated `CORS_ALLOW_ORIGIN` now
+   includes the instance's own `https://<domain>` for production instances).
+2. Regenerate the instance `.env` so it picks up the corrected value, then it
+   restarts automatically. The simplest no-op repair is to re-apply the current
+   address:
+
+   ```bash
+   sh-manager instance set-address <id> --domain <your-domain>   # same domain is a valid repair
+   ```
+
+   (An `instance update`, an env change, or `set-address` all regenerate `.env`.)
+3. Verify in the manager web console → instance → **Environment**: the
+   `CORS_ALLOW_ORIGIN` value now contains your domain. As a manual override you
+   can also set `CORS_ALLOW_ORIGIN` there to a regex covering your origin(s).
+
+If `CORS_ALLOW_ORIGIN` already includes your domain and CSRF still fails, the
+cause is no longer manager-side — check that the frontend forwards the session /
+CSRF cookie and the `Origin` header to the backend (a frontend/backend concern).
+
+## Frontend logs `getaddrinfo ENOTFOUND backend` / `fetch failed`
+
+The frontend (Next.js) reaches the backend over the private instance network at
+`http://backend:8080`. `getaddrinfo ENOTFOUND backend` means Docker's DNS has **no
+running `backend` container** to resolve at that moment; `failed to pipe response`
+/ `UND_ERR_SOCKET other side closed` mean a connection dropped mid-request. Both
+point at the **backend container being down or restarting**, not at the frontend.
+
+- A short burst right after installing/updating a plugin or running an update is
+  expected — the backend is recreated and the frontend retries. It clears on its
+  own once the backend is healthy again.
+- A continuous flood means the backend is **crash-looping**. Check it:
+
+  ```bash
+  sh-manager instance health <id>
+  docker compose -f <root>/instances/<id>/compose.yaml ps
+  docker compose -f <root>/instances/<id>/compose.yaml logs --tail=200 backend
+  ```
+
+  Read the backend log for the real error (a bad plugin, a failed migration, or
+  an out-of-memory kill if a tight `memory` limit was set). If a plugin broke it,
+  use [safe mode](safe-mode-and-recovery.md); if an update broke it, it should
+  have rolled back — see [an update is blocked or failed](#an-update-is-blocked-or-failed).
+
 ## Can't reach the web UI / BFF
 
 - The BFF binds to **`127.0.0.1:8765`** by default and refuses a non-loopback
@@ -283,6 +341,16 @@ required; the warning stops the next time Redis starts.
     `sh-manager self-update`; this recreates `sh-manager-web` on the new image. A
     `self-update` run *inside* the `sh-manager-web` container cannot restart
     itself — it prints a note telling you to restart it (`./shm.sh up`).
+  - **Still old after a reload?** Then the running container is on an **old
+    image**, and no browser cache-clearing can fix it. Force a clean recreate:
+    `./shm.sh reinstall` (`.\shm.ps1 reinstall`) — it stops the GUI, `docker pull`s
+    the image fresh, and starts it again. Confirm the version on the dashboard's
+    **Manager** card matches what you expect (it reads the *running* build, so a
+    wrong number here means the container, not the browser, is stale).
+  - **Expecting changes that are not released yet?** The dashboard version is the
+    source of truth: features land in the image only once that version is built
+    and published (or, in a source checkout, after `npm run build`). A version
+    bump in the changelog alone does not change a running image.
   - Make sure only **one** `sh-manager web` process is running (a leftover
     container still bound to `127.0.0.1:8765` keeps serving the old version).
   - See [reverse proxy & Apache](reverse-proxy-and-apache.md#i-updated-the-manager-but-still-see-the-old-gui).
