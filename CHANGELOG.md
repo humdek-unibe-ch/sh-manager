@@ -8,13 +8,64 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `1.5.7`). Registry releases
+- **The manager tool** uses its own semver (currently `1.5.8`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
   **`0.x`** line (core, frontend, scheduler, worker — all `0.1.0`).
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
+
+## [1.5.8] - 2026-06-16
+
+### Added
+- **Recover a backend that crash-loops after a half-removed plugin — new
+  `sh-manager instance plugin-recover <id>`.** When a plugin uninstall is
+  interrupted (e.g. the manager is self-updated mid-drain), the generated bundles
+  file still registers the plugin's bundle while its classes are gone, so the
+  Symfony kernel fatals with `Class "...Bundle" not found` on **every** request
+  and `bin/console` itself cannot boot. The command forces **safe mode** so the
+  kernel boots with core bundles only (creating the safe-mode marker directly
+  over a shell when the console can't boot), restarts, finalizes the parked
+  uninstall and reconciles the bundle registration from the database
+  (`selfhelp:plugin:repair`), then leaves safe mode and **probes a real boot**.
+  If it still fatals it re-enables safe mode to keep the instance UP and tells you
+  to re-trigger the uninstall from the CMS admin or restore a backup.
+  `--keep-safe-mode` stops after the repair. New tests.
+- **`instance safe-mode enable` now works even when the kernel is dead.** Enabling
+  safe mode falls back to creating the marker file directly when `bin/console`
+  cannot boot, so a crash-looping backend can be rescued (this is what
+  `plugin-recover` relies on).
+- **Plugin recovery is now in the web GUI.** The instance detail page has
+  **Safe mode…** (a dialog with explicit *Enable* and *Disable* options) and
+  **Plugin recover…** buttons next to the lifecycle controls. They post to new BFF
+  routes (`POST /api/instances/:id/safe-mode` with `{ enable }` and
+  `POST /api/instances/:id/plugin-recover`), run through the operation journal as
+  `instance_safe_mode` / `instance_plugin_recover`, and stream live progress over
+  SSE like every other instance operation — so an operator can recover a
+  crash-looping backend without SSHing in. New BFF + UI tests.
+- **Email notification when a release is published.** The `manager-release`
+  workflow emails a maintainer once a tag's image is built, scanned, signed and
+  the GitHub release is created. It is best-effort and opt-in: it runs only when
+  the `NOTIFICATION_EMAIL` secret is set (with `MAIL_SERVER`/`MAIL_PORT`/
+  `MAIL_USERNAME`/`MAIL_PASSWORD`), and `continue-on-error` keeps an SMTP hiccup
+  from failing an already-published release. The mail links to the release and
+  commit and carries no secrets.
+
+### Changed
+- **`sh-manager self-update` refuses to run while an instance operation is in
+  progress.** A self-update recreates the manager web container; doing that
+  mid-operation is exactly how a half-removed plugin / half-applied update happens
+  (the trigger for this release). The updater now reads the operation journal and
+  blocks with the list of running operations; `--force` overrides for genuinely
+  stale entries (e.g. left by a crashed manager). New tests.
+
+### Documentation
+- Troubleshooting + the safe-mode/recovery runbook document the half-removed-plugin
+  recovery (`instance plugin-recover`) and the self-update concurrency guard; the
+  update runbook notes that self-update waits for in-flight operations.
+- The release/publishing runbook documents the optional release-notification email
+  and the repository secrets it needs.
 
 ## [1.5.7] - 2026-06-16
 
