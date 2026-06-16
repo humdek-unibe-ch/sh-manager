@@ -144,6 +144,11 @@ Backups, images, logs, and volumes accumulate. `sh-manager doctor` flags low dis
 - **MySQL major-version upgrade required:** approve the one-way upgrade with
   `--approve-mysql-major` only after a verified backup. Detail:
   [update](update.md).
+- **Manager `self-update` says "Refusing to self-update: instance operations are
+  in progress":** an instance install/update/backup/**plugin drain** is still
+  running, and recreating the manager container now would interrupt it (which can
+  leave a half-removed plugin). Wait for it to finish and retry. If the listed
+  entries are stale (left by a crashed manager), re-run `self-update --force`.
 
 ## The site returns 503 (maintenance) and won't clear
 
@@ -314,6 +319,35 @@ point at the **backend container being down or restarting**, not at the frontend
   an out-of-memory kill if a tight `memory` limit was set). If a plugin broke it,
   use [safe mode](safe-mode-and-recovery.md); if an update broke it, it should
   have rolled back — see [an update is blocked or failed](#an-update-is-blocked-or-failed).
+
+## Backend crash-loops: `Class "...Bundle" not found` (half-removed plugin)
+
+Symptom: the backend logs, on a loop, e.g.:
+
+```text
+[critical] Uncaught Error: Class "Humdek\SurveyJsBundle\HumdekSurveyJsBundle" not found
+```
+
+Cause: a plugin uninstall was **interrupted** — most often a `self-update` ran at
+the same time and recreated containers mid-drain. The plugin package was removed
+but the generated bundle registration still names it, so the Symfony kernel
+cannot boot at all (even `bin/console` fatals). The instance 500s every request.
+
+Fix (manager `1.5.8+`):
+
+```bash
+sh-manager instance plugin-recover <id>
+```
+
+It boots the backend in safe mode (creating the safe-mode marker directly, since
+the kernel is dead), finalizes the pending uninstall, repairs the bundle
+registration from the database, then verifies a clean boot. If it cannot fully
+clear it, it keeps the instance UP in safe mode and tells you to re-trigger the
+uninstall from the CMS admin or restore a backup. Details:
+[safe mode & recovery](safe-mode-and-recovery.md#recover-a-backend-that-crash-loops-after-a-half-removed-plugin).
+
+Prevention: since `1.5.8`, `self-update` refuses to run while an instance
+operation (install/update/backup/**plugin drain**) is in progress — see below.
 
 ## Can't reach the web UI / BFF
 

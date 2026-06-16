@@ -2,8 +2,8 @@
 
 Audience: Server operators
 Status: Active
-Applies to: `sh-manager` (manager tool `0.1.6+`)
-Last verified: 2026-06-12
+Applies to: `sh-manager` (manager tool `0.1.6+`; `instance plugin-recover` needs `1.5.8+`)
+Last verified: 2026-06-16
 Source of truth: `apps/cli/src/bin.ts`, `apps/cli/src/actions.ts`, `packages/core/src`
 
 When a plugin or a change breaks an instance, **plugin safe-mode** boots the CMS
@@ -50,9 +50,45 @@ re-registers the instance in the inventory if it dropped out. It is a no-op on
 a healthy instance and refuses fully deleted ones. It also backfills the
 per-instance manager token used for CMS-requested updates.
 
+## Recover a backend that crash-loops after a half-removed plugin
+
+Symptom: the backend logs `Uncaught Error: Class "…\…Bundle" not found` on a
+loop and every request 500s. This happens when a plugin uninstall was
+**interrupted** (often: a `self-update` ran at the same time and recreated
+containers mid-drain). The plugin's package was removed, but the generated bundle
+registration still names it — so the Symfony kernel cannot boot, and `bin/console`
+itself fatals (you cannot fix it with a normal console command).
+
+```bash
+sh-manager instance plugin-recover website1
+```
+
+What it does:
+
+1. **Forces safe mode** so the kernel boots with core bundles only. Because the
+   kernel is dead, it creates the safe-mode marker **directly** (no `bin/console`).
+2. **Restarts** the backend (now boots, plugins off — the crash loop stops).
+3. **Finalizes the parked uninstall** (`run-operation` removes the plugin row and
+   regenerates the bundle registration) and **reconciles** it from the database
+   (`selfhelp:plugin:repair`).
+4. **Leaves safe mode and probes a real boot.** If it boots cleanly, recovery is
+   complete (plugins on). If it still fatals, safe mode is **re-enabled** so the
+   instance stays UP, and you are told to re-trigger the uninstall from the CMS
+   admin (reachable now) and run the command again, or restore a backup.
+
+Use `--keep-safe-mode` to stop after the repair (inspect before re-enabling
+plugins). When fully fixed, `sh-manager instance safe-mode disable website1`.
+
+> Prevention: since `1.5.8` `sh-manager self-update` refuses to run while an
+> instance operation (install/update/backup/**plugin drain**) is in progress, so
+> an update can no longer interrupt a plugin uninstall. Let operations finish, or
+> override with `self-update --force` only when the operation journal is stale.
+
 ## Recovery playbook
 
-1. **Stabilise**: if a plugin is suspected, `safe-mode enable` the instance.
+1. **Stabilise**: if a plugin is suspected, `safe-mode enable` the instance. If
+   the backend crash-loops with `Class "…Bundle" not found` (a half-removed
+   plugin), run `instance plugin-recover <id>` (above).
 2. **Diagnose**: run `doctor` and `instance health`; if state files are damaged,
    run `instance repair`; collect a support bundle if you need help.
 3. **Roll back a bad update**: failed updates roll back automatically. If a change
