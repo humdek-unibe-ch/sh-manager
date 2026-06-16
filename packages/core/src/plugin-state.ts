@@ -64,7 +64,13 @@ export function pluginStateSnapshotPath(coreVersion: string): string {
 export interface PendingPluginOperation {
   operationId: number;
   pluginId: string;
-  type: 'install' | 'update' | 'uninstall';
+  /**
+   * `purge` is uninstall + data removal: the composer side is identical to an
+   * uninstall (remove the package); the extra data deletion is the backend's
+   * own finalize step. We therefore treat it like `uninstall` here but keep the
+   * distinct label so operators see "purge" in the manager (CMS `Purge` action).
+   */
+  type: 'install' | 'update' | 'uninstall' | 'purge';
   /** Composer package coordinates from the operation's resolved source. */
   package: string | null;
   version: string | null;
@@ -317,7 +323,7 @@ export async function finalizePluginOperations(
 
   for (const op of input.operations) {
     try {
-      if (op.type === 'uninstall') {
+      if (op.type === 'uninstall' || op.type === 'purge') {
         await composerRemove(deps, op);
       } else {
         await composerRequire(deps, op);

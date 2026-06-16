@@ -396,6 +396,12 @@ export function createManagerServer(options: ManagerServerOptions): ManagerServe
       sendJson(res, 200, { backups: await im.instances.backups(instanceId) });
       return true;
     }
+    if (rest === '/plugins' && ctx.method === 'GET') {
+      // Live installed-plugin read; `plugins: null` => instance down/unreachable
+      // (the UI then falls back to the manifest's recorded list).
+      sendJson(res, 200, { plugins: await im.instances.livePlugins(instanceId) });
+      return true;
+    }
     if (rest === '/backup-schedule' && ctx.method === 'GET') {
       sendJson(res, 200, await im.instances.backupSchedule(instanceId));
       return true;

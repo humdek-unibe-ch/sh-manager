@@ -236,6 +236,12 @@ export interface UpdateExecutionDeps {
   exitMaintenance?: () => Promise<void>;
   /** Stop the given services (`docker compose stop <names>`) without removing them or any volume. */
   stopServices?: (names: readonly string[]) => Promise<void>;
+  /**
+   * Live progress hook, called the moment each step is recorded (not at the end)
+   * so the manager journal can advance its phase + stream the log in real time.
+   * It must never break the update: a throwing hook is swallowed.
+   */
+  onStep?: (step: UpdateStepResult) => void | Promise<void>;
   now?: () => string;
 }
 
@@ -288,9 +294,9 @@ export async function executeUpdate(
     const b = await deps.takeBackup();
     backupId = b.backupId;
     report.backupId = backupId;
-    steps.push({ name: 'backup', status: 'done', detail: backupId });
+    await emitStep(steps, deps.onStep, { name: 'backup', status: 'done', detail: backupId });
   } catch (err) {
-    steps.push({ name: 'backup', status: 'failed', detail: errMessage(err) });
+    await emitStep(steps, deps.onStep, { name: 'backup', status: 'failed', detail: errMessage(err) });
     return report;
   }
 
@@ -298,9 +304,9 @@ export async function executeUpdate(
   // capture the snapshot we cannot guarantee a config rollback, so abort now.
   try {
     await deps.snapshot();
-    steps.push({ name: 'snapshot', status: 'done' });
+    await emitStep(steps, deps.onStep, { name: 'snapshot', status: 'done' });
   } catch (err) {
-    steps.push({ name: 'snapshot', status: 'failed', detail: errMessage(err) });
+    await emitStep(steps, deps.onStep, { name: 'snapshot', status: 'failed', detail: errMessage(err) });
     return report;
   }
 
@@ -310,14 +316,14 @@ export async function executeUpdate(
   try {
     if (deps.enterMaintenance) {
       await deps.enterMaintenance();
-      steps.push({ name: 'maintenance-enter', status: 'done' });
+      await emitStep(steps, deps.onStep, { name: 'maintenance-enter', status: 'done' });
     }
     if (deps.stopServices) {
       await deps.stopServices(MAINTENANCE_STOP_SERVICES);
-      steps.push({ name: 'stop-services', status: 'done', detail: MAINTENANCE_STOP_SERVICES.join(',') });
+      await emitStep(steps, deps.onStep, { name: 'stop-services', status: 'done', detail: MAINTENANCE_STOP_SERVICES.join(',') });
     }
   } catch (err) {
-    steps.push({ name: 'maintenance-enter', status: 'failed', detail: errMessage(err) });
+    await emitStep(steps, deps.onStep, { name: 'maintenance-enter', status: 'failed', detail: errMessage(err) });
     await safeExitMaintenance(deps);
     return report;
   }
@@ -327,34 +333,34 @@ export async function executeUpdate(
 
   try {
     await deps.runner.run(deps.instanceDir, composeCommands.pull());
-    steps.push({ name: 'pull', status: 'done' });
+    await emitStep(steps, deps.onStep, { name: 'pull', status: 'done' });
 
     await deps.applyArtifacts();
-    steps.push({ name: 'apply-artifacts', status: 'done' });
+    await emitStep(steps, deps.onStep, { name: 'apply-artifacts', status: 'done' });
 
     await deps.runner.run(deps.instanceDir, composeCommands.upDetached());
-    steps.push({ name: 'up', status: 'done' });
+    await emitStep(steps, deps.onStep, { name: 'up', status: 'done' });
 
     // `up` recreated the backend (new image) AND restarted the frontend, so the
     // maintenance lock (ephemeral container fs) is gone. Re-assert it on the
     // fresh backend so the migrate + health window is still gated.
     if (deps.enterMaintenance) {
       await deps.enterMaintenance();
-      steps.push({ name: 'maintenance-reassert', status: 'done' });
+      await emitStep(steps, deps.onStep, { name: 'maintenance-reassert', status: 'done' });
     }
 
     migrationsAttempted = true;
     await deps.runMigrations();
-    steps.push({ name: 'migrate', status: 'done' });
+    await emitStep(steps, deps.onStep, { name: 'migrate', status: 'done' });
 
     if (deps.restorePlugins) {
       await deps.restorePlugins();
-      steps.push({ name: 'plugins', status: 'done' });
+      await emitStep(steps, deps.onStep, { name: 'plugins', status: 'done' });
     }
 
     const health = await deps.checkHealth();
     if (!isHealthy(health)) {
-      steps.push({ name: 'health', status: 'failed', detail: `overall=${health.overall}` });
+      await emitStep(steps, deps.onStep, { name: 'health', status: 'failed', detail: `overall=${health.overall}` });
       await runRollback(deps, steps, report, {
         backupId,
         reason: `health ${health.overall}`,
@@ -363,18 +369,18 @@ export async function executeUpdate(
       });
       return report;
     }
-    steps.push({ name: 'health', status: 'done', detail: 'healthy' });
+    await emitStep(steps, deps.onStep, { name: 'health', status: 'done', detail: 'healthy' });
 
     // Leave maintenance only after health passes.
     if (deps.exitMaintenance) {
       await deps.exitMaintenance();
-      steps.push({ name: 'maintenance-exit', status: 'done' });
+      await emitStep(steps, deps.onStep, { name: 'maintenance-exit', status: 'done' });
     }
 
     report.ok = true;
     return report;
   } catch (err) {
-    steps.push({ name: 'update', status: 'failed', detail: errMessage(err) });
+    await emitStep(steps, deps.onStep, { name: 'update', status: 'failed', detail: errMessage(err) });
     await runRollback(deps, steps, report, {
       backupId,
       reason: errMessage(err),
@@ -402,16 +408,16 @@ async function runRollback(
     report.rolledBack = true;
     if (ctx.migrated && ctx.destructive) {
       report.requiresManualRestore = true;
-      steps.push({
+      await emitStep(steps, deps.onStep, {
         name: 'rollback',
         status: 'done',
         detail: `config restored; destructive migrations ran - restore backup ${ctx.backupId} to recover data`,
       });
     } else {
-      steps.push({ name: 'rollback', status: 'done', detail: ctx.backupId });
+      await emitStep(steps, deps.onStep, { name: 'rollback', status: 'done', detail: ctx.backupId });
     }
   } catch (rollbackErr) {
-    steps.push({ name: 'rollback', status: 'failed', detail: errMessage(rollbackErr) });
+    await emitStep(steps, deps.onStep, { name: 'rollback', status: 'failed', detail: errMessage(rollbackErr) });
   } finally {
     // The restored stack may reuse the same backend container (unchanged image),
     // which could still hold the maintenance lock. Always clear it so a failed
@@ -432,6 +438,26 @@ async function safeExitMaintenance(deps: UpdateExecutionDeps): Promise<void> {
 
 function errMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * Record a step into the report AND notify the live-progress hook in one place,
+ * so callers (the manager journal) see the step the instant it happens instead
+ * of only in the final report. The hook is best-effort: a failure there must
+ * never abort or alter the operation.
+ */
+async function emitStep(
+  steps: UpdateStepResult[],
+  onStep: ((step: UpdateStepResult) => void | Promise<void>) | undefined,
+  step: UpdateStepResult,
+): Promise<void> {
+  steps.push(step);
+  if (!onStep) return;
+  try {
+    await onStep(step);
+  } catch {
+    // Progress reporting must never break the update.
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -608,6 +634,8 @@ export interface FrontendUpdateExecutionDeps {
   checkHealth: () => Promise<HealthReport>;
   /** Restore the snapshot config and recreate the previous frontend container. */
   rollback: (reason: string) => Promise<void>;
+  /** Live progress hook (see {@link UpdateExecutionDeps.onStep}); best-effort. */
+  onStep?: (step: UpdateStepResult) => void | Promise<void>;
   now?: () => string;
 }
 
@@ -646,18 +674,18 @@ export async function executeFrontendUpdate(
   // Snapshot first — before any mutation. A failure here aborts without rollback.
   try {
     await deps.snapshot();
-    steps.push({ name: 'snapshot', status: 'done' });
+    await emitStep(steps, deps.onStep, { name: 'snapshot', status: 'done' });
   } catch (err) {
-    steps.push({ name: 'snapshot', status: 'failed', detail: errMessage(err) });
+    await emitStep(steps, deps.onStep, { name: 'snapshot', status: 'failed', detail: errMessage(err) });
     return report;
   }
 
   try {
     await deps.applyArtifacts();
-    steps.push({ name: 'apply-artifacts', status: 'done' });
+    await emitStep(steps, deps.onStep, { name: 'apply-artifacts', status: 'done' });
 
     await deps.runner.run(deps.instanceDir, composeCommands.pullService(FRONTEND_UPDATE_SERVICE));
-    steps.push({ name: 'pull', status: 'done', detail: plan.targetFrontendVersion });
+    await emitStep(steps, deps.onStep, { name: 'pull', status: 'done', detail: plan.targetFrontendVersion });
 
     // `up -d` recreates the frontend (new image) AND any app service whose env
     // changed — notably the backend, which reads SELFHELP_FRONTEND_VERSION. A
@@ -665,27 +693,27 @@ export async function executeFrontendUpdate(
     // the CMS system page keeps reporting the previous frontend version even
     // though the container was swapped. Recreating refreshes that stamp.
     await deps.runner.run(deps.instanceDir, composeCommands.upDetached());
-    steps.push({ name: 'up', status: 'done', detail: FRONTEND_UPDATE_SERVICE });
+    await emitStep(steps, deps.onStep, { name: 'up', status: 'done', detail: FRONTEND_UPDATE_SERVICE });
 
     // Recreating the Symfony containers drops composer-installed plugin vendor/
     // from their writable layer; re-extract the snapshot before health-checking.
     if (deps.restorePluginState) {
       await deps.restorePluginState();
-      steps.push({ name: 'plugins', status: 'done' });
+      await emitStep(steps, deps.onStep, { name: 'plugins', status: 'done' });
     }
 
     const health = await deps.checkHealth();
     if (!isHealthy(health)) {
-      steps.push({ name: 'health', status: 'failed', detail: `overall=${health.overall}` });
+      await emitStep(steps, deps.onStep, { name: 'health', status: 'failed', detail: `overall=${health.overall}` });
       await runFrontendRollback(deps, steps, report, `health ${health.overall}`);
       return report;
     }
-    steps.push({ name: 'health', status: 'done', detail: 'healthy' });
+    await emitStep(steps, deps.onStep, { name: 'health', status: 'done', detail: 'healthy' });
 
     report.ok = true;
     return report;
   } catch (err) {
-    steps.push({ name: 'update', status: 'failed', detail: errMessage(err) });
+    await emitStep(steps, deps.onStep, { name: 'update', status: 'failed', detail: errMessage(err) });
     await runFrontendRollback(deps, steps, report, errMessage(err));
     return report;
   }
@@ -700,8 +728,8 @@ async function runFrontendRollback(
   try {
     await deps.rollback(reason);
     report.rolledBack = true;
-    steps.push({ name: 'rollback', status: 'done', detail: reason });
+    await emitStep(steps, deps.onStep, { name: 'rollback', status: 'done', detail: reason });
   } catch (rollbackErr) {
-    steps.push({ name: 'rollback', status: 'failed', detail: errMessage(rollbackErr) });
+    await emitStep(steps, deps.onStep, { name: 'rollback', status: 'failed', detail: errMessage(rollbackErr) });
   }
 }

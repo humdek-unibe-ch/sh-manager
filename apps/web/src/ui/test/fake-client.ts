@@ -343,6 +343,11 @@ export function makeFakeClient(opts: FakeClientOptions = {}): ApiClient {
     async listBackups(instanceId) {
       return backups[instanceId] ?? [];
     },
+    async listInstancePlugins() {
+      // Tests that care override this; default mirrors a down/unknown instance
+      // so the UI falls back to the manifest's recorded plugin list.
+      return null;
+    },
     async getBackupSchedule(instanceId) {
       if (!instances.some((i) => i.instanceId === instanceId)) {
         throw new ApiError(404, `Instance "${instanceId}" not found.`);

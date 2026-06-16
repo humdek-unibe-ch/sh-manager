@@ -37,6 +37,7 @@ export function CloneInstanceDialog({
 }: CloneInstanceDialogProps): JSX.Element {
   const effectiveMode: 'local' | 'production' = sourceMode === 'local' ? 'local' : 'production';
   const [targetId, setTargetId] = useState('');
+  const [displayName, setDisplayName] = useState('');
   const [targetDomain, setTargetDomain] = useState('');
   const [localPort, setLocalPort] = useState('');
 
@@ -84,6 +85,14 @@ export function CloneInstanceDialog({
           {...(idError ? { error: idError } : {})}
         />
 
+        <TextField
+          label="Display name"
+          value={displayName}
+          onChange={setDisplayName}
+          placeholder={targetId || `${sourceInstanceId}-copy`}
+          help="Shown in the manager. Defaults to the new instance id — the clone is named after itself, not the source."
+        />
+
         {effectiveMode === 'production' ? (
           <TextField
             label="New domain"
@@ -124,6 +133,7 @@ export function CloneInstanceDialog({
             onClick={() =>
               start.mutate({
                 targetInstanceId: targetId,
+                ...(displayName.trim() !== '' ? { displayName: displayName.trim() } : {}),
                 ...(effectiveMode === 'production' ? { targetDomain } : { targetLocalPort: portNumber }),
               })
             }

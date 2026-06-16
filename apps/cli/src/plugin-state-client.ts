@@ -101,7 +101,13 @@ function toPendingOperation(dto: PendingRowDto): PendingPluginOperation {
   const repository =
     dto.repository ?? (dto.archiveBackendDir ? { type: 'path', url: dto.archiveBackendDir } : null);
   const type: PendingPluginOperation['type'] =
-    dto.type === 'uninstall' ? 'uninstall' : dto.type === 'update' ? 'update' : 'install';
+    dto.type === 'uninstall'
+      ? 'uninstall'
+      : dto.type === 'purge'
+        ? 'purge'
+        : dto.type === 'update'
+          ? 'update'
+          : 'install';
   return {
     operationId: dto.operationId,
     pluginId: dto.pluginId,

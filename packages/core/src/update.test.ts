@@ -150,6 +150,42 @@ describe('executeUpdate', () => {
     expect(runner.calls.map((c) => c.args[0])).toEqual(['pull', 'up']);
   });
 
+  it('streams each step live through onStep, in order, matching the final report', async () => {
+    // Regression for the "I only saw the first step, then everything finished at
+    // once" report: the manager journal advances per step via this hook, so it
+    // must fire as each step happens (not only in the final report).
+    const seen: string[] = [];
+    const report = await executeUpdate(approved, okPlan(), {
+      runner: new RecordingComposeRunner(), instanceDir: '/tmp/website1',
+      takeBackup: async () => ({ backupId: 'backup-1' }),
+      snapshot: async () => undefined,
+      applyArtifacts: async () => undefined,
+      runMigrations: async () => undefined,
+      restorePlugins: async () => undefined,
+      checkHealth: async () => healthy,
+      rollback: async () => undefined,
+      onStep: (step) => { seen.push(step.name); },
+    });
+    expect(report.ok).toBe(true);
+    // The hook saw the milestones live, and the live sequence equals the report.
+    expect(seen).toEqual(['backup', 'snapshot', 'pull', 'apply-artifacts', 'up', 'migrate', 'plugins', 'health']);
+    expect(seen).toEqual(report.steps.map((s) => s.name));
+  });
+
+  it('never lets a throwing onStep hook break the update', async () => {
+    const report = await executeUpdate(approved, okPlan(), {
+      runner: new RecordingComposeRunner(), instanceDir: '/tmp/website1',
+      takeBackup: async () => ({ backupId: 'backup-1' }),
+      snapshot: async () => undefined,
+      applyArtifacts: async () => undefined,
+      runMigrations: async () => undefined,
+      checkHealth: async () => healthy,
+      rollback: async () => undefined,
+      onStep: () => { throw new Error('journal write failed'); },
+    });
+    expect(report.ok).toBe(true);
+  });
+
   it('reinstalls plugins after migrations and before the health gate, rolling back when it fails', async () => {
     // The recreated containers carry only the baked vendor state, so plugin
     // restore is part of the gated update path: health must validate the

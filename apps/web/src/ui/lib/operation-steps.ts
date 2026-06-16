@@ -51,14 +51,33 @@ const STEP_MAPS: Record<OperationKind, StepDef[]> = {
     { id: 'recreate', label: 'Recreate frontend container' },
     { id: 'health', label: 'Health check' },
   ],
-  instance_backup: [{ id: 'backup', label: 'Create backup', note: 'Database, uploads and config snapshot.' }],
+  instance_backup: [
+    { id: 'database', label: 'Dump database' },
+    { id: 'metadata', label: 'Snapshot manifest, lock & config' },
+    { id: 'volumes', label: 'Archive uploads & plugin artifacts' },
+    { id: 'manifest', label: 'Write manifest & checksums' },
+  ],
   instance_scheduled_backup: [{ id: 'scheduled backup', label: 'Run scheduled backup' }],
   instance_backup_prune: [{ id: 'prune backups', label: 'Apply retention & prune backups' }],
   instance_restore: [
     { id: 'pre-restore backup', label: 'Pre-restore safety backup' },
-    { id: 'restore', label: 'Restore snapshot', note: 'Forward-migrates if the DB head differs.' },
+    { id: 'verify', label: 'Verify backup integrity' },
+    { id: 'stop', label: 'Stop instance (volumes kept)' },
+    { id: 'volumes', label: 'Restore uploads & plugin artifacts' },
+    { id: 'database', label: 'Import database' },
+    { id: 'config', label: 'Restore configuration & inventory' },
+    { id: 'recreate', label: 'Start restored stack' },
+    { id: 'migrate', label: 'Forward-migrate if needed', note: 'Only when the DB head differs.' },
+    { id: 'health', label: 'Health check' },
   ],
-  instance_clone: [{ id: 'clone', label: 'Clone instance', note: 'Fresh secrets and a new address.' }],
+  instance_clone: [
+    { id: 'plan', label: 'Resolve & plan clone', note: 'Pin source versions; fresh secrets and a new address.' },
+    { id: 'secrets', label: 'Generate secrets & write config' },
+    { id: 'volumes', label: 'Copy uploads & plugin artifacts' },
+    { id: 'database', label: 'Copy database', note: 'Source stays running (read-only dump).' },
+    { id: 'recreate', label: 'Start the clone stack' },
+    { id: 'health', label: 'Health check' },
+  ],
   instance_set_address: [{ id: 'apply address', label: 'Apply address & recreate containers' }],
   instance_set_mailer: [{ id: 'apply mailer', label: 'Apply mailer & restart' }],
   instance_set_name: [{ id: 'rename', label: 'Rename instance' }],
@@ -66,6 +85,18 @@ const STEP_MAPS: Record<OperationKind, StepDef[]> = {
   instance_remove: [{ id: 'remove', label: 'Remove instance' }],
   cms_operations_drain: [{ id: 'drain', label: 'Process pending CMS & plugin operations' }],
 };
+
+/**
+ * Friendly display label for an operation kind. Most kinds read fine as
+ * `kind.replace(/_/g, ' ')`, but `cms_operations_drain` is operator jargon —
+ * it is really "the manager applied a plugin/CMS change you requested in the
+ * admin UI", so we give it a clearer name. The live phase (set by the drain)
+ * carries the specifics ("Installing plugin X 0.2.1").
+ */
+export function operationKindLabel(kind: OperationKind | string): string {
+  if (kind === 'cms_operations_drain') return 'Plugin / CMS operation';
+  return kind.replace(/_/g, ' ');
+}
 
 /** Minimal operation slice this view-model needs. */
 export interface OperationStepInput {

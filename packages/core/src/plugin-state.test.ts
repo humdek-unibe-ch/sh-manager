@@ -191,6 +191,27 @@ describe('finalizePluginOperations', () => {
     expect(calls.some((c) => c.cmd.includes('selfhelp:plugin:enable'))).toBe(false);
   });
 
+  it('treats a purge like an uninstall on the composer side (remove + finalize, never enable)', async () => {
+    const purge: PendingPluginOperation = {
+      operationId: 11,
+      pluginId: 'sh2-shp-survey-js',
+      type: 'purge',
+      package: 'humdek/sh2-shp-survey-js',
+      version: null,
+      repository: null,
+    };
+    const { deps, calls } = fake();
+    const report = await finalizePluginOperations({ operations: [purge], coreVersion: '0.4.2' }, deps);
+
+    expect(report.outcomes[0]).toMatchObject({ operationId: 11, type: 'purge', status: 'done' });
+    // Composer REMOVE (not require) — a purge must never try to install.
+    expect(calls.some((c) => c.cmd.startsWith('composer remove humdek/sh2-shp-survey-js'))).toBe(true);
+    expect(calls.some((c) => c.cmd.startsWith('composer require'))).toBe(false);
+    expect(calls.some((c) => c.cmd.includes('selfhelp:plugin:run-operation 11'))).toBe(true);
+    // Purge removes; it must never enable the plugin.
+    expect(calls.some((c) => c.cmd.includes('selfhelp:plugin:enable'))).toBe(false);
+  });
+
   it('stops at the first failed operation, cancels it in the CMS, and does not restart when nothing finalized', async () => {
     const second: PendingPluginOperation = { ...installOp, operationId: 8, pluginId: 'other-plugin', package: 'humdek/other', version: '1.0.0', repository: null };
     const { deps, calls, restarts } = fake({ failMatching: { pattern: /^composer require/, message: 'rate limited' } });

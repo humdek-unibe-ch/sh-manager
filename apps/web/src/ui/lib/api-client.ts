@@ -18,6 +18,7 @@ import type {
   CloneInstanceRequest,
   CreateInstanceRequest,
   FrontendUpdateInstanceRequest,
+  InstalledPluginInfo,
   InstanceDetail,
   InstanceEnvConfig,
   InstanceLogsResult,
@@ -102,6 +103,11 @@ export interface ApiClient {
   listInstances(): Promise<InstanceSummary[]>;
   getInstance(instanceId: string): Promise<InstanceDetail>;
   listBackups(instanceId: string): Promise<BackupSummary[]>;
+  /**
+   * Plugins ACTUALLY installed in the running instance (live DB read), or null
+   * when the instance is down/unreachable (caller falls back to the manifest).
+   */
+  listInstancePlugins(instanceId: string): Promise<InstalledPluginInfo[] | null>;
   /** Schedule policy + run state + footprint estimate. */
   getBackupSchedule(instanceId: string): Promise<BackupScheduleStatus>;
   /** Persist the (complete) schedule policy; the server validates it. */
@@ -226,6 +232,13 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     listBackups: async (instanceId) =>
       (await request<{ backups: BackupSummary[] }>(`/api/instances/${encodeURIComponent(instanceId)}/backups`, 'GET'))
         .backups,
+    listInstancePlugins: async (instanceId) =>
+      (
+        await request<{ plugins: InstalledPluginInfo[] | null }>(
+          `/api/instances/${encodeURIComponent(instanceId)}/plugins`,
+          'GET',
+        )
+      ).plugins,
     getBackupSchedule: (instanceId) =>
       request<BackupScheduleStatus>(`/api/instances/${encodeURIComponent(instanceId)}/backup-schedule`, 'GET'),
     setBackupSchedule: (instanceId, policy) =>

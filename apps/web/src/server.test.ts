@@ -350,6 +350,9 @@ describe('instance management APIs', () => {
       async backups() {
         return [];
       },
+      async livePlugins() {
+        return null;
+      },
       async health() {
         return { instanceId: 'clinic-a', overall: 'healthy', services: [], checkedAt: '2026-06-01T00:00:00Z' };
       },

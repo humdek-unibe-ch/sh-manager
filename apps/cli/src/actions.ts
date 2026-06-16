@@ -67,6 +67,7 @@ import {
   type HealthReport,
   type OperationExecutor,
   type PendingOperation,
+  type PendingPluginOperation,
   type PhaseReporter,
   type PluginDrainReport,
   type PluginExecDeps,
@@ -77,6 +78,7 @@ import {
   type ServiceProbeResult,
   type UpdateExecutionReport,
   type UpdatePlan,
+  type UpdateStepResult,
 } from '@shm/core';
 import {
   InventoryStore,
@@ -903,6 +905,12 @@ export interface InstanceUpdateOptions {
   acceptMigrationRisk?: boolean;
   /** Explicit opt-in for a one-way MySQL major-version upgrade required by the target core's runtime policy. */
   approveMysqlMajor?: boolean;
+  /**
+   * Live progress hook: invoked the instant each execution step is recorded so
+   * the manager journal can advance its phase + stream the log in real time
+   * (best-effort — a throwing hook never breaks the update).
+   */
+  onStep?: (step: UpdateStepResult) => void | Promise<void>;
 }
 
 export async function instanceUpdate(deps: ActionDeps, instanceId: string, opts: InstanceUpdateOptions): Promise<{ plan: UpdatePlan; executed: boolean; report?: Awaited<ReturnType<typeof executeUpdate>> }> {
@@ -1111,6 +1119,7 @@ export async function instanceUpdate(deps: ActionDeps, instanceId: string, opts:
       stopServices: async (names) => {
         await deps.runner.run(paths.dir, [...composeCommands.stop(), ...names]);
       },
+      ...(opts.onStep ? { onStep: opts.onStep } : {}),
     },
   );
 
@@ -1126,6 +1135,8 @@ export interface InstanceFrontendUpdateOptions {
   channel?: ReleaseChannel;
   /** 'latest' (default) or a specific frontend version. */
   target?: string;
+  /** Live progress hook (see {@link InstanceUpdateOptions.onStep}). */
+  onStep?: (step: UpdateStepResult) => void | Promise<void>;
 }
 
 /**
@@ -1269,6 +1280,7 @@ export async function instanceFrontendUpdate(
       await deps.runner.run(paths.dir, composeCommands.upDetached());
       await restorePluginStateAfterRecreate(deps, instanceId, manifest.versions.selfhelp);
     },
+    ...(opts.onStep ? { onStep: opts.onStep } : {}),
   });
 
   return { plan, executed: true, report };
@@ -1402,6 +1414,28 @@ export interface PluginDrainOverrides {
   /** Injectable exec seam (tests); default: compose exec/restart. */
   execDeps?: PluginExecDeps;
   log?: (line: string) => void | Promise<void>;
+  /**
+   * Called once with the parked operations the drain is about to run, BEFORE
+   * any composer step. Lets the BFF label the journaled operation with what it
+   * is actually doing ("Installing plugin X 0.2.1") instead of the generic
+   * "cms operations drain" — addresses operators not knowing a drain was a
+   * plugin install. Reporting failures must never abort the drain.
+   */
+  onPlanned?: (ops: PendingPluginOperation[]) => void | Promise<void>;
+}
+
+/** One-line human summary of a parked plugin operation, for phases/logs. */
+export function describePluginOperation(op: PendingPluginOperation): string {
+  const verb =
+    op.type === 'install'
+      ? 'Installing'
+      : op.type === 'update'
+        ? 'Updating'
+        : op.type === 'purge'
+          ? 'Purging'
+          : 'Uninstalling';
+  const version = op.version ? ` ${op.version}` : '';
+  return `${verb} plugin ${op.pluginId}${version}`;
 }
 
 function pluginSeams(
@@ -1442,7 +1476,42 @@ export async function drainInstancePluginOperations(
   const { client, execDeps } = pluginSeams(deps, instanceId, overrides);
   const operations = await client.listPendingOperations();
   if (operations.length === 0) return { outcomes: [], restarted: false };
+  // Surface WHAT is about to run before we start (label the journaled op).
+  if (overrides?.onPlanned) {
+    try {
+      await overrides.onPlanned(operations);
+    } catch {
+      // Labeling is best-effort; never let it block the actual drain.
+    }
+  }
   return finalizePluginOperations({ operations, coreVersion: manifest.versions.selfhelp }, execDeps);
+}
+
+/** Operator-facing view of one plugin actually installed in a running instance. */
+export interface InstalledPluginInfo {
+  id: string;
+  version: string;
+  enabled: boolean;
+}
+
+/**
+ * Read the plugins ACTUALLY installed in a running instance, straight from its
+ * `plugins` table (the durable source of truth), rather than the possibly-stale
+ * `installedPlugins` recorded in the manifest. Requires the instance to be up
+ * (it execs a read-only query inside the backend container). Throws when the
+ * instance is down / has no plugin support; the manager treats that as "unknown"
+ * and falls back to the manifest.
+ */
+export async function instanceListInstalledPlugins(
+  deps: ActionDeps,
+  instanceId: string,
+  overrides?: PluginDrainOverrides,
+): Promise<InstalledPluginInfo[]> {
+  const { client } = pluginSeams(deps, instanceId, overrides);
+  const rows = await client.listInstalledPlugins();
+  return rows
+    .map((r) => ({ id: r.pluginId, version: r.version, enabled: r.enabled }))
+    .sort((a, b) => a.id.localeCompare(b.id));
 }
 
 /**
@@ -1506,10 +1575,23 @@ async function hashFilesIn(dir: string, exclude: string[]): Promise<{ path: stri
 // instance backup
 // ---------------------------------------------------------------------------
 
+/**
+ * Live progress event for long operations (backup/restore). `phase` is the
+ * machine id the UI step-checklist matches on (see `operation-steps.ts`);
+ * `detail` is the human log line. Reporting is best-effort and must never
+ * change the operation's outcome.
+ */
+export interface OperationProgress {
+  phase: string;
+  detail: string;
+}
+
 export interface BackupOptions {
   mode?: 'maintenance' | 'online';
   origin?: BackupOrigin;
   seq?: number;
+  /** Fires as each backup stage starts so the BFF can advance the live UI. */
+  onStep?: (step: OperationProgress) => void | Promise<void>;
 }
 
 /**
@@ -1539,12 +1621,21 @@ export async function instanceBackup(
   await mkdir(backupDir, { recursive: true });
 
   const includedAreas = ['database', 'manifest', 'lock'];
+  const step = async (phase: string, detail: string): Promise<void> => {
+    try {
+      await opts.onStep?.({ phase, detail });
+    } catch {
+      // Progress reporting is best-effort; never let it abort a backup.
+    }
+  };
 
   // 1. Database dump (maintenance-mode default; mysqldump runs in the db container).
+  await step('database', 'Dumping database…');
   const { stdout: dump } = await deps.runner.run(paths.dir, ['exec', '-T', 'mysql', 'sh', '-lc', APP_DB_DUMP_CMD]);
   await writeFile(path.join(backupDir, 'database.sql'), dump);
 
   // 2. Metadata snapshots (manifest + lock + redacted env + compose copy).
+  await step('metadata', 'Snapshotting manifest, lock, env & compose…');
   await writeFile(path.join(backupDir, 'selfhelp.instance.json'), JSON.stringify(manifest, null, 2));
   await writeFile(path.join(backupDir, 'selfhelp.lock.json'), JSON.stringify(lock, null, 2));
   const envText = await readFile(paths.envPath, 'utf8').catch(() => '');
@@ -1563,6 +1654,7 @@ export async function instanceBackup(
   // area (REQUIRED_BACKUP_AREAS stays unchanged; the extra .tgz is still
   // checksummed by the backup manifest below).
   if (deps.archiveVolume) {
+    await step('volumes', 'Archiving uploads & plugin artifacts…');
     await deps.archiveVolume(`${project}_uploads`, path.join(backupDir, 'uploads.tgz'));
     includedAreas.push('uploads');
     await deps.archiveVolume(`${project}_plugin_artifacts`, path.join(backupDir, 'plugin_artifacts.tgz'));
@@ -1573,6 +1665,7 @@ export async function instanceBackup(
     includedAreas.push('plugin_artifacts');
   }
 
+  await step('manifest', 'Writing backup manifest & checksums…');
   const files = await hashFilesIn(backupDir, ['backup-manifest.json']);
   const backupManifest = buildBackupManifest({
     instanceId,
@@ -1970,6 +2063,8 @@ export interface RestoreCliOptions {
   disasterRecoveryImport?: boolean;
   /** When true, materialize the restore's secret policy on disk (else plan only). */
   apply?: boolean;
+  /** Fires as each restore stage starts so the BFF can advance the live UI. */
+  onStep?: (step: OperationProgress) => void | Promise<void>;
 }
 
 export async function instanceRestore(
@@ -2003,7 +2098,16 @@ export async function instanceRestore(
   }
   const backupManifest = JSON.parse(raw) as BackupManifest;
 
+  const step = async (phase: string, detail: string): Promise<void> => {
+    try {
+      await opts.onStep?.({ phase, detail });
+    } catch {
+      // Progress reporting is best-effort; never let it abort a restore.
+    }
+  };
+
   // Recompute hashes for integrity verification.
+  await step('verify', 'Verifying backup integrity (recomputing checksums)…');
   const actualHashes: Record<string, string> = {};
   for (const f of backupManifest.files) {
     const buf = await readFile(path.join(backupDir, f.path)).catch(() => null);
@@ -2063,9 +2167,11 @@ export async function instanceRestore(
   restoredManifest.updatedAt = deps.now?.() ?? new Date().toISOString();
 
   // 1. Quiesce the instance, keeping every volume.
+  await step('stop', 'Stopping the instance (volumes kept)…');
   await deps.runner.run(paths.dir, composeCommands.stop());
 
   // 2. Restore persistent volumes from the backup archives (when present).
+  await step('volumes', 'Restoring uploads & plugin artifacts…');
   const uploadsTgz = path.join(backupDir, 'uploads.tgz');
   if (await pathExists(uploadsTgz)) await deps.extractVolume(uploadsTgz, `${project}_uploads`);
   const pluginTgz = path.join(backupDir, 'plugin_artifacts.tgz');
@@ -2076,6 +2182,7 @@ export async function instanceRestore(
   }
 
   // 3. Start MySQL only, wait until ready, import the database dump.
+  await step('database', 'Starting database & importing the dump…');
   await deps.runner.run(paths.dir, [...composeCommands.upDetached(), 'mysql']);
   await waitForMysqlReady(deps, paths.dir);
   await importDatabaseWithRetry(deps, paths.dir, path.join(backupDir, 'database.sql'));
@@ -2084,6 +2191,7 @@ export async function instanceRestore(
   // compose (so code matches the restored DB). A clone/DR import keeps the current
   // code (so an older DB can be migrated forward) and rebuilds routing/compose for
   // its new production domain when one was given.
+  await step('config', 'Restoring configuration & inventory…');
   let restoreCompose = false;
   if (isClone && opts.newDomain && restoredManifest.mode === 'production') {
     restoredManifest.domain = opts.newDomain;
@@ -2128,6 +2236,7 @@ export async function instanceRestore(
   });
 
   // 6. Bring the full stack up on the restored data.
+  await step('recreate', 'Starting the restored stack…');
   await deps.runner.run(paths.dir, composeCommands.upDetached());
 
   // 7. Migrate only when needed: the restored DB head differs from the running
@@ -2135,6 +2244,7 @@ export async function instanceRestore(
   const restoredHead = restoredLock.core.migrationVersion;
   const migrated = !restoreCompose && preRestoreHead !== undefined && restoredHead !== preRestoreHead;
   if (migrated) {
+    await step('migrate', 'Forward-migrating the restored database…');
     await deps.runner.run(paths.dir, [
       'exec',
       '-T',
@@ -2163,6 +2273,7 @@ export async function instanceRestore(
   );
 
   // 8. Health.
+  await step('health', 'Health check…');
   const health = evaluateHealth(
     instanceId,
     await deps.probeHealth(restoredManifest.routing.publicFrontendUrl, restoredManifest.routing.browserApiPrefix),
@@ -2245,6 +2356,17 @@ export interface CloneCliOptions {
   copyPluginArtifacts?: boolean;
   /** When true, build + populate the clone (else plan only). */
   apply?: boolean;
+  /**
+   * Operator-facing display name for the clone. Defaults to the clone's own id
+   * (NOT the source's name) so a clone is named after itself, not its origin.
+   */
+  displayName?: string;
+  /**
+   * Live progress hook: invoked at each clone milestone so the manager journal
+   * can advance its phase + stream the log in real time. Best-effort: a throwing
+   * hook never breaks the clone.
+   */
+  onPhase?: (phase: string, detail?: string) => void | Promise<void>;
 }
 
 export async function instanceClone(
@@ -2288,6 +2410,16 @@ export async function instanceClone(
     throw new Error('Applying a clone requires the copyVolume + importDatabase host helpers.');
   }
 
+  // Best-effort live progress: never let a reporting hook break the clone.
+  const phase = async (name: string, detail?: string): Promise<void> => {
+    if (!opts.onPhase) return;
+    try {
+      await opts.onPhase(name, detail);
+    } catch {
+      // Progress reporting must never break the clone.
+    }
+  };
+
   const sourcePaths = instancePaths(sourceInstanceId, deps.root);
   const targetPaths = instancePaths(targetInstanceId, deps.root);
   const sourceProject = composeProjectName(sourceInstanceId);
@@ -2300,7 +2432,9 @@ export async function instanceClone(
 
   const artifacts = buildInstanceInstallArtifacts({
     instanceId: targetInstanceId,
-    displayName: sourceManifest.displayName,
+    // Name the clone after itself, not its source: a clone of "prod" called
+    // "staging" should read "staging" everywhere, not the source's display name.
+    displayName: opts.displayName ?? targetInstanceId,
     mode,
     ...(mode === 'production' ? { domain: opts.targetDomain } : { localPort: opts.targetLocalPort }),
     root: deps.root,
@@ -2326,6 +2460,7 @@ export async function instanceClone(
   // A clone is a distinct security boundary: generate fresh secrets that share
   // nothing with the source, write the target artifacts + inventory entry, but
   // do not bring it up yet (we populate volumes + DB first).
+  await phase('secrets', `Generating fresh secrets and writing clone config for "${targetInstanceId}".`);
   const secrets = generateCloneSecrets(secretGenOptions(deps));
   const secretsWritten = await writeInstanceSecrets(targetPaths.secretsDir, secrets, deps.secretIO);
   // Carry the source's admin bootstrap password (the "admin sector") into the
@@ -2342,6 +2477,9 @@ export async function instanceClone(
   });
 
   // Copy persistent volumes from the source (read-only) into the new target volumes.
+  if (plan.copyUploads || plan.copyPluginArtifacts) {
+    await phase('volumes', 'Copying uploads and plugin artifacts from the source (read-only).');
+  }
   if (plan.copyUploads) await deps.copyVolume(`${sourceProject}_uploads`, `${targetProject}_uploads`);
   if (plan.copyPluginArtifacts) {
     await deps.copyVolume(`${sourceProject}_plugin_artifacts`, `${targetProject}_plugin_artifacts`);
@@ -2353,6 +2491,7 @@ export async function instanceClone(
 
   // Bring up the clone's MySQL, then copy the database from the (untouched)
   // source via a read-only dump piped into the clone.
+  await phase('database', 'Copying the database from the source into the clone (source stays running).');
   await deps.runner.run(targetPaths.dir, [...composeCommands.upDetached(), 'mysql']);
   await waitForMysqlReady(deps, targetPaths.dir);
   const { stdout: dump } = await deps.runner.run(sourcePaths.dir, ['exec', '-T', 'mysql', 'sh', '-lc', APP_DB_DUMP_CMD]);
@@ -2363,7 +2502,9 @@ export async function instanceClone(
   await rm(tmpDump, { force: true });
 
   // Bring the full clone stack up and health-check it.
+  await phase('recreate', 'Starting the full clone stack.');
   await deps.runner.run(targetPaths.dir, composeCommands.upDetached());
+  await phase('health', 'Running health checks on the clone.');
   const health = evaluateHealth(
     targetInstanceId,
     await deps.probeHealth(artifacts.manifest.routing.publicFrontendUrl, artifacts.manifest.routing.browserApiPrefix),

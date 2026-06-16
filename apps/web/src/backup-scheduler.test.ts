@@ -56,6 +56,7 @@ function fakeInstances(b: FakeBehaviour): ManagerInstanceActions {
     list: async () => b.summaries,
     detail: unsupported,
     backups: unsupported,
+    livePlugins: unsupported,
     health: unsupported,
     serverStatus: unsupported,
     mailer: unsupported,

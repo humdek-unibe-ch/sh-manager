@@ -27,6 +27,7 @@ export type {
 } from '../../cli/src/actions.js';
 import { InventoryStore, ManifestStore, instancePaths, type RemoveMode } from '@shm/instances';
 import {
+  describePluginOperation,
   drainInstanceOperations,
   drainInstancePluginOperations,
   hasPendingPluginOperations,
@@ -41,6 +42,7 @@ import {
   instanceHealth,
   instanceInstall,
   instanceList,
+  instanceListInstalledPlugins,
   instanceLogs,
   LOG_SERVICES,
   instanceRemove,
@@ -56,6 +58,7 @@ import {
   type ActionDeps,
   type BackupScheduleStatus,
   type InstanceEnvConfig,
+  type InstalledPluginInfo,
   type InstanceFrontendUpdateOptions,
   type InstanceInstallOptions,
   type InstanceLogsResult,
@@ -149,6 +152,8 @@ export interface CloneInstanceRequest {
   targetDomain?: string;
   /** Local sources: the clone's new published localhost port. */
   targetLocalPort?: number;
+  /** Operator-facing name for the clone; defaults to the clone's own id. */
+  displayName?: string;
 }
 
 export interface SetAddressRequest {
@@ -189,11 +194,19 @@ export interface ServerStatus {
   instanceCount: number;
 }
 
+export type { InstalledPluginInfo };
+
 export interface ManagerInstanceActions {
   list(): Promise<InstanceSummary[]>;
   detail(instanceId: string): Promise<InstanceDetail | null>;
   backups(instanceId: string): Promise<BackupSummary[]>;
   health(instanceId: string): Promise<HealthReport>;
+  /**
+   * Plugins ACTUALLY installed in the running instance (live DB read), or null
+   * when the instance is down / has no plugin support so the UI can fall back to
+   * the manifest's recorded list.
+   */
+  livePlugins(instanceId: string): Promise<InstalledPluginInfo[] | null>;
   /** Is this state root an initialized server (inventory exists)? */
   serverStatus(): Promise<ServerStatus>;
   /** Redacted outbound-mail configuration of an instance. */
@@ -252,6 +265,41 @@ export interface ManagerInstanceActions {
 export interface BuildInstanceActionsOptions {
   deps: ActionDeps;
   locks: InstanceLocks;
+}
+
+/** Minimal shape of a core execution step (update/frontend update). */
+interface ProgressStep {
+  name: string;
+  status: string;
+  detail?: string;
+}
+
+/**
+ * Maps a core update/frontend-update execution step name onto the coarse journal
+ * phase that drives the operation step checklist (the ids in
+ * `apps/web/src/ui/lib/operation-steps.ts`). Steps absent from this map are
+ * still streamed to the live log, they just do not move the checklist marker —
+ * so the marker only ever sits on a known row and never resets to the start.
+ */
+const UPDATE_STEP_PHASE: Record<string, string> = {
+  backup: 'backup',
+  pull: 'pull',
+  'apply-artifacts': 'recreate',
+  up: 'recreate',
+  migrate: 'migrations',
+  health: 'health',
+};
+
+/**
+ * Stream one execution step into the operation journal as it happens: always log
+ * the line, and advance the checklist phase for milestone steps so the operator
+ * watches backup -> pull -> recreate -> migrate -> health tick by live instead
+ * of seeing every step appear at once when the operation finishes.
+ */
+async function streamUpdateStep(ctx: OperationContext, step: ProgressStep): Promise<void> {
+  await ctx.log(`${step.name}: ${step.status}${step.detail ? ` — ${step.detail}` : ''}`);
+  const phase = UPDATE_STEP_PHASE[step.name];
+  if (phase && step.status !== 'failed') await ctx.setPhase(phase);
 }
 
 /** Real adapter over the tested CLI actions. */
@@ -359,6 +407,18 @@ export function buildInstanceActions(opts: BuildInstanceActionsOptions): Manager
       return instanceHealth(deps, instanceId);
     },
 
+    async livePlugins(instanceId) {
+      // Live read from the running instance's `plugins` table — the source of
+      // truth for what is ACTUALLY installed (the manifest's recorded list can
+      // lag CMS-driven installs). A down/plugin-less instance throws; surface
+      // that as null so the UI falls back to the manifest instead of erroring.
+      try {
+        return await instanceListInstalledPlugins(deps, instanceId);
+      } catch {
+        return null;
+      }
+    },
+
     async serverStatus() {
       const inventory: ServerInventory | null = await new InventoryStore(deps.root).read().catch(() => null);
       if (!inventory) return { initialized: false, serverId: null, proxyNetwork: null, instanceCount: 0 };
@@ -462,13 +522,14 @@ export function buildInstanceActions(opts: BuildInstanceActionsOptions): Manager
         ...(req.channel ? { channel: req.channel as InstanceUpdateOptions['channel'] } : {}),
         acceptMigrationRisk: req.acceptMigrationRisk ?? false,
         approveMysqlMajor: req.approveMysqlMajor ?? false,
+        // Stream each execution step into the journal live (log + checklist phase)
+        // so the operator sees backup -> pull -> recreate -> migrate -> health
+        // advance one by one instead of all at once when the update finishes.
+        onStep: (step) => streamUpdateStep(ctx, step),
       });
       if (!res.executed) {
         await ctx.log(`Update not executed (${res.plan.status}): ${res.plan.reasons.join('; ') || 'no reason given'}`);
         return { executed: false, plan: res.plan };
-      }
-      for (const step of res.report?.steps ?? []) {
-        await ctx.log(`${step.name}: ${step.status}${step.detail ? ` — ${step.detail}` : ''}`);
       }
       return {
         executed: true,
@@ -483,15 +544,14 @@ export function buildInstanceActions(opts: BuildInstanceActionsOptions): Manager
       const res = await instanceFrontendUpdate(deps, instanceId, {
         ...(req.target ? { target: req.target } : {}),
         ...(req.channel ? { channel: req.channel as InstanceFrontendUpdateOptions['channel'] } : {}),
+        // Stream each execution step live (see `update` above).
+        onStep: (step) => streamUpdateStep(ctx, step),
       });
       if (!res.executed) {
         await ctx.log(
           `Frontend update not executed (${res.plan.status}): ${res.plan.reasons.join('; ') || 'no newer frontend available'}`,
         );
         return { executed: false, plan: res.plan };
-      }
-      for (const step of res.report?.steps ?? []) {
-        await ctx.log(`${step.name}: ${step.status}${step.detail ? ` — ${step.detail}` : ''}`);
       }
       return {
         executed: true,
@@ -502,8 +562,15 @@ export function buildInstanceActions(opts: BuildInstanceActionsOptions): Manager
     },
 
     async backup(instanceId, ctx) {
-      await ctx.setPhase('backup');
-      const res = await instanceBackup(deps, instanceId, {});
+      // Drive the live checklist from the backup's own stages (database →
+      // metadata → volumes → manifest) instead of one opaque "backup" phase.
+      await ctx.setPhase('database');
+      const res = await instanceBackup(deps, instanceId, {
+        onStep: async (s) => {
+          await ctx.setPhase(s.phase);
+          await ctx.log(s.detail);
+        },
+      });
       await ctx.log(`Backup ${res.backupId} written to ${res.backupDir}.`);
       return {
         backupId: res.backupId,
@@ -515,13 +582,26 @@ export function buildInstanceActions(opts: BuildInstanceActionsOptions): Manager
 
     async restore(instanceId, req, ctx) {
       // Safety net first: an automatic pre-restore backup so the operator can
-      // undo a restore that targeted the wrong snapshot.
+      // undo a restore that targeted the wrong snapshot. Keep the macro phase on
+      // "pre-restore backup" and surface its inner stages as log lines (so the
+      // checklist row stays put while the log shows what the backup is doing).
       await ctx.setPhase('pre-restore backup');
-      const pre = await instanceBackup(deps, instanceId, { origin: 'pre_restore' });
+      const pre = await instanceBackup(deps, instanceId, {
+        origin: 'pre_restore',
+        onStep: async (s) => ctx.log(`pre-restore backup: ${s.detail}`),
+      });
       await ctx.log(`Pre-restore backup ${pre.backupId} written to ${pre.backupDir}.`);
 
-      await ctx.setPhase('restore');
-      const res = await instanceRestore(deps, instanceId, req.backupId, { mode: 'same_instance', apply: true });
+      // The restore then drives the checklist row-by-row (verify → stop →
+      // volumes → database → config → recreate → migrate → health).
+      const res = await instanceRestore(deps, instanceId, req.backupId, {
+        mode: 'same_instance',
+        apply: true,
+        onStep: async (s) => {
+          await ctx.setPhase(s.phase);
+          await ctx.log(s.detail);
+        },
+      });
       if (!res.validation.ok || !res.plan) {
         throw new Error(`Restore blocked: ${res.validation.errors.join('; ')}`);
       }
@@ -536,13 +616,19 @@ export function buildInstanceActions(opts: BuildInstanceActionsOptions): Manager
     },
 
     async clone(sourceInstanceId, req, ctx) {
-      await ctx.setPhase('clone');
+      await ctx.setPhase('plan');
+      // Log the upfront plan first so the operator sees what will happen, then
+      // advance the checklist phase live as each milestone is reached.
       const res = await instanceClone(deps, sourceInstanceId, req.targetInstanceId, {
         ...(req.targetDomain ? { targetDomain: req.targetDomain } : {}),
         ...(req.targetLocalPort !== undefined ? { targetLocalPort: req.targetLocalPort } : {}),
+        ...(req.displayName ? { displayName: req.displayName } : {}),
         apply: true,
+        onPhase: async (phase, detail) => {
+          if (detail) await ctx.log(detail);
+          await ctx.setPhase(phase);
+        },
       });
-      for (const step of res.plan.steps) await ctx.log(`plan: ${step}`);
       return {
         targetInstanceId: req.targetInstanceId,
         executed: res.executed ?? false,
@@ -650,8 +736,20 @@ export function buildInstanceActions(opts: BuildInstanceActionsOptions): Manager
       }
 
       // Plugin operations second: a system update drained above may already
-      // have reinstalled plugins as part of its own execution.
-      const pluginReport = await drainInstancePluginOperations(deps, instanceId, { log: (l) => ctx.log(l) });
+      // have reinstalled plugins as part of its own execution. `onPlanned`
+      // fires before any composer step so the journaled operation says WHAT it
+      // is doing (e.g. "Installing plugin sh-shp-survey-js 0.2.1") instead of
+      // the opaque "cms operations drain" — so operators can tell a drain was a
+      // plugin install/update/uninstall.
+      const pluginReport = await drainInstancePluginOperations(deps, instanceId, {
+        log: (l) => ctx.log(l),
+        onPlanned: async (ops) => {
+          if (ops.length === 0) return;
+          const summary = ops.map(describePluginOperation).join('; ');
+          await ctx.setPhase(ops.length === 1 ? summary : `Applying ${ops.length} plugin changes`);
+          await ctx.log(`Plugin operations requested in the CMS: ${summary}.`);
+        },
+      });
       for (const outcome of pluginReport.outcomes) {
         const line =
           outcome.status === 'done'
