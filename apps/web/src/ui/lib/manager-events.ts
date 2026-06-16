@@ -41,6 +41,8 @@ export interface SubscribeManagerEventsOptions {
   /** EventSource factory; defaults to the global `EventSource` when present. */
   factory?: EventSourceFactory;
   onOperation: (event: ManagerOperationEvent) => void;
+  /** Notified when the stream connects (and on each auto-reconnect). */
+  onOpen?: () => void;
   /** Notified on transport errors (EventSource auto-reconnects regardless). */
   onError?: (error: unknown) => void;
 }
@@ -70,6 +72,9 @@ export function subscribeManagerEvents(options: SubscribeManagerEventsOptions): 
     return () => {};
   }
 
+  if (options.onOpen) {
+    source.addEventListener('open', () => options.onOpen?.());
+  }
   source.addEventListener('operation', (event) => {
     if (!event.data) return;
     try {
