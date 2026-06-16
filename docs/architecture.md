@@ -102,9 +102,28 @@ tool needs:
 JSON API surface (all under `/api`): auth (`login`/`logout`/`meta`,
 `setup/operator`), server (`status`, `preflight`), instances (CRUD, health,
 backups + backup schedule, restore, update dry-run/execute, clone, address,
-mailer, remove), operations (history + journaled logs), and registry version
-listings — see [GUI instance management](operator/gui-instance-management.md)
-for the endpoint table.
+mailer, remove), operations (history + journaled logs), a live `events` stream,
+and registry version listings — see
+[GUI instance management](operator/gui-instance-management.md) for the endpoint
+table.
+
+### Live updates (Server-Sent Events, not polling)
+
+The SPA is **event-driven**, not poll-driven. The operation journal is the
+single source of truth: it emits a compact change event on every
+create/advance/finish, the BFF streams those over an authenticated
+**`GET /api/events`** Server-Sent-Events channel (with a heartbeat and prompt
+teardown on shutdown), and the SPA turns each event into a **targeted
+react-query refresh** (bursts of log lines are coalesced). A small external
+store (`apps/web/src/ui/features/manager/manager-sse-status.ts`) tracks the live
+connection state so feature queries can decide whether their fallback runs.
+
+There is **no time-based background polling** while the stream is healthy. A
+short **fallback poll** runs **only** while the stream is disconnected (for
+per-operation queries, only while an operation is still `running`) and stops on
+reconnect; on reconnect the SPA invalidates the manager-scoped queries once to
+reconcile anything missed. Events carry only
+id/kind/instance/status/phase/timestamps — never logs, results, or secrets.
 
 The persistent server also runs two background loops through the same
 journaled, per-instance-locked operation runner as interactive actions: the

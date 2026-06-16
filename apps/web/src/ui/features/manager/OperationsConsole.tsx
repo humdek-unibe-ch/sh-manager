@@ -35,6 +35,7 @@ import { InstanceDetail } from './InstanceDetail';
 import { INSTANCES_KEY, instanceStatusTone } from './InstancesList';
 import { parseConsoleRoute } from './console-route';
 import { useManagerEvents } from './use-manager-events';
+import { managerFallbackInterval, useManagerSseConnected } from './manager-sse-status';
 
 const DOT_COLOR: Record<BadgeTone, string> = {
   ok: 'var(--mantine-color-teal-6)',
@@ -72,9 +73,10 @@ export interface OperationsConsoleProps {
 
 export function OperationsConsole({ client, onSignOut }: OperationsConsoleProps): JSX.Element {
   const queryClient = useQueryClient();
-  // Live operation/command progress via the BFF Server-Sent-Events stream; the
-  // query polling below stays on as a fallback if the stream is unavailable.
+  // Live operation/command progress via the BFF Server-Sent-Events stream. The
+  // query polling below is a fallback that only runs while the stream is down.
   useManagerEvents();
+  const sseConnected = useManagerSseConnected();
   const navigate = useNavigate();
   const location = useLocation();
   // The console is a single mounted shell, so it derives its view from the
@@ -92,7 +94,7 @@ export function OperationsConsole({ client, onSignOut }: OperationsConsoleProps)
   const instancesQuery = useQuery({
     queryKey: INSTANCES_KEY,
     queryFn: () => client.listInstances(),
-    refetchInterval: 10_000,
+    refetchInterval: managerFallbackInterval(sseConnected, 10_000),
   });
   const instances = instancesQuery.data ?? [];
 

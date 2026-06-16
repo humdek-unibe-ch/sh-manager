@@ -15,7 +15,7 @@ import { OperationsConsole } from './OperationsConsole';
 import { InstanceDetail } from './InstanceDetail';
 import { InstancesList } from './InstancesList';
 import { OperationLog } from './OperationLog';
-import { FAKE_DRY_RUN_PLAN, makeFakeClient, fakeInstance, fakeOperation } from '../../test/fake-client';
+import { FAKE_DRY_RUN_PLAN, makeFakeClient, fakeInstance, fakeManifest, fakeOperation } from '../../test/fake-client';
 
 describe('InstancesList', () => {
   it('lists instances with status and surfaces broken ones with a repair hint', async () => {
@@ -79,6 +79,47 @@ describe('InstanceDetail', () => {
     // Operation history shows the failed update.
     expect(screen.getByText('instance update')).toBeInTheDocument();
     expect(screen.getByText('failed')).toBeInTheDocument();
+  });
+
+  it('paginates a long operation history (25 per page) and navigates pages', async () => {
+    const user = userEvent.setup();
+    const ops = Array.from({ length: 30 }, (_, i) =>
+      fakeOperation({ id: `op-${i + 1}`, kind: 'instance_backup', status: 'succeeded' }),
+    );
+    render(<InstanceDetail client={makeFakeClient({ operations: ops })} instanceId="clinic-a" />);
+
+    // Footer caption reflects the first page slice of 25 of 30.
+    expect(await screen.findByText(/Showing 1.*of 30 operations/)).toBeInTheDocument();
+    const page2 = screen.getByRole('button', { name: '2' });
+    expect(page2).toBeInTheDocument();
+
+    await user.click(page2);
+    expect(await screen.findByText(/Showing 26.*of 30 operations/)).toBeInTheDocument();
+  });
+
+  it('renders per-container versions/images and installed plugins from the manifest', async () => {
+    const client = makeFakeClient({ manifests: { 'clinic-a': fakeManifest() } });
+    render(<InstanceDetail client={client} instanceId="clinic-a" />);
+
+    // Components & versions card: a component row + its recorded version + image.
+    expect(await screen.findByText('Components & versions')).toBeInTheDocument();
+    expect(screen.getByText('Plugin API')).toBeInTheDocument();
+    expect(screen.getByText('1.2.0')).toBeInTheDocument();
+    expect(screen.getByText('mysql:8.4')).toBeInTheDocument();
+    expect(screen.getByText('dunglas/mercure:v0.16')).toBeInTheDocument();
+
+    // Installed plugins card lists each plugin id + version.
+    expect(screen.getByText('Installed plugins')).toBeInTheDocument();
+    expect(screen.getByText('sh-shp-llm')).toBeInTheDocument();
+    expect(screen.getByText('1.1.0')).toBeInTheDocument();
+  });
+
+  it('shows an empty-state in the installed-plugins card when none are recorded', async () => {
+    const client = makeFakeClient({ manifests: { 'clinic-a': fakeManifest({ installedPlugins: [] }) } });
+    render(<InstanceDetail client={client} instanceId="clinic-a" />);
+
+    expect(await screen.findByText('Installed plugins')).toBeInTheDocument();
+    expect(screen.getByText('No plugins installed')).toBeInTheDocument();
   });
 
   it('runs a health check on demand and renders the per-service report', async () => {
@@ -334,6 +375,9 @@ describe('OperationLog', () => {
     expect(screen.getByText(/migrate: error/)).toBeInTheDocument();
     expect(screen.getByText('Operation failed')).toBeInTheDocument();
     expect(screen.getByText(/rolled back/i)).toBeInTheDocument();
+    // The per-kind step checklist renders alongside the raw log.
+    expect(screen.getByText('Resolve & plan update')).toBeInTheDocument();
+    expect(screen.getByText('Run database migrations')).toBeInTheDocument();
   });
 });
 

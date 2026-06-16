@@ -2,9 +2,9 @@
 
 Audience: Server operators
 Status: Active
-Applies to: `sh-manager` (manager tool `1.2.0+`)
-Last verified: 2026-06-12
-Source of truth: `apps/web/src/server.ts`, `apps/web/src/instances.ts`, `apps/web/src/jobs.ts`, `apps/web/src/poller.ts`, `apps/web/src/ui/features/manager/`
+Applies to: `sh-manager` (manager tool `1.4.7+`)
+Last verified: 2026-06-16
+Source of truth: `apps/web/src/server.ts`, `apps/web/src/instances.ts`, `apps/web/src/jobs.ts`, `apps/web/src/poller.ts`, `apps/web/src/ui/features/manager/`, `apps/web/src/ui/lib/manager-events.ts`
 
 The web UI is **one operations console** that manages the full instance
 lifecycle from the browser: list and inspect instances, run health checks,
@@ -91,11 +91,14 @@ manager version + self-update status, and the **Instances** section.
   reason instead of crashing — repair it with
   `sh-manager instance repair <id>` (see
   [safe mode & recovery](safe-mode-and-recovery.md)).
-- **Instance workspace** — manifest summary, the **backups list** (id, date,
-  size, versions metadata), the operation history, and a **Run health
-  check** button (backend + frontend + per-service container checks). Health
-  is checked on demand when you click the button; nothing polls the
-  containers in the background.
+- **Instance workspace** — manifest summary, a **Components & versions** card
+  (the resolved core / frontend / scheduler / worker versions and the exact
+  container images this instance runs, read from the instance manifest), an
+  **Installed plugins** card (each plugin with its installed version), the
+  **backups list** (id, date, size, versions metadata), the operation history
+  (paginated), and a **Run health check** button (backend + frontend +
+  per-service container checks). Health is checked on demand when you click the
+  button; nothing polls the containers in the background.
 - **Create (step wizard)** — the **New instance** button opens a guided
   full-page wizard; it also opens **automatically** when the server has no
   instances yet. Steps: **Welcome** → **Preflight** (Docker, internet,
@@ -183,8 +186,30 @@ manager version + self-update status, and the **Instances** section.
   `delete <id>`).
 - **Operation log viewer** — every action (including CMS-requested updates
   drained in the background) appears in the operation history; clicking an
-  operation streams its journaled log lines live until it reaches a terminal
-  state.
+  operation shows a **step checklist** for its kind (e.g. update, backup,
+  restore, clone, address/email/env change, restart) that advances with the
+  real journaled phase, with the journaled **log lines streaming underneath**
+  until it reaches a terminal state. The history table paginates once it grows
+  past a page, and every status pill (instance status, operation status, backup
+  origin, health service) shows its **full label** — nothing is clipped.
+
+## Live updates (Server-Sent Events, no background polling)
+
+The console is **event-driven**. After you sign in it opens a single
+authenticated stream (`GET /api/events`) and refreshes the affected views — the
+instance list, the instance workspace, the operation history and the live
+operation log — **the instant** the backend journals a change (create, phase
+advance, log line, success, failure). There is **no time-based background
+polling**: an idle console makes no repeating requests.
+
+A short **fallback poll** activates **only** while the stream is disconnected
+(for per-operation views, only while an operation is still running) and **stops
+the moment the stream reconnects**. On reconnect the console reconciles by
+refreshing the manager-scoped queries once, so any change missed while the
+stream was down is picked up immediately — you never need a manual full-page
+refresh to see the current state. A browser without `EventSource` still works;
+it just falls back to the short poll. Events carry only
+id/kind/instance/status/phase/timestamps — never logs, results, or secrets.
 
 ## CMS-requested updates and plugin operations drain automatically
 
@@ -215,8 +240,9 @@ Headless servers without a resident GUI keep using the systemd/cron triggers
 ## API reference
 
 All endpoints require a session (exceptions noted); non-GET requests require
-the CSRF header. Long-running actions return `202 { operationId }` — poll
-the operation.
+the CSRF header. Long-running actions return `202 { operationId }`; the console
+then follows the operation over the **`GET /api/events`** stream (falling back
+to a short poll of `GET /api/operations/:id` only while the stream is down).
 
 | Endpoint | Action |
 | --- | --- |
@@ -246,6 +272,7 @@ the operation.
 | `POST /api/instances/:id/remove` | Disable / remove / full-delete. |
 | `GET /api/operations?instanceId=` | Operation history. |
 | `GET /api/operations/:id` | One operation incl. journaled log lines. |
+| `GET /api/events` | Authenticated Server-Sent-Events stream of operation changes (live console updates; no polling). |
 | `GET /api/registry/versions?channel=` | Installable versions for the version dropdowns. |
 
 ## See also

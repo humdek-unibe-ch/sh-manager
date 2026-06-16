@@ -6,11 +6,13 @@
  * uninventoried directory), which surface with a repair hint instead of
  * disappearing. Row click opens the instance detail.
  */
-import { Anchor, Badge, Group, Stack, Table, Text, Tooltip } from '@mantine/core';
+import { Anchor, Group, Stack, Table, Text, Tooltip } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
-import { Alert, Button, Card, EmptyState, Spinner, StatusBadge, type BadgeTone } from '../../components';
+import { Alert, Button, Card, EmptyState, PaginationFooter, Spinner, StatusBadge, type BadgeTone } from '../../components';
 import { ApiError, type ApiClient } from '../../lib/api-client';
 import type { InstanceSummary } from '../../lib/types';
+import { usePagination } from '../../lib/use-pagination';
+import { managerFallbackInterval, useManagerSseConnected } from './manager-sse-status';
 
 export const INSTANCES_KEY = ['manager', 'instances'] as const;
 
@@ -36,13 +38,15 @@ export interface InstancesListProps {
 }
 
 export function InstancesList({ client, onOpen, onCreate }: InstancesListProps): JSX.Element {
+  const sseConnected = useManagerSseConnected();
   const query = useQuery({
     queryKey: INSTANCES_KEY,
     queryFn: () => client.listInstances(),
-    refetchInterval: 10_000,
+    refetchInterval: managerFallbackInterval(sseConnected, 10_000),
   });
 
   const instances = query.data ?? [];
+  const instancesPage = usePagination(instances, 25);
 
   return (
     <Card
@@ -92,7 +96,7 @@ export function InstancesList({ client, onOpen, onCreate }: InstancesListProps):
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {instances.map((inst) => (
+                {instancesPage.pageItems.map((inst) => (
                   <Table.Tr key={inst.instanceId}>
                     <Table.Td>
                       <Anchor component="button" type="button" onClick={() => onOpen(inst.instanceId)} fw={600}>
@@ -130,11 +134,7 @@ export function InstancesList({ client, onOpen, onCreate }: InstancesListProps):
                         ) : (
                           <StatusBadge tone={instanceStatusTone(inst.status)}>{inst.status}</StatusBadge>
                         )}
-                        {inst.busy ? (
-                          <Badge color="indigo" variant="light" size="sm">
-                            busy
-                          </Badge>
-                        ) : null}
+                        {inst.busy ? <StatusBadge tone="info">busy</StatusBadge> : null}
                       </Group>
                     </Table.Td>
                     <Table.Td>
@@ -146,6 +146,14 @@ export function InstancesList({ client, onOpen, onCreate }: InstancesListProps):
                 ))}
               </Table.Tbody>
             </Table>
+            <PaginationFooter
+              page={instancesPage.page}
+              pageCount={instancesPage.pageCount}
+              onPageChange={instancesPage.setPage}
+              total={instancesPage.total}
+              range={instancesPage.range}
+              noun="instances"
+            />
           </Table.ScrollContainer>
         )}
       </Stack>

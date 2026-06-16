@@ -24,6 +24,8 @@ export { StatusBadge, type StatusBadgeProps, type BadgeTone } from './status/Sta
 export { CheckRow, type CheckRowProps, type CheckStatus } from './status/CheckRow';
 export { StepProgress, type StepProgressProps, type ProgressStep, type StepState } from './status/StepProgress';
 
+export { PaginationFooter, type PaginationFooterProps } from './data/PaginationFooter';
+
 export { WizardStepper, type WizardStepperProps } from './wizard/WizardStepper';
 export { WizardFrame, type WizardFrameProps } from './wizard/WizardFrame';
 

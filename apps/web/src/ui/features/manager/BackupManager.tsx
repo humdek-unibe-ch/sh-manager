@@ -15,11 +15,13 @@
  *   and requires typing `restore <backupId>` to confirm.
  */
 import { useState } from 'react';
-import { Badge, Code, Group, Modal, NumberInput, Stack, Switch, Table, Text } from '@mantine/core';
+import { Code, Group, Modal, NumberInput, Stack, Switch, Table, Text } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, EmptyState, Spinner, TextField } from '../../components';
+import { Alert, Button, Card, EmptyState, PaginationFooter, Spinner, StatusBadge, TextField, type BadgeTone } from '../../components';
 import { ApiError, type ApiClient } from '../../lib/api-client';
 import type { BackupOrigin, BackupSchedulePolicy, BackupSummary } from '../../lib/types';
+import { usePagination } from '../../lib/use-pagination';
+import { managerFallbackInterval, useManagerSseConnected } from './manager-sse-status';
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -40,18 +42,20 @@ const ORIGIN_LABEL: Record<BackupOrigin, string> = {
   pre_restore: 'pre-restore',
 };
 
-const ORIGIN_COLOR: Record<BackupOrigin, string> = {
-  manual: 'blue',
-  scheduled: 'green',
-  pre_update: 'orange',
-  pre_restore: 'grape',
+const ORIGIN_TONE: Record<BackupOrigin, BadgeTone> = {
+  manual: 'info',
+  scheduled: 'ok',
+  pre_update: 'warning',
+  pre_restore: 'neutral',
 };
 
 function OriginBadge({ origin }: { origin: BackupOrigin }): JSX.Element {
+  // Origin is a category, not a live status, so no leading dot — but it reuses
+  // the standard non-truncating pill so the column never clips.
   return (
-    <Badge size="sm" variant="light" color={ORIGIN_COLOR[origin]}>
+    <StatusBadge tone={ORIGIN_TONE[origin]} dot={false}>
       {ORIGIN_LABEL[origin]}
-    </Badge>
+    </StatusBadge>
   );
 }
 
@@ -92,11 +96,12 @@ function ScheduleCard({ client, instanceId, busy, onStarted }: BackupManagerProp
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState<ScheduleDraft | null>(null);
   const [pruneSummary, setPruneSummary] = useState<string | null>(null);
+  const sseConnected = useManagerSseConnected();
 
   const query = useQuery({
     queryKey: ['manager', 'instance', instanceId, 'backup-schedule'],
     queryFn: () => client.getBackupSchedule(instanceId),
-    refetchInterval: 30_000,
+    refetchInterval: managerFallbackInterval(sseConnected, 30_000),
   });
 
   const save = useMutation({
@@ -226,13 +231,13 @@ function ScheduleCard({ client, instanceId, busy, onStarted }: BackupManagerProp
                 Save schedule
               </Button>
               {draft !== null ? (
-                <Badge color="yellow" variant="light">
+                <StatusBadge tone="warning" dot={false}>
                   Unsaved changes
-                </Badge>
+                </StatusBadge>
               ) : save.isSuccess ? (
-                <Badge color="teal" variant="light">
+                <StatusBadge tone="ok" dot={false}>
                   Saved
-                </Badge>
+                </StatusBadge>
               ) : null}
               <Button variant="ghost" loading={preview.isPending} onClick={() => preview.mutate()}>
                 Preview cleanup
@@ -301,11 +306,12 @@ function ScheduleCard({ client, instanceId, busy, onStarted }: BackupManagerProp
 export function BackupManager({ client, instanceId, busy, onStarted }: BackupManagerProps): JSX.Element {
   const [restoreTarget, setRestoreTarget] = useState<BackupSummary | null>(null);
   const [typed, setTyped] = useState('');
+  const sseConnected = useManagerSseConnected();
 
   const query = useQuery({
     queryKey: ['manager', 'instance', instanceId, 'backups'],
     queryFn: () => client.listBackups(instanceId),
-    refetchInterval: 15_000,
+    refetchInterval: managerFallbackInterval(sseConnected, 15_000),
   });
 
   const createBackup = useMutation({
@@ -323,6 +329,7 @@ export function BackupManager({ client, instanceId, busy, onStarted }: BackupMan
   });
 
   const backups = query.data ?? [];
+  const backupsPage = usePagination(backups, 25);
   const expected = restoreTarget ? `restore ${restoreTarget.backupId}` : '';
 
   return (
@@ -372,7 +379,7 @@ export function BackupManager({ client, instanceId, busy, onStarted }: BackupMan
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
-                  {backups.map((b) => (
+                  {backupsPage.pageItems.map((b) => (
                     <Table.Tr key={b.backupId}>
                       <Table.Td>
                         <Text size="sm" fw={500}>
@@ -415,6 +422,14 @@ export function BackupManager({ client, instanceId, busy, onStarted }: BackupMan
                   ))}
                 </Table.Tbody>
               </Table>
+              <PaginationFooter
+                page={backupsPage.page}
+                pageCount={backupsPage.pageCount}
+                onPageChange={backupsPage.setPage}
+                total={backupsPage.total}
+                range={backupsPage.range}
+                noun="backups"
+              />
             </Table.ScrollContainer>
           )}
         </Stack>

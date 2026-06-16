@@ -11,12 +11,13 @@
  * survives a browser reload.
  */
 import { useEffect, useRef, useState } from 'react';
-import { Anchor, Badge, Group, Stack, Table, Text, Title } from '@mantine/core';
+import { Anchor, Code, Group, Stack, Table, Text, Title } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { notifications } from '@mantine/notifications';
-import { Alert, Button, Card, EmptyState, KeyValue, Spinner, StatusBadge } from '../../components';
+import { Alert, Button, Card, EmptyState, KeyValue, PaginationFooter, Spinner, StatusBadge } from '../../components';
 import { ApiError, type ApiClient, type InstanceHealthReport } from '../../lib/api-client';
 import type { OperationRecord } from '../../lib/types';
+import { usePagination } from '../../lib/use-pagination';
 import { BackupManager } from './BackupManager';
 import { CloneInstanceDialog } from './CloneInstanceDialog';
 import { EnvDialog } from './EnvDialog';
@@ -28,6 +29,7 @@ import { RemoveInstanceDialog } from './RemoveInstanceDialog';
 import { RenameInstanceDialog } from './RenameInstanceDialog';
 import { SetAddressDialog } from './SetAddressDialog';
 import { INSTANCES_KEY, instanceStatusTone } from './InstancesList';
+import { managerFallbackInterval, useManagerSseConnected } from './manager-sse-status';
 
 type DialogKind = 'update' | 'clone' | 'rename' | 'address' | 'mailer' | 'env' | 'logs' | 'remove' | null;
 
@@ -53,29 +55,33 @@ export function InstanceDetail({ client, instanceId }: InstanceDetailProps): JSX
   const [dialog, setDialog] = useState<DialogKind>(null);
   const [watchedOperationId, setWatchedOperationId] = useState<string | null>(null);
   const queryClient = useQueryClient();
+  // SSE-driven: the `/api/events` stream invalidates these queries live, so the
+  // fallback poll only runs while the stream is disconnected.
+  const sseConnected = useManagerSseConnected();
 
   const detailQuery = useQuery({
     queryKey: ['manager', 'instance', instanceId],
     queryFn: () => client.getInstance(instanceId),
-    refetchInterval: 10_000,
+    refetchInterval: managerFallbackInterval(sseConnected, 10_000),
   });
 
   const operationsQuery = useQuery({
     queryKey: ['manager', 'instance', instanceId, 'operations'],
     queryFn: () => client.listOperations(instanceId),
-    refetchInterval: 5_000,
+    refetchInterval: managerFallbackInterval(sseConnected, 5_000),
   });
 
   // Watch the in-progress operation here too (shares <OperationLog/>'s query
   // key, so it's a single poll). The moment it reaches a terminal state we
   // refresh EVERY query scoped to this instance — detail, operations, backups,
   // schedule, mailer, env — so the whole view reflects the new state without
-  // waiting for the next interval tick, and the operator gets a toast.
+  // waiting for the next interval tick, and the operator gets a toast. The poll
+  // only runs while SSE is down AND the operation is still running.
   const watchedQuery = useQuery({
     queryKey: ['manager', 'operation', watchedOperationId],
     queryFn: () => client.getOperation(watchedOperationId as string),
     enabled: watchedOperationId !== null,
-    refetchInterval: (q) => (q.state.data?.status === 'running' ? 2_000 : false),
+    refetchInterval: (q) => (!sseConnected && q.state.data?.status === 'running' ? 2_000 : false),
   });
 
   const refreshInstance = (): void => {
@@ -117,6 +123,23 @@ export function InstanceDetail({ client, instanceId }: InstanceDetailProps): JSX
   const summary = detail?.summary ?? null;
   const busy = summary?.busy != null;
   const operations = operationsQuery.data ?? [];
+  const operationsPage = usePagination(operations, 25);
+  const manifest = detail?.manifest ?? null;
+  // One row per managed container, pairing the recorded version (where the
+  // manifest tracks one) with the resolved image tag/digest.
+  const componentRows: { label: string; version: string | null; image: string | null }[] = manifest
+    ? [
+        { label: 'SelfHelp', version: manifest.versions.selfhelp, image: null },
+        { label: 'Backend', version: manifest.versions.backend, image: manifest.images.backend },
+        { label: 'Frontend', version: manifest.versions.frontend, image: manifest.images.frontend },
+        { label: 'Scheduler', version: manifest.versions.scheduler, image: manifest.images.scheduler },
+        { label: 'Worker', version: manifest.versions.worker, image: manifest.images.worker },
+        { label: 'Plugin API', version: manifest.versions.pluginApi, image: null },
+        { label: 'MySQL', version: null, image: manifest.images.mysql },
+        { label: 'Redis', version: null, image: manifest.images.redis },
+        { label: 'Mercure', version: null, image: manifest.images.mercure },
+      ]
+    : [];
 
   const onStarted = (operationId: string): void => {
     setWatchedOperationId(operationId);
@@ -216,6 +239,88 @@ export function InstanceDetail({ client, instanceId }: InstanceDetailProps): JSX
         />
       </Card>
 
+      {manifest ? (
+        <Card
+          title="Components & versions"
+          description="Versions and container image tags recorded in this instance's manifest."
+        >
+          <Table.ScrollContainer minWidth={520}>
+            <Table verticalSpacing="xs">
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>Component</Table.Th>
+                  <Table.Th>Version</Table.Th>
+                  <Table.Th>Image</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {componentRows.map((row) => (
+                  <Table.Tr key={row.label}>
+                    <Table.Td>
+                      <Text size="sm" fw={500}>
+                        {row.label}
+                      </Text>
+                    </Table.Td>
+                    <Table.Td>
+                      <Text size="sm">{row.version ?? '—'}</Text>
+                    </Table.Td>
+                    <Table.Td>
+                      {row.image ? (
+                        <Code style={{ whiteSpace: 'normal', wordBreak: 'break-all' }}>{row.image}</Code>
+                      ) : (
+                        <Text size="sm" c="dimmed">
+                          —
+                        </Text>
+                      )}
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          </Table.ScrollContainer>
+        </Card>
+      ) : null}
+
+      {manifest ? (
+        <Card
+          title="Installed plugins"
+          description={
+            manifest.installedPlugins.length === 1
+              ? '1 plugin recorded in the manifest.'
+              : `${manifest.installedPlugins.length} plugins recorded in the manifest.`
+          }
+        >
+          {manifest.installedPlugins.length === 0 ? (
+            <EmptyState icon="🧩" title="No plugins installed">
+              Plugins installed into this instance will be listed here with their version.
+            </EmptyState>
+          ) : (
+            <Table.ScrollContainer minWidth={360}>
+              <Table verticalSpacing="xs">
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>Plugin</Table.Th>
+                    <Table.Th>Version</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {manifest.installedPlugins.map((plugin) => (
+                    <Table.Tr key={plugin.id}>
+                      <Table.Td>
+                        <Text size="sm">{plugin.id}</Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Code>{plugin.version}</Code>
+                      </Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
+            </Table.ScrollContainer>
+          )}
+        </Card>
+      ) : null}
+
       {health.isError ? (
         <Alert tone="error" title="Health check failed">
           {health.error instanceof ApiError ? health.error.message : 'The manager service did not answer.'}
@@ -230,13 +335,9 @@ export function InstanceDetail({ client, instanceId }: InstanceDetailProps): JSX
           <Stack gap={6}>
             {health.data.services.map((s) => (
               <Group key={s.service} gap="sm" wrap="nowrap">
-                <Badge
-                  color={s.state === 'healthy' ? 'teal' : s.required ? 'red' : 'gray'}
-                  variant="light"
-                  styles={{ label: { textTransform: 'none' } }}
-                >
+                <StatusBadge tone={s.state === 'healthy' ? 'ok' : s.required ? 'error' : 'warning'}>
                   {s.state}
-                </Badge>
+                </StatusBadge>
                 <Text size="sm">
                   {s.service}
                   {s.required ? '' : ' (optional)'}
@@ -292,7 +393,7 @@ export function InstanceDetail({ client, instanceId }: InstanceDetailProps): JSX
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {operations.map((op: OperationRecord) => (
+                {operationsPage.pageItems.map((op: OperationRecord) => (
                   <Table.Tr key={op.id}>
                     <Table.Td>
                       <Anchor component="button" type="button" size="sm" onClick={() => setWatchedOperationId(op.id)}>
@@ -315,6 +416,14 @@ export function InstanceDetail({ client, instanceId }: InstanceDetailProps): JSX
                 ))}
               </Table.Tbody>
             </Table>
+            <PaginationFooter
+              page={operationsPage.page}
+              pageCount={operationsPage.pageCount}
+              onPageChange={operationsPage.setPage}
+              total={operationsPage.total}
+              range={operationsPage.range}
+              noun="operations"
+            />
           </Table.ScrollContainer>
         )}
       </Card>

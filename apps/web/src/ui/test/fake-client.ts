@@ -8,6 +8,7 @@
  */
 import { validateSchedulePolicy } from '@shm/backup';
 import { MANAGER_CONTROLLED_ENV_KEYS } from '@shm/docker';
+import type { InstanceManifest } from '@shm/schemas';
 import { validateAddressChange, validateCloneInstance, validateCreateInstance } from '../../instance-validation';
 import { ApiError, type ApiClient, type InstanceHealthReport } from '../lib/api-client';
 import type {
@@ -58,6 +59,8 @@ export interface FakeClientOptions {
   envConfigs?: Record<string, InstanceEnvConfig>;
   /** Log text per `${instanceId}:${service}` (default: a representative line). */
   logs?: Record<string, string>;
+  /** Instance manifest per instance id (default: null = manifest not read). */
+  manifests?: Record<string, InstanceManifest | null>;
   /** Backup schedule status per instance id (default: nothing configured). */
   backupSchedules?: Record<string, BackupScheduleStatus>;
   /** Retention preview served by previewBackupPrune (default: keep everything). */
@@ -75,6 +78,44 @@ export function fakeInstance(overrides: Partial<InstanceSummary> = {}): Instance
     updatedAt: '2026-06-01T10:00:00.000Z',
     brokenReason: null,
     busy: null,
+    ...overrides,
+  };
+}
+
+export function fakeManifest(overrides: Partial<InstanceManifest> = {}): InstanceManifest {
+  return {
+    manifestVersion: 1,
+    instanceId: 'clinic-a',
+    displayName: 'Clinic A',
+    domain: 'clinic-a.example',
+    mode: 'production',
+    createdAt: '2026-06-01T09:00:00.000Z',
+    updatedAt: '2026-06-01T10:00:00.000Z',
+    registry: { id: 'official', url: 'https://registry.example.com/', channel: 'stable' },
+    versions: {
+      selfhelp: '0.1.0',
+      backend: '0.1.0',
+      frontend: '0.1.5',
+      scheduler: '0.1.0',
+      worker: '0.1.0',
+      pluginApi: '1.2.0',
+    },
+    images: {
+      backend: 'ghcr.io/humdek-unibe-ch/sh-backend:0.1.0',
+      frontend: 'ghcr.io/humdek-unibe-ch/sh-frontend:0.1.5',
+      scheduler: 'ghcr.io/humdek-unibe-ch/sh-scheduler:0.1.0',
+      worker: 'ghcr.io/humdek-unibe-ch/sh-worker:0.1.0',
+      mysql: 'mysql:8.4',
+      redis: 'redis:7.4',
+      mercure: 'dunglas/mercure:v0.16',
+    },
+    routing: {
+      publicFrontendUrl: 'https://clinic-a.example',
+      browserApiPrefix: '/cms-api/v1',
+      internalSymfonyUrl: 'http://backend',
+      symfonyApiPrefix: '/cms-api/v1',
+    },
+    installedPlugins: [{ id: 'sh-shp-llm', version: '1.1.0' }],
     ...overrides,
   };
 }
@@ -294,7 +335,7 @@ export function makeFakeClient(opts: FakeClientOptions = {}): ApiClient {
       if (!summary) throw new ApiError(404, `Instance "${instanceId}" not found.`);
       const detail: InstanceDetail = {
         summary,
-        manifest: null,
+        manifest: opts.manifests?.[instanceId] ?? null,
         instanceDir: `/opt/selfhelp/instances/${instanceId}`,
       };
       return detail;

@@ -44,6 +44,7 @@ import {
 } from '../../../instance-validation';
 import { OperationLog, operationTone } from './OperationLog';
 import { VersionSelect } from './VersionSelect';
+import { useManagerSseConnected } from './manager-sse-status';
 
 const PHASES = [
   { id: 'welcome', label: 'Welcome' },
@@ -180,11 +181,14 @@ export function CreateInstanceWizard({
   });
 
   // Watch the running install (shares the cache entry with OperationLog below).
+  // SSE pushes install progress live; the 2s poll only runs while the stream is
+  // down AND the install is still running.
+  const sseConnected = useManagerSseConnected();
   const operationQuery = useQuery({
     queryKey: ['manager', 'operation', operationId ?? 'none'],
     queryFn: () => client.getOperation(operationId!),
     enabled: operationId !== null,
-    refetchInterval: (q) => (q.state.data?.status === 'running' ? 2_000 : false),
+    refetchInterval: (q) => (!sseConnected && q.state.data?.status === 'running' ? 2_000 : false),
   });
   const opStatus = operationQuery.data?.status ?? null;
 
@@ -517,7 +521,7 @@ export function CreateInstanceWizard({
           </Alert>
         ) : null}
 
-        <OperationLog client={client} operationId={operationId!} />
+        <OperationLog client={client} operationId={operationId!} showSteps={false} />
 
         {opStatus === 'succeeded' ? (
           <Alert tone="success" title={`"${displayName.trim() || instanceId}" is installed`}>

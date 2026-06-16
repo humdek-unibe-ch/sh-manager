@@ -29,7 +29,7 @@ import type {
   SetNameRequest,
   UpdateInstanceRequest,
 } from '../../instances';
-import type { OperationRecord, OperationStatus } from '../../jobs';
+import type { OperationKind, OperationRecord, OperationStatus } from '../../jobs';
 
 export type {
   BackupOrigin,
@@ -56,6 +56,7 @@ export type {
   SetMailerRequest,
   SetNameRequest,
   UpdateInstanceRequest,
+  OperationKind,
   OperationRecord,
   OperationStatus,
   InstanceMode,

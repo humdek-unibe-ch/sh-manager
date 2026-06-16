@@ -7,9 +7,11 @@
  */
 import { Box, Code, Group, Stack, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
-import { Alert, Spinner, StatusBadge, type BadgeTone } from '../../components';
+import { Alert, Spinner, StatusBadge, StepProgress, type BadgeTone } from '../../components';
 import { ApiError, type ApiClient } from '../../lib/api-client';
 import type { OperationStatus } from '../../lib/types';
+import { buildOperationSteps } from '../../lib/operation-steps';
+import { useManagerSseConnected } from './manager-sse-status';
 
 export function operationTone(status: OperationStatus): BadgeTone {
   return status === 'succeeded' ? 'ok' : status === 'failed' ? 'error' : 'info';
@@ -18,13 +20,22 @@ export function operationTone(status: OperationStatus): BadgeTone {
 export interface OperationLogProps {
   client: ApiClient;
   operationId: string;
+  /**
+   * Render the per-kind step checklist above the log (default `true`). The
+   * create wizard sets this `false` because it shows its own richer install
+   * checklist alongside, so we avoid a duplicate.
+   */
+  showSteps?: boolean;
 }
 
-export function OperationLog({ client, operationId }: OperationLogProps): JSX.Element {
+export function OperationLog({ client, operationId, showSteps = true }: OperationLogProps): JSX.Element {
+  // The `/api/events` stream pushes a frame per log line, so the live log stays
+  // current without polling; the 2s poll is a fallback for a dropped stream.
+  const sseConnected = useManagerSseConnected();
   const query = useQuery({
     queryKey: ['manager', 'operation', operationId],
     queryFn: () => client.getOperation(operationId),
-    refetchInterval: (q) => (q.state.data?.status === 'running' ? 2_000 : false),
+    refetchInterval: (q) => (!sseConnected && q.state.data?.status === 'running' ? 2_000 : false),
   });
 
   if (query.isPending) {
@@ -43,6 +54,7 @@ export function OperationLog({ client, operationId }: OperationLogProps): JSX.El
   }
 
   const op = query.data;
+  const steps = showSteps ? buildOperationSteps({ kind: op.kind, phase: op.phase, status: op.status }) : [];
   return (
     <Stack gap="sm">
       <Group gap="sm" wrap="wrap">
@@ -60,6 +72,8 @@ export function OperationLog({ client, operationId }: OperationLogProps): JSX.El
           {op.finishedAt ? ` — finished ${new Date(op.finishedAt).toLocaleString()}` : ''}
         </Text>
       </Group>
+
+      {steps.length > 0 ? <StepProgress steps={steps} /> : null}
 
       {op.log.length > 0 ? (
         <Box
