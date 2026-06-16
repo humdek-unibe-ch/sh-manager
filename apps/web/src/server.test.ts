@@ -469,6 +469,12 @@ describe('instance management APIs', () => {
       async enable() {
         return { executed: true, recreated: false, health: null };
       },
+      async safeMode(_id, req) {
+        return { enabled: req.enable };
+      },
+      async pluginRecover() {
+        return { steps: ['recovered'], drained: [], recovered: true, safeModeLeftEnabled: false };
+      },
       async peekPendingCmsWork() {
         return { systemUpdate: null, pluginOps: false };
       },
@@ -621,6 +627,55 @@ describe('instance management APIs', () => {
       await drive('/api/instances/clinic-a/disable', 'instance_disable');
       // Enable is its own inverse operation.
       await drive('/api/instances/clinic-a/enable', 'instance_enable');
+    } finally {
+      await rm(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('toggles safe mode and recovers plugins under their own journaled operation kinds', async () => {
+    const tmpRoot = await mkdtemp(path.join(tmpdir(), 'shm-mgmt-'));
+    try {
+      const { base, cookie, csrfToken } = await managementBase(tmpRoot);
+      const authed = { cookie };
+      const mutating = { cookie, 'Content-Type': 'application/json', 'x-shm-csrf': csrfToken };
+
+      // State-changing, so CSRF is required.
+      const noCsrf = await fetch(base + '/api/instances/clinic-a/safe-mode', {
+        method: 'POST',
+        headers: { cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enable: true }),
+      });
+      expect(noCsrf.status).toBe(403);
+
+      // `enable` is mandatory and must be a boolean.
+      const bad = await fetch(base + '/api/instances/clinic-a/safe-mode', {
+        method: 'POST',
+        headers: mutating,
+        body: JSON.stringify({}),
+      });
+      expect(bad.status).toBe(400);
+
+      const driveBody = async (path: string, body: unknown, expectedKind: string): Promise<void> => {
+        const accepted = await fetch(base + path, { method: 'POST', headers: mutating, body: JSON.stringify(body) });
+        expect(accepted.status).toBe(202);
+        const { operationId } = (await accepted.json()) as { operationId: string };
+        let status = 'running';
+        let kind = '';
+        for (let i = 0; i < 50 && status === 'running'; i++) {
+          const op = await fetch(`${base}/api/operations/${operationId}`, { headers: authed });
+          const opBody = (await op.json()) as { status: string; kind: string };
+          status = opBody.status;
+          kind = opBody.kind;
+          if (status === 'running') await new Promise((r) => setTimeout(r, 10));
+        }
+        expect(status).toBe('succeeded');
+        expect(kind).toBe(expectedKind);
+      };
+
+      // Safe mode carries an explicit direction and journals as instance_safe_mode.
+      await driveBody('/api/instances/clinic-a/safe-mode', { enable: true }, 'instance_safe_mode');
+      // Plugin recover takes no body and journals as instance_plugin_recover.
+      await driveBody('/api/instances/clinic-a/plugin-recover', undefined, 'instance_plugin_recover');
     } finally {
       await rm(tmpRoot, { recursive: true, force: true });
     }

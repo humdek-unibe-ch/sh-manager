@@ -66,6 +66,8 @@ function fakeInstances(b: FakeBehaviour): ManagerInstanceActions {
     setEnv: unsupported,
     disable: unsupported,
     enable: unsupported,
+    safeMode: unsupported,
+    pluginRecover: unsupported,
     remove: unsupported,
     async peekPendingCmsWork(id) {
       if (b.pendingError) throw b.pendingError;

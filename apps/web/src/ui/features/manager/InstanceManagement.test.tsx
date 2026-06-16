@@ -306,6 +306,56 @@ describe('InstanceDetail', () => {
     expect(await screen.findByText(/instance_enable finished/)).toBeInTheDocument();
   });
 
+  it('toggles safe mode from the GUI with explicit enable AND disable options', async () => {
+    const user = userEvent.setup();
+    const client = makeFakeClient();
+    const safeModeSpy = vi.spyOn(client, 'setSafeMode');
+    render(<InstanceDetail client={client} instanceId="clinic-a" />);
+
+    await user.click(await screen.findByRole('button', { name: /^safe mode…$/i }));
+    const dialog = await screen.findByRole('dialog');
+
+    // Both directions are offered so the operator chooses (enable to stop a
+    // crash loop, disable to bring plugins back).
+    expect(within(dialog).getByRole('button', { name: /enable safe mode/i })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: /disable safe mode/i })).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole('button', { name: /enable safe mode/i }));
+    expect(safeModeSpy).toHaveBeenCalledWith('clinic-a', { enable: true });
+    expect(await screen.findByText(/instance_safe_mode finished/)).toBeInTheDocument();
+  });
+
+  it('disables safe mode from the GUI', async () => {
+    const user = userEvent.setup();
+    const client = makeFakeClient();
+    const safeModeSpy = vi.spyOn(client, 'setSafeMode');
+    render(<InstanceDetail client={client} instanceId="clinic-a" />);
+
+    await user.click(await screen.findByRole('button', { name: /^safe mode…$/i }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: /disable safe mode/i }));
+
+    expect(safeModeSpy).toHaveBeenCalledWith('clinic-a', { enable: false });
+    expect(await screen.findByText(/instance_safe_mode finished/)).toBeInTheDocument();
+  });
+
+  it('runs plugin recovery from the GUI and watches the live operation log', async () => {
+    const user = userEvent.setup();
+    const client = makeFakeClient();
+    const recoverSpy = vi.spyOn(client, 'pluginRecover');
+    render(<InstanceDetail client={client} instanceId="clinic-a" />);
+
+    await user.click(await screen.findByRole('button', { name: /^plugin recover…$/i }));
+    const dialog = await screen.findByRole('dialog');
+    // The dialog explains the crash-loop it fixes and that no data is deleted.
+    expect(within(dialog).getByText(/not found/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/no data is deleted/i)).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole('button', { name: /recover plugins/i }));
+    expect(recoverSpy).toHaveBeenCalledWith('clinic-a');
+    expect(await screen.findByText(/instance_plugin_recover finished/)).toBeInTheDocument();
+  });
+
   it('clones a production instance onto a new domain (fresh secrets announced, id validated)', async () => {
     const user = userEvent.setup();
     render(<InstanceDetail client={makeFakeClient()} instanceId="clinic-a" />);

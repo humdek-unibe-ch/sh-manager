@@ -77,6 +77,8 @@ function fakeInstances(b: FakeBehaviour): ManagerInstanceActions {
     setEnv: unsupported,
     disable: unsupported,
     enable: unsupported,
+    safeMode: unsupported,
+    pluginRecover: unsupported,
     remove: unsupported,
     backupSchedule: unsupported,
     setBackupSchedule: unsupported,
