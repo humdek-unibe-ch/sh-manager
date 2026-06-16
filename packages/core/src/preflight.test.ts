@@ -59,6 +59,44 @@ describe('runPreflight', () => {
     expect(portMsg).toMatch(/Traefik proxy/i);
   });
 
+  it('warns when the host kernel vm.overcommit_memory is 0 (the Redis warning) with the host fix', () => {
+    const r = runPreflight({
+      instanceId: 'website1',
+      currentVersion: '1.5.5',
+      targetVersion: '1.5.6',
+      resources: { ...healthyResources, overcommitMemory: 0 },
+      database: safeDb,
+    });
+    expect(r.status).toBe('warning');
+    const check = r.checks.find((c) => c.code === 'resources.overcommit');
+    expect(check?.severity).toBe('warning');
+    // Actionable: names the sysctl and the host command, not a vague note.
+    expect(check?.message).toMatch(/vm\.overcommit_memory/);
+    expect(check?.message).toMatch(/sysctl vm\.overcommit_memory=1/);
+  });
+
+  it('does not raise the overcommit advisory when it is 1 or could not be read', () => {
+    const enabled = runPreflight({
+      instanceId: 'website1',
+      currentVersion: '1.5.5',
+      targetVersion: '1.5.6',
+      resources: { ...healthyResources, overcommitMemory: 1 },
+      database: safeDb,
+    });
+    expect(enabled.checks.some((c) => c.code === 'resources.overcommit')).toBe(false);
+
+    // Unset (non-Linux host / unreadable /proc) must stay silent, not warn.
+    const unknown = runPreflight({
+      instanceId: 'website1',
+      currentVersion: '1.5.5',
+      targetVersion: '1.5.6',
+      resources: healthyResources,
+      database: safeDb,
+    });
+    expect(unknown.checks.some((c) => c.code === 'resources.overcommit')).toBe(false);
+    expect(unknown.status).toBe('ok');
+  });
+
   it('blocks an impossible direct-upgrade path', () => {
     const r = runPreflight({ instanceId: 'website1', currentVersion: '1.0.0', targetVersion: '1.5.0', resources: healthyResources, database: safeDb, canDirectUpgrade: false });
     expect(r.status).toBe('blocked');

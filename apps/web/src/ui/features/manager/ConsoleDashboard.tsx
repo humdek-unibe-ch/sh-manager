@@ -251,6 +251,10 @@ export function ConsoleDashboard({
                   </Text>
                 ),
               )}
+              <Text size="xs" c="dimmed">
+                The update recreates this GUI container. Afterwards, reload this page (hard refresh:
+                Ctrl/Cmd+Shift+R) to load the new GUI — you do not need to stop your SSH tunnel.
+              </Text>
             </>
           ) : null}
           <Group>

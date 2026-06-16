@@ -3426,6 +3426,30 @@ function clampLogTail(tail: number | undefined): number {
 }
 
 /**
+ * Turns a `docker compose logs <service>` failure into an operator-readable
+ * message. Compose's own "no such service" is the common, confusing case: the
+ * requested service is simply not part of THIS instance's compose project
+ * (e.g. `mailpit`, which only exists for local-mode instances that use the
+ * bundled test mailbox, or any service on an instance whose compose predates a
+ * later-added service). Translate it instead of surfacing the raw error.
+ */
+function logReadFailureMessage(service: LogService, err: unknown): string {
+  const detail = err instanceof Error ? err.message : String(err);
+  if (/no such service/i.test(detail)) {
+    if (service === 'mailpit') {
+      return (
+        `This instance has no "mailpit" service. Mailpit is the bundled test mailbox that only runs ` +
+        `for local-mode instances; it is a sink and never relays mail to a real server. To send real ` +
+        `outbound mail (e.g. through a campus/UniBE relay without a password), set the instance's SMTP ` +
+        `DSN in the mailer settings — for example smtp://smtp.unibe.ch:25 — rather than reading mailpit logs.`
+      );
+    }
+    return `This instance has no "${service}" service, so there are no logs to read for it.`;
+  }
+  return `Could not read logs for "${service}": ${detail}`;
+}
+
+/**
  * Reads the recent container logs for ONE service of an instance via
  * `docker compose logs --tail=<n> <service>`, redacting any secret-looking
  * content before returning.
@@ -3457,7 +3481,7 @@ export async function instanceLogs(
   const raw = await deps.runner
     .run(paths.dir, [...composeCommands.logs(tail), service])
     .then((r) => r.stdout || r.stderr)
-    .catch((err: unknown) => `Could not read logs for "${service}": ${err instanceof Error ? err.message : String(err)}`);
+    .catch((err: unknown) => logReadFailureMessage(service, err));
   return {
     instanceId,
     service,

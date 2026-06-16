@@ -182,17 +182,33 @@ dig +short your-domain.example.org    # must return THIS server's public IP
 
 ## "I updated the manager but still see the old GUI"
 
-The web console is a single-page app. Manager `1.5.2+` serves the app shell with
-`Cache-Control: no-cache` (and content-hashed assets as immutable), so a
-`sh-manager self-update` is picked up on the next load. If you updated from an
-**older** manager, do **one** hard refresh to drop the previously cached shell:
+The web console is a single-page app **already loaded in your browser**, so it
+does not change until the page reloads. Manager `1.5.2+` serves the app shell
+with `Cache-Control: no-cache` (and content-hashed assets as immutable), so a
+`sh-manager self-update` is picked up on the next load.
 
-- Chrome/Edge/Firefox: `Ctrl`+`Shift`+`R` (macOS: `Cmd`+`Shift`+`R`).
+1. **Reload the page.** Do **one** hard refresh to drop any previously cached
+   shell: `Ctrl`+`Shift`+`R` (macOS: `Cmd`+`Shift`+`R`).
 
-Also make sure only **one** `sh-manager web` process is running (an old
-container left bound to `127.0.0.1:8765` keeps serving the old version), and
-that you reach it through the SSH tunnel: `ssh -L 8765:127.0.0.1:8765
-you@your-server`, then open `http://127.0.0.1:8765`.
+2. **You do NOT need to stop the SSH tunnel.** A common worry is that the tunnel
+   "breaks" the update — it does not. The tunnel (`ssh -L 8765:127.0.0.1:8765
+   you@your-server`) forwards to the host port that the recreated `sh-manager-web`
+   container re-publishes on `127.0.0.1:8765`. `self-update` briefly drops
+   in-flight connections while it recreates the container; just reconnect the
+   tunnel if your client dropped it and reload `http://127.0.0.1:8765`. Tearing
+   the tunnel down is unnecessary and does not change the GUI version.
+
+3. **Make sure the GUI container was actually recreated.** `self-update`
+   recreates `sh-manager-web` on the new image **only when it runs in a separate
+   container** — use the wrapper from a normal shell (`./shm.sh update` or
+   `.\shm.ps1 update`) or `sh-manager self-update`. A `self-update` started
+   *inside* the `sh-manager-web` container cannot remove itself mid-run; it prints
+   a note asking you to restart it (`./shm.sh up`). After the recreate the CLI
+   reminds you to reload the browser.
+
+4. **Only one `sh-manager web` process may run.** An old container left bound to
+   `127.0.0.1:8765` keeps serving the previous version — stop it (`./shm.sh down`)
+   before starting the new one.
 
 ## See also
 

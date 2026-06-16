@@ -20,6 +20,15 @@ export interface PreflightResourceFacts {
   cpuCount: number;
   dockerAvailable: boolean;
   dockerComposeAvailable: boolean;
+  /**
+   * Linux kernel `vm.overcommit_memory` (`/proc/sys/vm/overcommit_memory`):
+   * `0` is the distro default that makes Redis warn "Memory overcommit must be
+   * enabled" on every start (a background save / replication fork may fail
+   * under memory pressure). `1` silences it. `null`/undefined when it could not
+   * be read (e.g. the manager runs on non-Linux / the file is unavailable), in
+   * which case no advisory is raised.
+   */
+  overcommitMemory?: number | null;
 }
 
 export interface PreflightThresholds {
@@ -102,6 +111,24 @@ export function runPreflight(input: PreflightInput): UpdatePreflightResult {
       code: 'resources.cpu',
       severity: 'warning',
       message: `Low CPU count: ${r.cpuCount} (recommended ${t.minCpu}).`,
+    });
+  }
+
+  // Redis logs "WARNING Memory overcommit must be enabled!" on every start when
+  // the HOST kernel has vm.overcommit_memory=0 (the common distro default). It
+  // is a host sysctl — neither the container nor the manager image can change it
+  // at runtime — so surface it as an advisory with the exact fix. Only when we
+  // could actually read it AND it is the problematic 0 (null/undefined = not on
+  // Linux / unreadable = no advisory).
+  if (r.overcommitMemory === 0) {
+    checks.push({
+      code: 'resources.overcommit',
+      severity: 'warning',
+      message:
+        'Linux vm.overcommit_memory is 0, so Redis warns "Memory overcommit must be enabled" on every ' +
+        'start and a background save/replication may fail under memory pressure. Fix it on the HOST: ' +
+        'run "sudo sysctl vm.overcommit_memory=1" and persist it with ' +
+        '"echo \'vm.overcommit_memory = 1\' | sudo tee /etc/sysctl.d/99-selfhelp-redis.conf".',
     });
   }
 

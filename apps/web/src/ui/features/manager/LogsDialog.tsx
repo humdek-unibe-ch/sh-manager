@@ -26,14 +26,22 @@ export interface LogsDialogProps {
   instanceId: string;
   opened: boolean;
   onClose: () => void;
+  /**
+   * Instance mode. `mailpit` only exists in the compose of local-mode instances
+   * (the bundled test mailbox), so the picker hides it otherwise — selecting it
+   * on a production instance would only ever yield "no such service: mailpit".
+   */
+  mode?: 'local' | 'production' | null;
 }
 
 /**
  * UI labels for the log-readable services. The server validates the requested
  * service against the authoritative `LOG_SERVICES`; this list only drives the
  * picker (kept here so the browser bundle never imports server-side code).
+ *
+ * `mailpit` is gated on local mode (see {@link LogsDialogProps.mode}).
  */
-const SERVICE_OPTIONS: { value: LogService; label: string }[] = [
+const SERVICE_OPTIONS: { value: LogService; label: string; localOnly?: boolean }[] = [
   { value: 'backend', label: 'Backend (Symfony)' },
   { value: 'frontend', label: 'Frontend (Next.js)' },
   { value: 'worker', label: 'Worker (messenger)' },
@@ -41,7 +49,7 @@ const SERVICE_OPTIONS: { value: LogService; label: string }[] = [
   { value: 'mysql', label: 'MySQL' },
   { value: 'redis', label: 'Redis' },
   { value: 'mercure', label: 'Mercure' },
-  { value: 'mailpit', label: 'Mailpit (local mode)' },
+  { value: 'mailpit', label: 'Mailpit (local test mailbox)', localOnly: true },
 ];
 
 const TAIL_OPTIONS = [
@@ -52,10 +60,17 @@ const TAIL_OPTIONS = [
   { value: '2000', label: 'Last 2000 lines' },
 ];
 
-export function LogsDialog({ client, instanceId, opened, onClose }: LogsDialogProps): JSX.Element {
+export function LogsDialog({ client, instanceId, opened, onClose, mode }: LogsDialogProps): JSX.Element {
   const [service, setService] = useState<LogService>('backend');
   const [tail, setTail] = useState(200);
   const [filter, setFilter] = useState('');
+
+  // Hide local-only services (mailpit) for non-local instances so the picker
+  // never offers a service the instance does not run.
+  const serviceOptions = useMemo(
+    () => SERVICE_OPTIONS.filter((o) => !o.localOnly || mode === 'local'),
+    [mode],
+  );
 
   const logs = useQuery({
     queryKey: ['manager', 'instance', instanceId, 'logs', service, tail],
@@ -111,7 +126,7 @@ export function LogsDialog({ client, instanceId, opened, onClose }: LogsDialogPr
           <SelectField
             label="Service"
             value={service}
-            options={SERVICE_OPTIONS}
+            options={serviceOptions}
             onChange={(v) => setService(v as LogService)}
           />
           <SelectField

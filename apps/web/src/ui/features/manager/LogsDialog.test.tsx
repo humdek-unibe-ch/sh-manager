@@ -81,4 +81,26 @@ describe('LogsDialog', () => {
 
     expect(await screen.findByText(/No log lines contain/i)).toBeInTheDocument();
   });
+
+  it('offers the Mailpit service only for local-mode instances', async () => {
+    const user = userEvent.setup();
+    const client = makeFakeClient({ logs: { 'clinic-a:backend': 'backend-1  | ready\n' } });
+    render(<LogsDialog client={client} instanceId="clinic-a" mode="local" opened onClose={() => {}} />);
+
+    expect(await screen.findByText(/ready/)).toBeInTheDocument();
+    await user.click(screen.getByLabelText('Service', { selector: 'input' }));
+    expect(await screen.findByRole('option', { name: /Mailpit/i })).toBeInTheDocument();
+  });
+
+  it('hides the Mailpit service for production instances (it has no such service)', async () => {
+    const user = userEvent.setup();
+    const client = makeFakeClient({ logs: { 'clinic-a:backend': 'backend-1  | ready\n' } });
+    render(<LogsDialog client={client} instanceId="clinic-a" mode="production" opened onClose={() => {}} />);
+
+    expect(await screen.findByText(/ready/)).toBeInTheDocument();
+    await user.click(screen.getByLabelText('Service', { selector: 'input' }));
+    // The other services are listed, but Mailpit is not an option.
+    expect(await screen.findByRole('option', { name: /Redis/i })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /Mailpit/i })).not.toBeInTheDocument();
+  });
 });

@@ -633,6 +633,7 @@ export function InstanceDetail({ client, instanceId }: InstanceDetailProps): JSX
       <LogsDialog
         client={client}
         instanceId={instanceId}
+        mode={summary.mode === 'local' ? 'local' : summary.mode === 'production' ? 'production' : null}
         opened={dialog === 'logs'}
         onClose={() => setDialog(null)}
       />

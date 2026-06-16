@@ -59,6 +59,23 @@ async function composeAvailable(): Promise<boolean> {
   }
 }
 
+/**
+ * Reads the host kernel's `vm.overcommit_memory` (the setting Redis warns
+ * about). `vm.*` sysctls are NOT network/PID-namespaced, so `/proc/sys` inside
+ * the manager container reflects the HOST value — exactly what we want to
+ * advise on. Returns `null` when unreadable (non-Linux host, restricted /proc),
+ * which the preflight treats as "no advisory".
+ */
+async function readOvercommitMemory(): Promise<number | null> {
+  try {
+    const raw = (await readFile('/proc/sys/vm/overcommit_memory', 'utf8')).trim();
+    const value = Number.parseInt(raw, 10);
+    return Number.isInteger(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
 async function portFree(port: number): Promise<boolean> {
   return new Promise((resolve) => {
     const srv = createServer();
@@ -177,6 +194,7 @@ export function realDeps(root: string, trustedKeys: TrustedKeysFile, opts: RealD
         cpuCount: os.cpus().length,
         dockerAvailable: await dockerAvailable(),
         dockerComposeAvailable: await composeAvailable(),
+        overcommitMemory: await readOvercommitMemory(),
       };
     },
     ensureNetwork: async (name): Promise<void> => {

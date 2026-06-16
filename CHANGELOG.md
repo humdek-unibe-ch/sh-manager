@@ -8,13 +8,51 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `1.5.5`). Registry releases
+- **The manager tool** uses its own semver (currently `1.5.6`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
   **`0.x`** line (core, frontend, scheduler, worker — all `0.1.0`).
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
+
+## [1.5.6] - 2026-06-16
+
+### Fixed
+- **"Could not read logs for mailpit … no such service: mailpit" confused
+  operators trying to send real mail.** The log picker offered **Mailpit** for
+  every instance, but Mailpit is the bundled local **test mailbox** that only
+  exists in local-mode compose (it catches mail and never relays it). The picker
+  now shows Mailpit **only for local-mode instances**, and a `no such service`
+  log read returns a clear, actionable message instead of the raw compose error —
+  for Mailpit it points operators at the real fix: set an SMTP relay DSN (e.g.
+  `smtp://smtp.unibe.ch:25` for a passwordless campus relay) via **Outbound
+  email** / `instance set-mailer`. New CLI + dialog tests.
+
+### Added
+- **`sh-manager doctor` now flags the Redis "Memory overcommit must be enabled"
+  warning.** When the host kernel has `vm.overcommit_memory=0` (the common distro
+  default that makes Redis warn on every start), doctor raises a
+  `resources.overcommit` advisory with the exact host fix
+  (`sudo sysctl vm.overcommit_memory=1`, persisted under `/etc/sysctl.d/`). It is
+  a host sysctl — the container/image cannot change it at runtime — and is a
+  warning, not a failure. New preflight tests cover the advisory and that it stays
+  silent when the value is `1` or unreadable (non-Linux hosts).
+
+### Changed
+- **Clearer guidance for "I updated but still see the old GUI".** `self-update`
+  now reminds you to **reload the browser** after the GUI container is recreated,
+  and states that you **do not need to stop the SSH tunnel** (it keeps forwarding
+  to the recreated container's published port). The operations dashboard's manager
+  card and the troubleshooting / reverse-proxy runbooks document the same: reload
+  (hard refresh), the tunnel is fine, and the GUI container only recreates when
+  `self-update` runs in a *separate* container (a run inside `sh-manager-web`
+  cannot restart itself).
+
+### Documentation
+- Troubleshooting gains **"Sending email / Mailpit vs a real SMTP relay"** and
+  **"Redis logs 'Memory overcommit must be enabled'"** sections; the reverse-proxy
+  runbook's old-GUI section now covers the SSH tunnel and the self-restart caveat.
 
 ## [1.5.5] - 2026-06-16
 

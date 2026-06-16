@@ -3,7 +3,7 @@
 Audience: Server operators
 Status: Active
 Applies to: `sh-manager` (manager tool `0.1.6+`, manages the SelfHelp 0.x pre-release platform line)
-Last verified: 2026-06-12
+Last verified: 2026-06-16
 Source of truth: `apps/cli/src/actions.ts`, `packages/core/src`, `packages/docker/src`, backend `src/EventListener`, `docker/Dockerfile`
 
 Symptom-first triage. Start with the two diagnostics that cover most cases, then
@@ -192,11 +192,70 @@ Components reported `not_configured` are optional and not failures.
 | Component | If degraded |
 | --- | --- |
 | database | Check `mysql` container + healthcheck; see "won't start" above. |
-| cache / redis | Check the `redis` container; confirm the instance points at it. |
+| cache / redis | Check the `redis` container; confirm the instance points at it. The "Memory overcommit must be enabled" line is a host warning, not a failure — see [Redis logs "Memory overcommit must be enabled"](#redis-logs-memory-overcommit-must-be-enabled). |
 | mercure | Realtime hub; `not_configured` is fine if you don't use realtime. |
 | worker (messenger) | Check the `worker` container logs; it consumes `plugin_ops`. |
 | scheduler | Check the `scheduler` container; it runs due jobs on a tick. |
-| mailer | `not_configured` means no SMTP; configure it to send mail. |
+| mailer | `not_configured` means no SMTP; configure it to send mail — see [Sending email / Mailpit](#sending-email-mailpit-vs-a-real-smtp-relay). |
+
+## Sending email / Mailpit vs a real SMTP relay
+
+Two different things are easy to confuse:
+
+- **Mailpit** is a bundled **local test mailbox**. It only runs for **local-mode**
+  instances, it **catches** outgoing mail so it never leaves the server, and it
+  **never relays** to a real mail server. It exists so local/dev installs can see
+  what *would* be sent. The default `MAILER_DSN` for a local instance is
+  `smtp://mailpit:1025`.
+- A **real SMTP relay** (e.g. the UniBE campus mail host) is what actually
+  delivers mail to recipients. You point the instance at it with a Symfony
+  Mailer **DSN**.
+
+So "send mail through the UniBE SMTP **with Mailpit**" cannot work — Mailpit is a
+sink, not a relay. Configure the relay instead.
+
+**Send through a campus/UniBE relay without a password** (the relay accepts mail
+from the server's network by IP, no credentials):
+
+- Web console: open the instance → **Outbound email** → set the DSN to
+  `smtp://smtp.unibe.ch:25` (use the "Use this example" link) → **Apply &
+  restart**. Replace the host/port with your relay if it differs.
+- CLI: `sh-manager instance set-mailer <id> --dsn "smtp://smtp.unibe.ch:25"`.
+
+The DSN is stored in the instance's restricted `secrets/secrets.env` (mode
+`0600`), overrides the Mailpit default, and the instance restarts so every
+service (backend/worker/scheduler) picks it up. With credentials, use
+`smtp://user:pass@host:587`; reset to the local mailbox with **Reset to test
+mailbox** (or `--clear`).
+
+**"Could not read logs for mailpit" / `no such service: mailpit`.** The instance
+has no `mailpit` service — it is local-only (and absent on production instances).
+The log picker now offers Mailpit only for local-mode instances. Nothing to fix;
+to send real mail, set an SMTP DSN as above.
+
+## Redis logs "Memory overcommit must be enabled"
+
+On startup Redis prints:
+
+```text
+WARNING Memory overcommit must be enabled! ... add 'vm.overcommit_memory = 1' to
+/etc/sysctl.conf and then reboot or run 'sysctl vm.overcommit_memory=1' ...
+```
+
+This is a **host kernel** setting (`vm.overcommit_memory`), not a SelfHelp bug,
+and it is a **warning, not a failure** — the instance and its cache work without
+it. It only matters if Redis ever does a background save / replication fork under
+memory pressure. Neither the container nor the manager image can change a host
+sysctl at runtime, so fix it **on the host** (once, for all instances):
+
+```bash
+sudo sysctl vm.overcommit_memory=1                                   # apply now
+echo 'vm.overcommit_memory = 1' | sudo tee /etc/sysctl.d/99-selfhelp-redis.conf   # persist across reboots
+```
+
+`sh-manager doctor` reports this as a warning (`resources.overcommit`) with the
+same fix when it detects `vm.overcommit_memory=0`. No restart of the instances is
+required; the warning stops the next time Redis starts.
 
 ## Can't reach the web UI / BFF
 
@@ -209,12 +268,24 @@ Components reported `not_configured` are optional and not failures.
   [security hardening](security-hardening.md)).
 - A blocked request may be the Host-header (DNS-rebinding) guard — use the tunnel
   and `http://127.0.0.1:8765`, not a public hostname.
-- **Updated the manager but still see the old GUI?** Manager `1.5.2+` serves the
-  app shell as `no-cache`, so a `self-update` shows up on the next load. Coming
-  from an older manager, do one hard refresh (`Ctrl`/`Cmd`+`Shift`+`R`) to drop
-  the cached shell, and make sure only **one** `sh-manager web` process is
-  running (a leftover container still bound to `127.0.0.1:8765` keeps serving the
-  old version). See [reverse proxy & Apache](reverse-proxy-and-apache.md#i-updated-the-manager-but-still-see-the-old-gui).
+- **Updated the manager but still see the old GUI?** The GUI is a single-page
+  app already loaded in your browser, so it does not change until you reload.
+  After a `self-update`:
+  - **Reload the page** — hard refresh (`Ctrl`/`Cmd`+`Shift`+`R`). Manager
+    `1.5.2+` serves the app shell `no-cache`, so the reload picks up the new
+    build; coming from an older manager, the hard refresh drops the stale shell.
+  - **You do NOT need to stop your SSH tunnel.** The tunnel forwards to the host
+    port the recreated container re-publishes (`127.0.0.1:8765`); a `self-update`
+    just drops in-flight connections briefly, so reconnect/reload — do not tear
+    the tunnel down.
+  - **The GUI container must actually be recreated.** Run the update from a
+    *separate* shell with the wrapper (`./shm.sh update` / `.\shm.ps1 update`) or
+    `sh-manager self-update`; this recreates `sh-manager-web` on the new image. A
+    `self-update` run *inside* the `sh-manager-web` container cannot restart
+    itself — it prints a note telling you to restart it (`./shm.sh up`).
+  - Make sure only **one** `sh-manager web` process is running (a leftover
+    container still bound to `127.0.0.1:8765` keeps serving the old version).
+  - See [reverse proxy & Apache](reverse-proxy-and-apache.md#i-updated-the-manager-but-still-see-the-old-gui).
 
 ## "DENIED (cross-instance)" from the manager
 

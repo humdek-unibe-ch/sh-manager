@@ -73,6 +73,13 @@ import {
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ROOT = process.env.SELFHELP_ROOT ?? '/opt/selfhelp';
+// After the GUI container is recreated on the new image, the browser still
+// holds the previously loaded single-page app until it reloads. Tell the
+// operator how to pick up the new GUI — and that an SSH tunnel does NOT need to
+// be torn down (it forwards to the host port the new container re-publishes).
+const GUI_RELOAD_HINT =
+  'Reload the manager GUI in your browser to load the new version (hard refresh: Ctrl/Cmd+Shift+R). ' +
+  'You do not need to stop your SSH tunnel — it keeps forwarding to the recreated container.';
 // Default trust anchor = the official SelfHelp production signing key, pinned
 // in this repo (packages/schemas/keys/). The dev fixture key under examples/
 // has a public seed and must only ever be used when passed explicitly
@@ -156,6 +163,7 @@ program
         const result = await applySelfUpdate(check);
         if (result.webRestarted) {
           console.log('The web GUI container was on an older image and has been restarted on the current one.');
+          console.log(GUI_RELOAD_HINT);
         } else if (result.webRestartHint) {
           console.log(result.webRestartHint);
         }
@@ -174,6 +182,7 @@ program
           ? `\nManager updated to ${check.latestVersion}. Every next run uses the new image.`
           : `\nManager updated to ${check.latestVersion}. Restart running manager processes to load it.`,
       );
+      if (result.webRestarted) console.log(GUI_RELOAD_HINT);
     } catch (err) {
       fail(err);
     }

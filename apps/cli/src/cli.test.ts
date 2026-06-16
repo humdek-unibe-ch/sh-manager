@@ -1218,6 +1218,38 @@ describe('instance lifecycle (offline)', () => {
     expect(logRunner.calls[0]?.args).toEqual(['logs', '--no-color', '--tail=2000', 'frontend']);
   });
 
+  it('explains the mailpit log "no such service" as the local-only test mailbox, pointing at the SMTP relay', async () => {
+    const { d } = await lifecycleDeps();
+    await installWebsite1(d);
+
+    // Production instances have no mailpit service: compose fails with "no such
+    // service: mailpit". The reader must translate that into a clear, actionable
+    // message instead of leaking the raw compose error.
+    d.runner = new RecordingComposeRunner(() => {
+      throw new Error('no configuration file provided: no such service: mailpit');
+    });
+
+    const res = await instanceLogs(d, 'website1', { service: 'mailpit' });
+    expect(res.text).toMatch(/no "mailpit" service/i);
+    expect(res.text).toMatch(/local-mode/i);
+    // It guides the operator to the real fix (set an SMTP DSN), not mailpit logs.
+    expect(res.text).toMatch(/smtp:\/\/smtp\.unibe\.ch:25/);
+    // The raw compose noise is not surfaced.
+    expect(res.text).not.toMatch(/no configuration file provided/i);
+  });
+
+  it('translates a generic "no such service" log failure for any service', async () => {
+    const { d } = await lifecycleDeps();
+    await installWebsite1(d);
+
+    d.runner = new RecordingComposeRunner(() => {
+      throw new Error('no such service: redis');
+    });
+
+    const res = await instanceLogs(d, 'website1', { service: 'redis' });
+    expect(res.text).toMatch(/no "redis" service/i);
+  });
+
   it('clone retries the database import when MySQL drops the first connection', async () => {
     // Regression: MySQL's first-boot temp-init server can answer the readiness
     // probe and then restart, so the first import dies mid-stream (ERROR 2002 /
