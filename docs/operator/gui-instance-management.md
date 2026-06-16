@@ -9,8 +9,8 @@ Source of truth: `apps/web/src/server.ts`, `apps/web/src/instances.ts`, `apps/we
 The web UI is **one operations console** that manages the full instance
 lifecycle from the browser: list and inspect instances, run health checks,
 browse backups, preview updates, and execute create / update / backup /
-restore / clone / change-address / remove / outbound-mail changes — with
-every action journaled and visible as a **live log** in the GUI.
+restore / clone / change-address / disable / enable / remove / outbound-mail
+changes — with every action journaled and visible as a **live log** in the GUI.
 
 The console uses the same **admin-shell layout** as the SelfHelp CMS admin
 UI: your **instances live in the left sidebar** (with live status dots and
@@ -181,9 +181,19 @@ manager version + self-update status, and the **Instances** section.
   recreated by an update — take a **support bundle** for a portable point-in-time
   copy. CLI equivalent:
   `sh-manager instance logs <id> [--service <svc>] [--tail <n>]`.
-- **Remove** — three modes, same as the CLI: `disable` (reversible),
-  `remove_containers_keep_data`, and `full_delete` (requires typing
-  `delete <id>`).
+- **Disable / Enable (toggle button)** — the reversible lifecycle switch. When
+  an instance is **active** the header shows **Disable…**: it stops the
+  containers (`docker compose stop`) but keeps every volume, secret, upload,
+  plugin and backup, marking the inventory `disabled` — the site goes offline
+  but nothing is destroyed. When an instance is **disabled** (or
+  `removed_keep_data`) the header instead shows **Enable**: it brings the
+  instance back online (`docker compose up -d`, remounts composer-installed
+  plugins, health-probes it) and marks it `active` again, so it returns exactly
+  as it was. CLI equivalents: `sh-manager instance remove <id> --mode disable`
+  and `sh-manager instance enable <id>`.
+- **Remove** — two modes now that disable is its own toggle (above):
+  `remove_containers_keep_data` and `full_delete` (requires typing
+  `delete <id>`). CLI equivalent: `sh-manager instance remove <id> --mode …`.
 - **Operation log viewer** — every action (including CMS-requested updates
   drained in the background) appears in the operation history; clicking an
   operation shows a **step checklist** for its kind (e.g. update, backup,
@@ -269,7 +279,9 @@ to a short poll of `GET /api/operations/:id` only while the stream is down).
 | `GET /api/instances/:id/env` | Show the effective non-secret environment (managed keys flagged read-only). |
 | `POST /api/instances/:id/env` | Persist non-secret env overrides; restarts the instance. |
 | `GET /api/instances/:id/logs?service=&tail=` | Recent (redacted) container logs for one service. |
-| `POST /api/instances/:id/remove` | Disable / remove / full-delete. |
+| `POST /api/instances/:id/disable` | Stop containers, keep all data (reversible). |
+| `POST /api/instances/:id/enable` | Bring a disabled / removed-keep-data instance back online. |
+| `POST /api/instances/:id/remove` | Remove-keep-data / full-delete. |
 | `GET /api/operations?instanceId=` | Operation history. |
 | `GET /api/operations/:id` | One operation incl. journaled log lines. |
 | `GET /api/events` | Authenticated Server-Sent-Events stream of operation changes (live console updates; no polling). |

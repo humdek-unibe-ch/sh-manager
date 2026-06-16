@@ -65,6 +65,26 @@ Stops serving but keeps everything. Marks the inventory entry disabled:
 sh-manager instance remove website1 --mode disable
 ```
 
+> In the web console this is the dedicated **Disable / Enable** toggle button on
+> the instance, not a Remove option — see
+> [GUI instance management](gui-instance-management.md).
+
+### Enable (bring a stopped instance back)
+
+The inverse of `disable` (and of `remove_containers_keep_data`): starts the
+containers again (`docker compose up -d` — starting the stopped ones or
+recreating the kept-data ones), remounts composer-installed plugins, health-probes
+the instance, and marks the inventory entry `active` again. All data is preserved,
+so it comes back exactly as it was:
+
+```bash
+sh-manager instance enable website1
+```
+
+In the web console this is the **Enable** button that appears on a disabled
+instance. Enabling refuses an instance that is already active, mid-operation
+(`installing`/`updating`), or in an `error` state.
+
 ### Remove containers, keep data (reversible)
 
 Removes the containers but keeps all persistent data (volumes, secrets, backups):
@@ -98,6 +118,6 @@ blocked and the command exits non-zero.
 
 | Mode | Containers | Data (volumes/secrets/backups) | Reversible |
 | --- | --- | --- | --- |
-| `disable` | kept (stopped) | kept | yes |
-| `remove_containers_keep_data` | removed | kept | yes (reinstall) |
+| `disable` | kept (stopped) | kept | yes — `sh-manager instance enable <id>` |
+| `remove_containers_keep_data` | removed | kept | yes — `sh-manager instance enable <id>` |
 | `full_delete` | removed | kept unless `--delete-volumes` / `--delete-backups` | only if data kept |

@@ -562,6 +562,16 @@ export function createManagerServer(options: ManagerServerOptions): ManagerServe
       await start('instance_set_address', instanceId, (opCtx) => im.instances.setAddress(instanceId, req, opCtx));
       return true;
     }
+    if (rest === '/disable' && ctx.method === 'POST') {
+      // Reversible quiesce: stop containers, keep all data (status -> disabled).
+      await start('instance_disable', instanceId, (opCtx) => im.instances.disable(instanceId, opCtx));
+      return true;
+    }
+    if (rest === '/enable' && ctx.method === 'POST') {
+      // Inverse of disable: bring the instance back online (status -> active).
+      await start('instance_enable', instanceId, (opCtx) => im.instances.enable(instanceId, opCtx));
+      return true;
+    }
     if (rest === '/remove' && ctx.method === 'POST') {
       const body = (ctx.body ?? {}) as Partial<RemoveInstanceRequest>;
       if (!body.mode) throw new HttpError(400, 'mode is required (disable | remove_containers_keep_data | full_delete).');

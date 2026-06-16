@@ -42,6 +42,7 @@ import {
   instanceHealth,
   instanceInstall,
   instanceList,
+  instanceEnable,
   instanceListInstalledPlugins,
   instanceLogs,
   LOG_SERVICES,
@@ -247,6 +248,16 @@ export interface ManagerInstanceActions {
   setName(instanceId: string, req: SetNameRequest, ctx: OperationContext): Promise<unknown>;
   /** Persists operator env overrides, regenerates `.env`, and restarts the instance. */
   setEnv(instanceId: string, req: SetEnvRequest, ctx: OperationContext): Promise<unknown>;
+  /**
+   * Stops the instance's containers but keeps every volume/secret/manifest and
+   * the inventory entry (status -> `disabled`). Reversible via {@link enable}.
+   */
+  disable(instanceId: string, ctx: OperationContext): Promise<unknown>;
+  /**
+   * Brings a `disabled` (or `removed_keep_data`) instance back online (`up -d`,
+   * remount plugins, status -> `active`). The inverse of {@link disable}.
+   */
+  enable(instanceId: string, ctx: OperationContext): Promise<unknown>;
   remove(instanceId: string, req: RemoveInstanceRequest, ctx: OperationContext): Promise<unknown>;
   /**
    * Cheap read-only peek: what CMS-requested work is waiting for the manager?
@@ -703,6 +714,30 @@ export function buildInstanceActions(opts: BuildInstanceActionsOptions): Manager
         `Applied ${res.applied} environment override${res.applied === 1 ? '' : 's'}; containers recreated.`,
       );
       return { applied: res.applied, restarted: res.restarted, health: res.health ?? null };
+    },
+
+    async disable(instanceId, ctx) {
+      await ctx.setPhase('disable');
+      // Disable is exactly the `disable` removal mode (compose stop + status
+      // disabled), reused so there is a single tested code path; it is just
+      // journaled under its own `instance_disable` kind now that it is a
+      // first-class toggle rather than a hidden "Remove" option.
+      const res = await instanceRemove(deps, instanceId, { mode: 'disable' });
+      if (!res.ok) throw new Error(`Disable blocked: ${res.errors.join('; ')}`);
+      await ctx.log(`Disabled ${instanceId}: stopped the containers, kept all data (reversible via Enable).`);
+      return { executed: res.executed };
+    },
+
+    async enable(instanceId, ctx) {
+      await ctx.setPhase('enable');
+      const res = await instanceEnable(deps, instanceId);
+      if (!res.ok) throw new Error(`Enable blocked: ${res.errors.join('; ')}`);
+      await ctx.log(
+        res.recreated
+          ? `Enabled ${instanceId}: recreated the containers and marked it active.`
+          : `Enabled ${instanceId}: started the containers and marked it active.`,
+      );
+      return { executed: res.executed, recreated: res.recreated, health: res.health ?? null };
     },
 
     async remove(instanceId, req, ctx) {

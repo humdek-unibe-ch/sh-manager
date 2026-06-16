@@ -93,6 +93,13 @@ describe('buildOperationSteps', () => {
     const map = states('cms_operations_drain', 'starting', 'running');
     expect(map.drain).toBe('running');
   });
+
+  it('renders the single-row disable/enable lifecycle steps', () => {
+    expect(states('instance_disable', 'disable', 'running').disable).toBe('running');
+    expect(states('instance_disable', 'disable', 'succeeded').disable).toBe('success');
+    expect(states('instance_enable', 'enable', 'running').enable).toBe('running');
+    expect(states('instance_enable', 'enable', 'succeeded').enable).toBe('success');
+  });
 });
 
 describe('operationKindLabel', () => {
@@ -109,6 +116,8 @@ describe('operationKindLabel', () => {
   it('humanises other kinds by replacing underscores', () => {
     expect(operationKindLabel('instance_backup')).toBe('instance backup');
     expect(operationKindLabel('instance_frontend_update')).toBe('instance frontend update');
+    expect(operationKindLabel('instance_disable')).toBe('instance disable');
+    expect(operationKindLabel('instance_enable')).toBe('instance enable');
   });
 });
 

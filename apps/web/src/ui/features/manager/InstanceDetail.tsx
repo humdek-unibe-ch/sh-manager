@@ -27,12 +27,24 @@ import { MailerDialog } from './MailerDialog';
 import { OperationLog, operationTone } from './OperationLog';
 import { operationKindLabel } from '../../lib/operation-steps';
 import { RemoveInstanceDialog } from './RemoveInstanceDialog';
+import { ToggleEnabledDialog } from './ToggleEnabledDialog';
 import { RenameInstanceDialog } from './RenameInstanceDialog';
 import { SetAddressDialog } from './SetAddressDialog';
 import { INSTANCES_KEY, instanceStatusTone } from './InstancesList';
 import { managerFallbackInterval, useManagerSseConnected } from './manager-sse-status';
 
-type DialogKind = 'update' | 'clone' | 'rename' | 'address' | 'mailer' | 'env' | 'logs' | 'remove' | null;
+type DialogKind =
+  | 'update'
+  | 'clone'
+  | 'rename'
+  | 'address'
+  | 'mailer'
+  | 'env'
+  | 'logs'
+  | 'disable'
+  | 'enable'
+  | 'remove'
+  | null;
 
 function healthTone(overall: InstanceHealthReport['overall']): 'ok' | 'warning' | 'error' | 'neutral' {
   switch (overall) {
@@ -293,6 +305,17 @@ export function InstanceDetail({ client, instanceId }: InstanceDetailProps): JSX
           <Button variant="secondary" onClick={() => setDialog('logs')}>
             Logs…
           </Button>
+          {/* Lifecycle toggle: a disabled/stopped instance can be brought back
+              online (Enable); a running one can be quiesced (Disable, reversible). */}
+          {summary.status === 'disabled' || summary.status === 'removed_keep_data' ? (
+            <Button variant="primary" disabled={busy} onClick={() => setDialog('enable')}>
+              Enable
+            </Button>
+          ) : summary.status === 'active' ? (
+            <Button variant="secondary" disabled={busy} onClick={() => setDialog('disable')}>
+              Disable…
+            </Button>
+          ) : null}
           <Button variant="danger" disabled={busy} onClick={() => setDialog('remove')}>
             Remove…
           </Button>
@@ -612,6 +635,13 @@ export function InstanceDetail({ client, instanceId }: InstanceDetailProps): JSX
         instanceId={instanceId}
         opened={dialog === 'logs'}
         onClose={() => setDialog(null)}
+      />
+      <ToggleEnabledDialog
+        client={client}
+        instanceId={instanceId}
+        action={dialog === 'disable' ? 'disable' : dialog === 'enable' ? 'enable' : null}
+        onClose={() => setDialog(null)}
+        onStarted={onStarted}
       />
       <RemoveInstanceDialog
         client={client}

@@ -8,13 +8,41 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `1.4.9`). Registry releases
+- **The manager tool** uses its own semver (currently `1.5.0`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
   **`0.x`** line (core, frontend, scheduler, worker — all `0.1.0`).
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
+
+## [1.5.0] - 2026-06-16
+
+### Added
+- **Instances now have a dedicated Disable / Enable toggle — you can bring a
+  disabled instance back.** Previously the only way to stop an instance was the
+  hidden *Disable* option inside the **Remove…** dialog, and once disabled there
+  was no way to start it again from the manager (you had to drop to the CLI /
+  Docker). Disabling is now a first-class, reversible lifecycle action with a
+  matching way back:
+  - The instance detail header shows **Disable…** when the instance is running
+    (`active`) and **Enable** when it is stopped (`disabled` or
+    `removed_keep_data`). Enable runs `docker compose up -d` — starting the
+    stopped containers of a disabled instance or recreating the kept-data ones —
+    remounts composer-installed plugins, runs a health probe, and flips the
+    inventory status back to `active`. All volumes, secrets, uploads, plugins and
+    backups are preserved, so the instance comes back exactly as it was.
+  - The **Remove…** dialog no longer carries the *Disable* option; it is now only
+    about removal (remove-containers-keep-data and full delete).
+  - Disable/enable are journaled under their own operation kinds
+    (`instance_disable` / `instance_enable`) instead of the generic
+    `instance_remove`, so the operation history reads "instance disable" /
+    "instance enable" with a live step checklist.
+  - New BFF routes `POST /api/instances/:id/disable` and `.../enable`, a new
+    `planEnable` pure planner in `@shm/instances` (refuses already-active /
+    transient / unknown instances), an `instanceEnable` action, and a parity
+    `sh-manager instance enable <id>` CLI command. Covered by planner, server
+    route, operation-step and web UI toggle tests.
 
 ## [1.4.9] - 2026-06-16
 

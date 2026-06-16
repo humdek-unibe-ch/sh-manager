@@ -37,6 +37,8 @@ export type OperationKind =
   | 'instance_set_mailer'
   | 'instance_set_name'
   | 'instance_set_env'
+  | 'instance_disable'
+  | 'instance_enable'
   | 'instance_remove'
   | 'cms_operations_drain';
 

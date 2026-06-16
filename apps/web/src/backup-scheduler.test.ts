@@ -74,6 +74,8 @@ function fakeInstances(b: FakeBehaviour): ManagerInstanceActions {
     setMailer: unsupported,
     setName: unsupported,
     setEnv: unsupported,
+    disable: unsupported,
+    enable: unsupported,
     remove: unsupported,
     backupSchedule: unsupported,
     setBackupSchedule: unsupported,

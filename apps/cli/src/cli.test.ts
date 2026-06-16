@@ -30,6 +30,7 @@ import {
   instanceInstall,
   instanceList,
   instanceLogs,
+  instanceEnable,
   instanceRemove,
   instanceRepair,
   instanceRestore,
@@ -891,6 +892,36 @@ describe('instance lifecycle (offline)', () => {
     expect(res.executed).toBe(true);
     const list = await instanceList(d);
     expect(list.find((i) => i.instanceId === 'website1')?.status).toBe('disabled');
+  });
+
+  it('enable brings a disabled instance back: up -d + status active again', async () => {
+    const { d, runner: lifecycleRunner } = await lifecycleDeps();
+    await installWebsite1(d);
+    await instanceRemove(d, 'website1', { mode: 'disable' });
+
+    const website1Dir = instancePaths('website1', root).dir;
+    const callsBefore = lifecycleRunner.calls.filter((c) => c.cwd === website1Dir).length;
+
+    const res = await instanceEnable(d, 'website1');
+    expect(res.executed).toBe(true);
+    expect(res.newStatus).toBe('active');
+
+    // It brought the stack back with `up -d` (never `-v`).
+    const enableCalls = lifecycleRunner.calls.filter((c) => c.cwd === website1Dir).slice(callsBefore);
+    expect(enableCalls.some((c) => c.args.join(' ') === 'up -d')).toBe(true);
+    expect(enableCalls.some((c) => c.args.includes('-v') || c.args.includes('--volumes'))).toBe(false);
+
+    // The inventory entry is active again.
+    const list = await instanceList(d);
+    expect(list.find((i) => i.instanceId === 'website1')?.status).toBe('active');
+  });
+
+  it('enable refuses an instance that is already active', async () => {
+    const { d } = await lifecycleDeps();
+    await installWebsite1(d);
+    const res = await instanceEnable(d, 'website1');
+    expect(res.executed).toBe(false);
+    expect(res.errors.join(' ')).toContain('already active');
   });
 
   it('remove --mode full_delete removes the entry + volumes after typed confirmation', async () => {

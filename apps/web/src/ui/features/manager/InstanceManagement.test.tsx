@@ -242,15 +242,18 @@ describe('InstanceDetail', () => {
     expect(await screen.findByText(/instance_restore finished/)).toBeInTheDocument();
   });
 
-  it('full delete demands the typed "delete <id>" confirmation; disable does not', async () => {
+  it('full delete demands the typed "delete <id>" confirmation; remove-containers does not', async () => {
     const user = userEvent.setup();
     render(<InstanceDetail client={makeFakeClient()} instanceId="clinic-a" />);
 
     await user.click(await screen.findByRole('button', { name: /remove…/i }));
     const dialog = await screen.findByRole('dialog');
 
-    // Default mode (disable) needs no typed confirmation.
-    expect(within(dialog).getByRole('button', { name: /disable instance/i })).toBeEnabled();
+    // Disable now lives on its own toggle button, NOT inside the Remove dialog.
+    expect(within(dialog).queryByRole('radio', { name: /^disable/i })).not.toBeInTheDocument();
+
+    // Default mode (remove containers, keep data) needs no typed confirmation.
+    expect(within(dialog).getByRole('button', { name: /remove containers/i })).toBeEnabled();
 
     await user.click(within(dialog).getByRole('radio', { name: /full delete/i }));
     const deleteButton = within(dialog).getByRole('button', { name: /delete instance/i });
@@ -261,6 +264,46 @@ describe('InstanceDetail', () => {
 
     await user.click(deleteButton);
     expect(await screen.findByText(/instance_remove finished/)).toBeInTheDocument();
+  });
+
+  it('shows a Disable toggle for an active instance and confirms the reversible stop', async () => {
+    const user = userEvent.setup();
+    const client = makeFakeClient();
+    const disableSpy = vi.spyOn(client, 'disableInstance');
+    render(<InstanceDetail client={client} instanceId="clinic-a" />);
+
+    // An active instance offers Disable… and NOT Enable.
+    const disableButton = await screen.findByRole('button', { name: /^disable…$/i });
+    expect(screen.queryByRole('button', { name: /^enable$/i })).not.toBeInTheDocument();
+
+    await user.click(disableButton);
+    const dialog = await screen.findByRole('dialog');
+    // It is explicit that data is kept and the action is reversible.
+    expect(within(dialog).getByText(/fully reversible/i)).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole('button', { name: /disable instance/i }));
+    expect(disableSpy).toHaveBeenCalledWith('clinic-a');
+    expect(await screen.findByText(/instance_disable finished/)).toBeInTheDocument();
+  });
+
+  it('shows an Enable toggle for a disabled instance and brings it back online', async () => {
+    const user = userEvent.setup();
+    const client = makeFakeClient({ instances: [fakeInstance({ status: 'disabled' })] });
+    const enableSpy = vi.spyOn(client, 'enableInstance');
+    render(<InstanceDetail client={client} instanceId="clinic-a" />);
+
+    // A disabled instance offers Enable and NOT Disable… (the whole point of
+    // the request: there was previously no way back from "disabled").
+    const enableButton = await screen.findByRole('button', { name: /^enable$/i });
+    expect(screen.queryByRole('button', { name: /^disable…$/i })).not.toBeInTheDocument();
+
+    await user.click(enableButton);
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText(/comes back exactly as it was/i)).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole('button', { name: /enable instance/i }));
+    expect(enableSpy).toHaveBeenCalledWith('clinic-a');
+    expect(await screen.findByText(/instance_enable finished/)).toBeInTheDocument();
   });
 
   it('clones a production instance onto a new domain (fresh secrets announced, id validated)', async () => {

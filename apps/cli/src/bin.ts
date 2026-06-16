@@ -33,6 +33,7 @@ import {
   instanceHealth,
   instanceInstall,
   instanceList,
+  instanceEnable,
   instanceRemove,
   instanceRepair,
   instanceRestore,
@@ -882,6 +883,23 @@ instance
         process.exit(1);
       }
       console.log(formatSteps(`Removed ${id} (${res.mode}):`, res.steps));
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+instance
+  .command('enable <id>')
+  .description('Bring a disabled (or removed-keep-data) instance back online')
+  .action(async (id: string) => {
+    try {
+      const d = await deps(program.opts().root as string);
+      const res = await instanceEnable(d, id);
+      if (!res.executed) {
+        console.error(formatSteps(`Enable blocked for ${id}:`, res.errors));
+        process.exit(1);
+      }
+      console.log(formatSteps(`Enabled ${id}:`, res.steps));
     } catch (err) {
       fail(err);
     }

@@ -142,6 +142,10 @@ export interface ApiClient {
   setInstanceName(instanceId: string, req: SetNameRequest): Promise<StartedOperation>;
   /** Persist non-secret env overrides; the instance restarts automatically. */
   setInstanceEnv(instanceId: string, req: SetEnvRequest): Promise<StartedOperation>;
+  /** Stop the instance's containers but keep all data (reversible via enable). */
+  disableInstance(instanceId: string): Promise<StartedOperation>;
+  /** Bring a disabled (or removed-keep-data) instance back online. */
+  enableInstance(instanceId: string): Promise<StartedOperation>;
   removeInstance(instanceId: string, req: RemoveInstanceRequest): Promise<StartedOperation>;
 }
 
@@ -294,6 +298,10 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       request<StartedOperation>(`/api/instances/${encodeURIComponent(instanceId)}/name`, 'POST', req),
     setInstanceEnv: (instanceId, req) =>
       request<StartedOperation>(`/api/instances/${encodeURIComponent(instanceId)}/env`, 'POST', req),
+    disableInstance: (instanceId) =>
+      request<StartedOperation>(`/api/instances/${encodeURIComponent(instanceId)}/disable`, 'POST'),
+    enableInstance: (instanceId) =>
+      request<StartedOperation>(`/api/instances/${encodeURIComponent(instanceId)}/enable`, 'POST'),
     removeInstance: (instanceId, req) =>
       request<StartedOperation>(`/api/instances/${encodeURIComponent(instanceId)}/remove`, 'POST', req),
   };

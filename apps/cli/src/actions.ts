@@ -93,6 +93,7 @@ import {
   instancePaths,
   instancesDir,
   nodeSecretIO,
+  planEnable,
   planRemove,
   proxyDir,
   readInstanceSecrets,
@@ -103,6 +104,7 @@ import {
   withMailerDsn,
   writeFileAtomic,
   writeInstanceSecrets,
+  type EnablePlan,
   type GenerateSecretsOptions,
   type InstancePaths,
   type RemoveMode,
@@ -2793,6 +2795,78 @@ export async function instanceRemove(
   }
 
   return { ...plan, executed: true };
+}
+
+// ---------------------------------------------------------------------------
+// instance enable (bring a disabled / removed-keep-data instance back online)
+// ---------------------------------------------------------------------------
+
+export interface EnableResult extends EnablePlan {
+  executed: boolean;
+  /** Post-start health probe, when the manifest was readable. */
+  health?: HealthReport;
+}
+
+/**
+ * Re-enables a stopped instance — the inverse of the `disable` removal mode.
+ *
+ * `docker compose up -d` starts the stopped containers of a `disabled` instance
+ * and recreates the removed containers of a `removed_keep_data` one; either way
+ * all volumes/secrets/config are still on disk, so the instance comes back with
+ * its data intact. After a recreate the composer-installed plugins are remounted
+ * from the plugin volume snapshot (no-op when intact). The inventory status is
+ * flipped back to `active` and a best-effort health probe is returned.
+ */
+export async function instanceEnable(deps: ActionDeps, instanceId: string): Promise<EnableResult> {
+  const store = new InventoryStore(deps.root);
+  const inventory = await store.read();
+  const plan = planEnable({ instanceId }, inventory);
+  if (!plan.ok) return { ...plan, executed: false };
+
+  const paths = instancePaths(instanceId, deps.root);
+
+  // The compose declares the shared proxy network as external; make sure it
+  // exists (servers bootstrapped before multi-instance support, or a restarted
+  // Docker daemon, may not have it yet).
+  if (deps.ensureNetwork) {
+    await deps.ensureNetwork(inventory.proxy.network ?? DEFAULT_PROXY_NETWORK);
+  }
+
+  // Bring the instance back: starts a stopped (disabled) stack or recreates a
+  // downed (removed_keep_data) one — never `-v`, so no volume is touched.
+  await deps.runner.run(paths.dir, composeCommands.upDetached());
+
+  // A recreate drops composer-installed plugins from the Symfony containers'
+  // writable layer; restore them from the plugin volume snapshot so the CMS
+  // keeps its plugins (no-op when none are installed / already intact).
+  const manifest = await new ManifestStore(instanceId, deps.root).read().catch(() => null);
+  if (manifest) {
+    await restorePluginStateAfterRecreate(deps, instanceId, manifest.versions.selfhelp);
+  }
+
+  // Flip inventory status back to active.
+  const entry = inventory.instances.find((i) => i.instanceId === instanceId);
+  if (entry) {
+    entry.status = plan.newStatus;
+    await store.write(inventory);
+  }
+
+  // Best-effort health probe so the operator immediately sees it came back; a
+  // slow first start must never fail the (already successful) enable itself.
+  let health: HealthReport | undefined;
+  if (manifest) {
+    try {
+      health = evaluateHealth(
+        instanceId,
+        await deps.probeHealth(manifest.routing.publicFrontendUrl, manifest.routing.browserApiPrefix),
+        deps.now,
+      );
+    } catch {
+      health = undefined;
+    }
+  }
+
+  return { ...plan, executed: true, ...(health ? { health } : {}) };
 }
 
 // ---------------------------------------------------------------------------

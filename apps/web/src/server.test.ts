@@ -421,6 +421,12 @@ describe('instance management APIs', () => {
       async remove() {
         return { executed: true };
       },
+      async disable() {
+        return { executed: true };
+      },
+      async enable() {
+        return { executed: true, recreated: false, health: null };
+      },
       async peekPendingCmsWork() {
         return { systemUpdate: null, pluginOps: false };
       },
@@ -535,6 +541,44 @@ describe('instance management APIs', () => {
       const ops = await fetch(base + '/api/operations?instanceId=clinic-a', { headers: authed });
       const opsBody = (await ops.json()) as { operations: { id: string }[] };
       expect(opsBody.operations.some((o) => o.id === operationId)).toBe(true);
+    } finally {
+      await rm(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('disables and re-enables an instance under their own journaled operation kinds', async () => {
+    const tmpRoot = await mkdtemp(path.join(tmpdir(), 'shm-mgmt-'));
+    try {
+      const { base, cookie, csrfToken } = await managementBase(tmpRoot);
+      const authed = { cookie };
+      const mutating = { cookie, 'Content-Type': 'application/json', 'x-shm-csrf': csrfToken };
+
+      // State-changing, so CSRF is required (same guard as remove).
+      const noCsrf = await fetch(base + '/api/instances/clinic-a/disable', { method: 'POST', headers: { cookie } });
+      expect(noCsrf.status).toBe(403);
+
+      const drive = async (path: string, expectedKind: string): Promise<void> => {
+        const accepted = await fetch(base + path, { method: 'POST', headers: mutating });
+        expect(accepted.status).toBe(202);
+        const { operationId } = (await accepted.json()) as { operationId: string };
+        let status = 'running';
+        let kind = '';
+        for (let i = 0; i < 50 && status === 'running'; i++) {
+          const op = await fetch(`${base}/api/operations/${operationId}`, { headers: authed });
+          const body = (await op.json()) as { status: string; kind: string };
+          status = body.status;
+          kind = body.kind;
+          if (status === 'running') await new Promise((r) => setTimeout(r, 10));
+        }
+        expect(status).toBe('succeeded');
+        expect(kind).toBe(expectedKind);
+      };
+
+      // Disable journals as instance_disable, NOT instance_remove — so the
+      // operator's history reads "instance disable", not a removal.
+      await drive('/api/instances/clinic-a/disable', 'instance_disable');
+      // Enable is its own inverse operation.
+      await drive('/api/instances/clinic-a/enable', 'instance_enable');
     } finally {
       await rm(tmpRoot, { recursive: true, force: true });
     }

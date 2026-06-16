@@ -7,4 +7,5 @@ export * from './drift.js';
 export * from './domain.js';
 export * from './readme.js';
 export * from './remove.js';
+export * from './enable.js';
 export * from './secrets.js';

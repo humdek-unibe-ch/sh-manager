@@ -82,6 +82,8 @@ const STEP_MAPS: Record<OperationKind, StepDef[]> = {
   instance_set_mailer: [{ id: 'apply mailer', label: 'Apply mailer & restart' }],
   instance_set_name: [{ id: 'rename', label: 'Rename instance' }],
   instance_set_env: [{ id: 'apply environment', label: 'Apply environment & recreate containers' }],
+  instance_disable: [{ id: 'disable', label: 'Stop containers (all data kept)' }],
+  instance_enable: [{ id: 'enable', label: 'Start containers & restore plugins' }],
   instance_remove: [{ id: 'remove', label: 'Remove instance' }],
   cms_operations_drain: [{ id: 'drain', label: 'Process pending CMS & plugin operations' }],
 };

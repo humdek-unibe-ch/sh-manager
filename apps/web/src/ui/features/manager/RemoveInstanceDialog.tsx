@@ -1,13 +1,16 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
 /**
- * Remove dialog with three explicit levels — there is deliberately no bare
+ * Remove dialog with two explicit levels — there is deliberately no bare
  * "Delete" button:
  *
- * - disable: stop containers, keep everything (reversible).
  * - remove_containers_keep_data: compose down WITHOUT volumes; data + backups stay.
  * - full_delete: destructive; requires typing `delete <id>` exactly (the same
  *   confirmation the CLI requires) and explicit opt-ins for volumes/backups.
+ *
+ * The reversible "disable" (stop containers, keep everything) lives on its own
+ * Disable/Enable toggle button now (see {@link ToggleEnabledDialog}), so this
+ * dialog is only about removal.
  */
 import { useState } from 'react';
 import { Code, Group, Modal, Radio, Stack } from '@mantine/core';
@@ -33,7 +36,7 @@ export function RemoveInstanceDialog({
   onClose,
   onStarted,
 }: RemoveInstanceDialogProps): JSX.Element {
-  const [mode, setMode] = useState<RemoveMode>('disable');
+  const [mode, setMode] = useState<RemoveMode>('remove_containers_keep_data');
   const [deleteVolumes, setDeleteVolumes] = useState(false);
   const [deleteBackups, setDeleteBackups] = useState(false);
   const [typed, setTyped] = useState('');
@@ -60,10 +63,6 @@ export function RemoveInstanceDialog({
       <Stack gap="md">
         <Radio.Group value={mode} onChange={(v) => setMode(v as RemoveMode)} label="What should happen?">
           <Stack gap="xs" mt="xs">
-            <Radio
-              value="disable"
-              label="Disable — stop the containers, keep all data. Reversible at any time."
-            />
             <Radio
               value="remove_containers_keep_data"
               label="Remove containers, keep data — compose down without volumes; database, uploads and backups stay."
@@ -107,7 +106,7 @@ export function RemoveInstanceDialog({
             loading={start.isPending}
             onClick={() => start.mutate()}
           >
-            {mode === 'disable' ? 'Disable instance' : mode === 'full_delete' ? 'Delete instance' : 'Remove containers'}
+            {mode === 'full_delete' ? 'Delete instance' : 'Remove containers'}
           </Button>
         </Group>
       </Stack>

@@ -550,6 +550,20 @@ export function makeFakeClient(opts: FakeClientOptions = {}): ApiClient {
       envConfigs[instanceId] = { ...current, entries: [...byKey.values()] };
       return started;
     },
+    async disableInstance(instanceId) {
+      const target = instances.find((i) => i.instanceId === instanceId);
+      if (!target) throw new ApiError(404, `Instance "${instanceId}" not found.`);
+      const started = startFakeOperation('instance_disable', instanceId);
+      target.status = 'disabled';
+      return started;
+    },
+    async enableInstance(instanceId) {
+      const target = instances.find((i) => i.instanceId === instanceId);
+      if (!target) throw new ApiError(404, `Instance "${instanceId}" not found.`);
+      const started = startFakeOperation('instance_enable', instanceId);
+      target.status = 'active';
+      return started;
+    },
     async removeInstance(instanceId) {
       return startFakeOperation('instance_remove', instanceId);
     },

@@ -63,6 +63,8 @@ function fakeInstances(b: FakeBehaviour): ManagerInstanceActions {
     setMailer: unsupported,
     setName: unsupported,
     setEnv: unsupported,
+    disable: unsupported,
+    enable: unsupported,
     remove: unsupported,
     async peekPendingCmsWork(id) {
       if (b.pendingError) throw b.pendingError;
