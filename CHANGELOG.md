@@ -8,13 +8,45 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `1.5.2`). Registry releases
+- **The manager tool** uses its own semver (currently `1.5.3`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
   **`0.x`** line (core, frontend, scheduler, worker — all `0.1.0`).
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
+
+## [1.5.3] - 2026-06-16
+
+### Fixed
+- **A production instance is no longer left installed-but-unreachable when the
+  server's first bootstrap could not start the shared proxy.** The Traefik proxy
+  (the single entry point that terminates TLS and routes every instance) was only
+  ever started by the **first** `server init`. If that bring-up failed — the
+  pre-1.5.1 proxy-network label bug, or an existing **Apache/nginx** holding
+  80/443 at the time — the inventory was already written, so every later
+  install/reinstall **skipped** init and the proxy stayed down: the instance
+  installed and provisioned fine but was unreachable and health reported
+  `unhealthy` (`backend fetch failed` / `frontend unreachable`), with no command
+  to bring just the proxy back. The manager now **idempotently (re)starts the
+  shared proxy on every production bring-up** — `instance install` (so a reinstall
+  self-heals), `instance set-address` (so re-applying the domain fixes routing),
+  and `instance enable` — and never starts it in local mode (which must not grab
+  80/443 on a dev host). Covered by new install/enable/repair proxy tests.
+
+### Added
+- **New `sh-manager server start` command (CLI) to (re)start the shared Traefik
+  proxy.** An explicit repair for a server whose proxy is down (failed first
+  init, a host that came up before Docker, a manually stopped proxy): it brings
+  the proxy up when the server hosts a production instance and is a clear no-op
+  on a local-only server. Pairs with the automatic self-heal above for operators
+  who prefer an explicit step.
+
+### Changed
+- **`docs/operator/reverse-proxy-and-apache.md` now documents the proxy
+  self-heal and the `server start` repair**, and clarifies that on a Docker-only
+  install the command is the `shm` alias/wrapper (the in-image binary is
+  `sh-manager`).
 
 ## [1.5.2] - 2026-06-16
 

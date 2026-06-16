@@ -40,6 +40,8 @@ import {
   instanceSetName,
   instanceSupportBundle,
   serverInit,
+  serverStartProxy,
+  ensureProxyRunning,
   serverPurge,
   serverRunScheduledBackups,
 } from './actions.js';
@@ -164,6 +166,86 @@ describe('CLI actions (offline)', () => {
     expect(networks).toEqual(['selfhelp_proxy', 'selfhelp_proxy']);
     const upCall = runner.calls.find((c) => c.cwd.includes('qa1'));
     expect(upCall?.args).toEqual(['up', '-d']);
+  });
+
+  it('instance install (production) (re)starts the shared proxy so a half-bootstrapped server self-heals', async () => {
+    // Regression: the proxy was only started by the FIRST server init. If that
+    // bring-up failed (the pre-1.5.1 proxy-network label bug, or an Apache/nginx
+    // holding 80/443 at init time) the inventory was still written, so every
+    // later reinstall skipped init and the proxy stayed down — the instance
+    // installed fine but was unreachable with health "unhealthy".
+    const d = await makeDeps();
+    await serverInit(d, { serverId: 's1', mode: 'production', letsencryptEmail: 'ops@example.ch' });
+    const proxyDirPath = path.join(root, 'proxy');
+    const proxyUps = () => runner.calls.filter((c) => c.cwd === proxyDirPath && c.args.join(' ') === 'up -d').length;
+    const before = proxyUps();
+    await instanceInstall(d, {
+      instanceId: 'website1',
+      displayName: 'Website 1',
+      mode: 'production',
+      domain: 'website1.example.ch',
+      registryUrl: 'https://humdek-unibe-ch.github.io/sh2-plugin-registry/',
+      version: 'latest',
+      bringUp: true,
+    });
+    expect(proxyUps()).toBe(before + 1);
+  });
+
+  it('instance install (local) never starts the shared proxy (must not grab 80/443 on a dev host)', async () => {
+    const d = await makeDeps();
+    await serverInit(d, { serverId: 'dev', mode: 'local' });
+    const proxyDirPath = path.join(root, 'proxy');
+    await instanceInstall(d, {
+      instanceId: 'demo1',
+      displayName: 'Demo 1',
+      mode: 'local',
+      localPort: 8080,
+      registryUrl: 'https://humdek-unibe-ch.github.io/sh2-plugin-registry/',
+      version: 'latest',
+      bringUp: true,
+    });
+    expect(runner.calls.filter((c) => c.cwd === proxyDirPath).length).toBe(0);
+  });
+
+  it('server start repairs a production server by (re)starting the proxy, and is a no-op for a local-only server', async () => {
+    const d = await makeDeps();
+    await serverInit(d, { serverId: 's1', mode: 'production', letsencryptEmail: 'ops@example.ch' });
+    await instanceInstall(d, {
+      instanceId: 'website1',
+      displayName: 'Website 1',
+      mode: 'production',
+      domain: 'website1.example.ch',
+      registryUrl: 'https://humdek-unibe-ch.github.io/sh2-plugin-registry/',
+      version: 'latest',
+      bringUp: false,
+    });
+    const proxyDirPath = path.join(root, 'proxy');
+    const proxyUps = () => runner.calls.filter((c) => c.cwd === proxyDirPath && c.args.join(' ') === 'up -d').length;
+    const before = proxyUps();
+    const res = await serverStartProxy(d);
+    expect(res.started).toBe(true);
+    expect(proxyUps()).toBe(before + 1);
+  });
+
+  it('ensureProxyRunning self-heals a stale (pre-1.5.1, non-external) proxy compose before starting it', async () => {
+    // The proxy compose written by a manager < 1.5.1 declared the shared network
+    // as non-external, so `docker compose up` aborts with a label mismatch — the
+    // exact state a server is stuck in after that failed first bootstrap. The
+    // start/ensure path must regenerate it (external network) so it can come up.
+    const d = await makeDeps();
+    await serverInit(d, { serverId: 's1', mode: 'production', letsencryptEmail: 'ops@example.ch' });
+    const proxyComposePath = path.join(root, 'proxy', 'compose.yaml');
+    const current = await readFile(proxyComposePath, 'utf8');
+    expect(current).toContain('external: true');
+    await writeFile(proxyComposePath, current.replace('external: true', 'external: false'));
+
+    await ensureProxyRunning(d, 'production');
+
+    const healed = await readFile(proxyComposePath, 'utf8');
+    expect(healed).toContain('external: true');
+    expect(healed).not.toContain('external: false');
+    // The Let's Encrypt email survives the regeneration (recovered from disk).
+    expect(healed).toContain('acme.email=ops@example.ch');
   });
 
   it('refuses to re-bootstrap an already-managed server unless import is acknowledged', async () => {

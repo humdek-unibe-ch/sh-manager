@@ -420,6 +420,78 @@ export async function serverInit(deps: ActionDeps, opts: ServerInitOptions): Pro
   return { proxyComposePath: boot.proxyComposePath, inventoryPath: store.path };
 }
 
+/**
+ * Idempotently (re)start the shared Traefik proxy. PRODUCTION only — local mode
+ * routes via published ports and must never grab 80/443 on a dev host.
+ *
+ * The proxy is the single entry point in production (it terminates TLS and routes
+ * every instance), but it was only ever started by the FIRST `server init`. If
+ * that first bring-up failed — the pre-1.5.1 proxy-network label bug, or another
+ * web server (Apache/nginx) holding 80/443 at the time — the inventory was still
+ * written, so every later install/reinstall skipped `server init` and the proxy
+ * stayed down: instances install fine but are unreachable and health is
+ * `unhealthy` with no command to bring just the proxy back. Calling this on every
+ * production bring-up (install, set-address, enable) self-heals that state, and
+ * `sh-manager server start` exposes it as an explicit repair. A no-op when the
+ * proxy compose has not been written yet (server not bootstrapped).
+ */
+export async function ensureProxyRunning(deps: ActionDeps, mode: InstanceMode): Promise<void> {
+  if (mode !== 'production') return;
+  const dir = proxyDir(deps.root);
+  const composePath = `${dir}/compose.yaml`;
+  if (!(await pathExists(composePath))) return;
+
+  const inventory = await new InventoryStore(deps.root).read().catch(() => null);
+  const network = inventory?.proxy.network ?? DEFAULT_PROXY_NETWORK;
+
+  // Regenerate the proxy compose from the current template before bringing it
+  // up. A proxy compose written by a manager < 1.5.1 declared the shared network
+  // as NON-external, so `docker compose up` tries to own the manager-created
+  // network and aborts with a label mismatch — exactly the state a server is
+  // stuck in after that failed first bootstrap. Re-emitting it (external network)
+  // self-heals that on disk. The Let's Encrypt email is recovered from the
+  // existing compose (it is required for the production template and is not
+  // stored elsewhere); without it we leave the file as-is and still attempt the
+  // bring-up so a current compose is unaffected.
+  const existing = await readFile(composePath, 'utf8').catch(() => '');
+  const letsencryptEmail = existing.match(/acme\.email=([^\s'"]+)/)?.[1];
+  if (letsencryptEmail) {
+    const boot = buildServerBootstrap({
+      serverId: inventory?.serverId ?? 'selfhelp',
+      managerVersion: deps.managerVersion,
+      mode: 'production',
+      root: deps.root,
+      ...(deps.engineRoot ? { engineRoot: deps.engineRoot } : {}),
+      letsencryptEmail,
+      proxyNetwork: network,
+    });
+    await writeFileAtomic(boot.proxyComposePath, boot.proxyComposeYaml);
+  }
+
+  await deps.ensureNetwork?.(network);
+  await deps.runner.run(dir, composeCommands.upDetached());
+}
+
+/**
+ * Explicit operator repair: ensure the shared production proxy is running. Reads
+ * the server's mode from any installed instance manifest (the inventory does not
+ * record server mode); defaults to production when at least one instance is
+ * production, so a server bootstrapped with a domain always re-starts its proxy.
+ */
+export async function serverStartProxy(deps: ActionDeps): Promise<{ started: boolean; network: string }> {
+  const inventory = await new InventoryStore(deps.root).read();
+  let production = false;
+  for (const entry of inventory.instances) {
+    const manifest = await new ManifestStore(entry.instanceId, deps.root).read().catch(() => null);
+    if (manifest?.mode === 'production') {
+      production = true;
+      break;
+    }
+  }
+  await ensureProxyRunning(deps, production ? 'production' : 'local');
+  return { started: production, network: inventory.proxy.network };
+}
+
 // ---------------------------------------------------------------------------
 // instance list
 // ---------------------------------------------------------------------------
@@ -619,6 +691,11 @@ export async function instanceInstall(
       .catch(() => DEFAULT_PROXY_NETWORK);
     await deps.ensureNetwork(network);
   }
+  // Guarantee the shared proxy is up in production: an instance only becomes
+  // reachable (and gets its TLS cert) through it, and a server whose first
+  // `server init` failed to start the proxy would otherwise install the
+  // instance but leave it unreachable on every retry.
+  if (bringUp) await ensureProxyRunning(deps, opts.mode);
   const res = await installInstance(artifacts, {
     root: deps.root,
     runner: deps.runner,
@@ -2647,6 +2724,10 @@ export async function instanceSetAddress(
       const network = inventory?.proxy.network ?? DEFAULT_PROXY_NETWORK;
       await deps.ensureNetwork(network);
     }
+    // Re-applying a production address is the operator's natural "fix routing"
+    // action — make sure the shared proxy is actually running, not just the
+    // instance, so a server whose proxy never started becomes reachable.
+    await ensureProxyRunning(deps, manifest.mode);
     await deps.runner.run(paths.dir, composeCommands.upDetached());
     // Recreated Symfony containers lose their composer-installed plugins;
     // restore them from the snapshot on the plugin volume (no-op when intact).
@@ -2824,6 +2905,7 @@ export async function instanceEnable(deps: ActionDeps, instanceId: string): Prom
   if (!plan.ok) return { ...plan, executed: false };
 
   const paths = instancePaths(instanceId, deps.root);
+  const manifest = await new ManifestStore(instanceId, deps.root).read().catch(() => null);
 
   // The compose declares the shared proxy network as external; make sure it
   // exists (servers bootstrapped before multi-instance support, or a restarted
@@ -2831,6 +2913,9 @@ export async function instanceEnable(deps: ActionDeps, instanceId: string): Prom
   if (deps.ensureNetwork) {
     await deps.ensureNetwork(inventory.proxy.network ?? DEFAULT_PROXY_NETWORK);
   }
+  // Re-enabling a production instance is pointless if the shared proxy is down;
+  // bring it up too so the instance is actually reachable again.
+  if (manifest) await ensureProxyRunning(deps, manifest.mode);
 
   // Bring the instance back: starts a stopped (disabled) stack or recreates a
   // downed (removed_keep_data) one — never `-v`, so no volume is touched.
@@ -2839,7 +2924,6 @@ export async function instanceEnable(deps: ActionDeps, instanceId: string): Prom
   // A recreate drops composer-installed plugins from the Symfony containers'
   // writable layer; restore them from the plugin volume snapshot so the CMS
   // keeps its plugins (no-op when none are installed / already intact).
-  const manifest = await new ManifestStore(instanceId, deps.root).read().catch(() => null);
   if (manifest) {
     await restorePluginStateAfterRecreate(deps, instanceId, manifest.versions.selfhelp);
   }

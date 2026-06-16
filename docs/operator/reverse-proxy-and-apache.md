@@ -7,9 +7,15 @@ SPDX-License-Identifier: MPL-2.0
 
 Audience: Server operators
 Status: Active
-Applies to: `sh-manager` (manager tool `1.5.2+`, production mode with real domains + TLS)
+Applies to: `sh-manager` (manager tool `1.5.3+`, production mode with real domains + TLS)
 Last verified: 2026-06-16
-Source of truth: `packages/traefik/src/index.ts`, `packages/docker/src/compose.ts`, `apps/cli/src/actions.ts` (`serverInit`), `packages/core/src/preflight.ts`
+Source of truth: `packages/traefik/src/index.ts`, `packages/docker/src/compose.ts`, `apps/cli/src/actions.ts` (`serverInit`, `ensureProxyRunning`, `serverStartProxy`), `packages/core/src/preflight.ts`
+
+> Command names: on a Docker-only install you run the manager through the `shm`
+> alias/wrapper from [install](install.md) (e.g. `shm server start`). The
+> in-image binary is `sh-manager`; this page writes `shm` for the commands you
+> type and `sh-manager` only when naming the tool itself. `docker ...` and
+> system commands are unaffected.
 
 Short version: **SelfHelp ships its own reverse proxy** (a shared
 [Traefik](https://traefik.io/) container) that terminates TLS and routes every
@@ -72,18 +78,41 @@ you cannot move. See [Option B](#option-b-you-must-keep-apache-on-this-host).
 
    ```bash
    sudo ss -ltnp 'sport = :80'   # should print no listener
-   sh-manager doctor             # the ports check should pass
+   shm doctor                    # the ports check should pass
    ```
 
-4. **Bring the proxy/instance up again.** Re-run the failed install, or, if the
-   instance already exists, re-apply its address to recreate the stack:
+4. **Start the shared proxy** (the most common missing piece — see the note
+   below). This is idempotent and safe to run any time:
 
    ```bash
-   sh-manager instance set-address <id> --domain <your-domain>   # same domain is a valid repair
+   shm server start
+   # → "Shared Traefik proxy (re)started on network \"selfhelp_proxy\"."
+   ```
+
+   Then confirm it is running and serving 80/443:
+
+   ```bash
+   docker compose -f /opt/selfhelp/proxy/compose.yaml ps   # traefik should be Up
+   ```
+
+   If the instance itself also needs recreating, re-apply its address (this now
+   ensures the proxy is up too):
+
+   ```bash
+   shm instance set-address <id> --domain <your-domain>   # same domain is a valid repair
    ```
 
    The certificate is issued automatically on the first request once DNS and
    ports are correct (see the checklists below).
+
+> **Why the proxy might be down.** The proxy is started by the first
+> `server init`. If that first bring-up failed (an older manager's network bug,
+> or Apache holding 80/443 at the time), the server still recorded itself as
+> initialized, so later installs skipped init and the proxy never came up —
+> `docker compose -f /opt/selfhelp/proxy/compose.yaml ps` shows nothing and every
+> instance is unreachable. Manager `1.5.3+` self-heals this on every production
+> `instance install` / `set-address` / `enable`; `shm server start` is the
+> explicit repair.
 
 ## Option B: you must keep Apache on this host
 

@@ -63,6 +63,11 @@ blocks; the site is unreachable or TLS never issues.
 
 Certificates are issued by the shared Traefik proxy via Let's Encrypt.
 
+- **The proxy must actually be running.** Check:
+  `docker compose -f <root>/proxy/compose.yaml ps` — if it lists nothing, the
+  proxy never started (e.g. a failed first bootstrap). Start it with
+  `sh-manager server start` (`1.5.3+`), then re-check. An installed-but-down
+  proxy is the usual cause of `backend fetch failed` / `frontend unreachable`.
 - **Ports 80 and 443 must be free and reachable** from the internet — `sh-manager
   doctor` checks they are free locally; also confirm no upstream firewall blocks
   them. An existing Apache/nginx on 80/443 is the usual blocker — see
@@ -85,8 +90,9 @@ nginx** holding 80/443 — the shared SelfHelp Traefik proxy must own them.
   `sudo systemctl disable --now apache2` (or `nginx`), then re-run `doctor`.
 - If you must keep the other web server, you cannot share 80/443 — see the
   options in [reverse proxy & Apache](reverse-proxy-and-apache.md).
-- After freeing the ports, re-apply the instance address to bring the stack
-  back: `sh-manager instance set-address <id> --domain <your-domain>`.
+- After freeing the ports, start the shared proxy: `sh-manager server start`
+  (`1.5.3+`), then verify with
+  `docker compose -f <root>/proxy/compose.yaml ps`.
 
 ## Out of disk space
 

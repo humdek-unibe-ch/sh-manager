@@ -48,6 +48,7 @@ import {
   drainInstanceOperations,
   drainInstancePluginOperations,
   serverInit,
+  serverStartProxy,
   serverPurge,
   serverRunScheduledBackups,
   type BackupScheduleStatus,
@@ -268,6 +269,23 @@ server
       console.log(`Server initialized. Root: ${root}. Manager: ${MANAGER_VERSION}. Instances: ${rows.length}.`);
       if (rows.length > 0) {
         console.log(formatTable(['INSTANCE', 'DOMAIN', 'STATUS', 'PROJECT'], rows.map((r) => [r.instanceId, r.domain, r.status, r.composeProject])));
+      }
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+server
+  .command('start')
+  .description('(Re)start the shared Traefik proxy (production). Repairs a server whose proxy never started or was stopped — instances installed but unreachable.')
+  .action(async () => {
+    try {
+      const d = await deps(program.opts().root as string);
+      const res = await serverStartProxy(d);
+      if (res.started) {
+        console.log(`Shared Traefik proxy (re)started on network "${res.network}".`);
+      } else {
+        console.log('No production instance on this server — the shared proxy is only used in production (local instances route via published ports).');
       }
     } catch (err) {
       fail(err);
