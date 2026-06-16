@@ -123,3 +123,20 @@ jobs:
             sbom.spdx.json
             trivy-results.sarif
             license-report.txt
+
+      - name: Send release notification email
+        if: ${{ secrets.NOTIFICATION_EMAIL != '' }}
+        uses: dawidd6/action-send-mail@v4
+        with:
+          server_address: ${{ secrets.MAIL_SERVER }}
+          server_port: ${{ secrets.MAIL_PORT }}
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: SelfHelp Manager ${{ github.ref_name }} released
+          to: ${{ secrets.NOTIFICATION_EMAIL }}
+          from: SelfHelp Manager CI
+          body: |
+            SelfHelp Manager version ${{ github.ref_name }} has been released.
+
+            Release: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ github.ref_name }}
+            Commit: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
