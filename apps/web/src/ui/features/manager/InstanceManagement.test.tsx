@@ -77,7 +77,7 @@ describe('InstanceDetail', () => {
     expect(screen.getByText(/db, uploads, config/)).toBeInTheDocument();
     expect(screen.getByText('12.0 MiB')).toBeInTheDocument();
     // Operation history shows the failed update.
-    expect(screen.getByText('instance update')).toBeInTheDocument();
+    expect(screen.getByText('instance core update')).toBeInTheDocument();
     expect(screen.getByText('failed')).toBeInTheDocument();
   });
 
