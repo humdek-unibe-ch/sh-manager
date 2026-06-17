@@ -81,12 +81,17 @@ async function executeFrontendOperation(
   const res = await instanceFrontendUpdate(deps, approved.instanceId, { target: targetFrontend });
 
   if (!res.executed || !res.report) {
+    // Surface the resolver's reasons (e.g. "core no longer in the registry —
+    // update the core first") so the CMS-driven loop is as actionable as the CLI.
+    const detail = res.plan.reasons.length > 0
+      ? `plan status: ${res.plan.status} - ${res.plan.reasons.join('; ')}`
+      : `plan status: ${res.plan.status}`;
     return {
       instanceId: approved.instanceId,
       targetVersion: targetFrontend,
       ok: false,
       rolledBack: false,
-      steps: [{ name: 'plan', status: 'failed', detail: `plan status: ${res.plan.status}` }],
+      steps: [{ name: 'plan', status: 'failed', detail }],
     };
   }
 

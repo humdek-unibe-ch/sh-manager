@@ -428,6 +428,74 @@ describe('planFrontendUpdate', () => {
     expect(plan.status).toBe('blocked');
     expect(plan.targetFrontendVersion).toBeNull();
   });
+
+  // Regression for the frontend/core compatibility bypass: the running core's
+  // requiredFrontendRange must gate a frontend-only update from the live
+  // registry release OR the value recorded in the instance lock, and must never
+  // be silently dropped when the core release is gone from the registry.
+  describe('running-core requiredFrontendRange enforcement (the bug scenario)', () => {
+    const releases = [
+      mkFrontend('0.1.17', '>=0.1.0 <0.2.0'),
+      mkFrontend('0.1.19', '>=0.1.0 <0.2.0'),
+    ];
+
+    it('blocks frontend 0.1.19 via the LIVE registry core range (core 0.1.11 requires <0.1.18)', () => {
+      const runningCore = mkCore('0.1.11', { frontendCompatibility: { requiredFrontendRange: '>=0.1.0 <0.1.18' } });
+      const plan = planFrontendUpdate({
+        instanceId: 'website1',
+        currentFrontendVersion: '0.1.17',
+        coreVersion: '0.1.11',
+        currentCore: runningCore,
+        requireCoreFrontendRange: true,
+        frontendReleases: releases,
+        target: '0.1.19',
+      });
+      expect(plan.status).toBe('blocked');
+      expect(plan.targetFrontendVersion).toBeNull();
+      expect(plan.reasons.join(' ')).toMatch(/not accepted by the running SelfHelp core/i);
+    });
+
+    it('blocks frontend 0.1.19 via the LOCK range when the core 0.1.11 has left the registry', () => {
+      const plan = planFrontendUpdate({
+        instanceId: 'website1',
+        currentFrontendVersion: '0.1.17',
+        coreVersion: '0.1.11',
+        currentCore: null,
+        currentCoreRequiredFrontendRange: '>=0.1.0 <0.1.18',
+        requireCoreFrontendRange: true,
+        frontendReleases: releases,
+        target: '0.1.19',
+      });
+      expect(plan.status).toBe('blocked');
+      expect(plan.reasons.join(' ')).toMatch(/required frontend range/i);
+    });
+
+    it('fails closed (blocked, actionable) when neither the registry core nor the lock range is available', () => {
+      const plan = planFrontendUpdate({
+        instanceId: 'website1',
+        currentFrontendVersion: '0.1.17',
+        coreVersion: '0.1.11',
+        requireCoreFrontendRange: true,
+        frontendReleases: releases,
+      });
+      expect(plan.status).toBe('blocked');
+      expect(plan.reasons.join(' ')).toMatch(/update the core first/i);
+    });
+
+    it('allows the frontend update when the lock-stored range accepts the target', () => {
+      const plan = planFrontendUpdate({
+        instanceId: 'website1',
+        currentFrontendVersion: '0.1.16',
+        coreVersion: '0.1.11',
+        currentCoreRequiredFrontendRange: '>=0.1.0 <0.2.0',
+        requireCoreFrontendRange: true,
+        frontendReleases: releases,
+        target: '0.1.19',
+      });
+      expect(plan.status).toBe('ok');
+      expect(plan.targetFrontendVersion).toBe('0.1.19');
+    });
+  });
 });
 
 describe('executeFrontendUpdate', () => {

@@ -23,6 +23,18 @@ export interface FrontendUpdatePlanInput {
   coreVersion: string;
   /** The current core release, when known, so its required frontend range is enforced. */
   currentCore?: CoreRelease | null;
+  /**
+   * The running core's required frontend range from the instance lock — the
+   * authoritative fallback enforced when {@link currentCore} is unavailable
+   * (core release no longer in the registry).
+   */
+  currentCoreRequiredFrontendRange?: string | null;
+  /**
+   * Fail closed when the running core's required frontend range cannot be
+   * determined (see {@link FrontendUpdateInput.requireCoreFrontendRange}). The
+   * instance frontend-update action sets this so the constraint is never bypassed.
+   */
+  requireCoreFrontendRange?: boolean;
   frontendReleases: FrontendRelease[];
   channel?: ReleaseChannel;
   target?: 'latest' | string;
@@ -47,6 +59,8 @@ export function planFrontendUpdate(input: FrontendUpdatePlanInput): FrontendUpda
     currentFrontendVersion: input.currentFrontendVersion,
     coreVersion: input.coreVersion,
     currentCore: input.currentCore ?? null,
+    currentCoreRequiredFrontendRange: input.currentCoreRequiredFrontendRange ?? null,
+    requireCoreFrontendRange: input.requireCoreFrontendRange ?? false,
     available: input.frontendReleases,
     target: input.target ?? 'latest',
     channel: input.channel ?? 'stable',

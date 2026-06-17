@@ -316,10 +316,14 @@ export async function instanceFrontendUpdate(
 
   const frontendReleases = await fetchAllFrontends(client, index.frontend, channel);
 
-  // Best-effort: fetch the running core release so its required frontend range
-  // is enforced too (a frontend-only update must never move to a frontend the
-  // running core forbids). If the core is no longer published, fall back to the
-  // candidate frontend's own required-core-range check.
+  // Enforce the running core's required frontend range so a frontend-only update
+  // can NEVER move to a frontend the running core forbids. The range is taken
+  // from the live registry core release when it is still published; otherwise it
+  // falls back to the value recorded in the instance lock at install/core-update
+  // time — so the constraint holds even after the core release leaves the
+  // registry index. `requireCoreFrontendRange` makes the plan fail closed if the
+  // range cannot be determined at all (a pre-1.6 lock whose core is also gone),
+  // guiding the operator to upgrade the core first instead of bypassing the check.
   let currentCore: CoreRelease | null = null;
   const coreRef = index.core.find(
     (r) =>
@@ -336,6 +340,8 @@ export async function instanceFrontendUpdate(
     currentFrontendVersion: manifest.versions.frontend,
     coreVersion: manifest.versions.selfhelp,
     currentCore,
+    currentCoreRequiredFrontendRange: lock.core.requiredFrontendRange ?? null,
+    requireCoreFrontendRange: true,
     frontendReleases,
     channel,
     ...(opts.target ? { target: opts.target } : {}),

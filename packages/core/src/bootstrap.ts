@@ -221,6 +221,10 @@ export function buildInstanceInstallArtifacts(input: InstanceInstallInput): Inst
       migrationVersion: input.core.database.migrationRange,
       pluginApiVersion: input.core.pluginApiVersion,
       signedPayloadSha256: input.core.security.signedPayloadSha256 ?? input.core.security.signature,
+      // Persist the core's required frontend range so a later frontend-only
+      // update can ALWAYS enforce "does the running core accept this frontend?"
+      // — even if this core release has since left the registry index.
+      requiredFrontendRange: input.core.frontendCompatibility.requiredFrontendRange,
     },
     services: input.services,
     plugins: input.pluginLock ?? {},

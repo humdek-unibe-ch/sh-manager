@@ -365,7 +365,10 @@ export function releaseShapesFromLock(
     backend: { image: manifest.images.backend, digest: lock.core.backendImageDigest },
     worker: { image: manifest.images.worker, digest: lock.core.workerImageDigest },
     scheduler: { image: manifest.images.scheduler, digest: lock.core.schedulerImageDigest },
-    frontendCompatibility: { requiredFrontendRange: '*' },
+    // Carry the stored required frontend range forward (frontend-update / clone /
+    // address-change all rebuild the lock through this shape): losing it to `*`
+    // would silently drop the running core's frontend-compatibility constraint.
+    frontendCompatibility: { requiredFrontendRange: lock.core.requiredFrontendRange ?? '*' },
     database: {
       migrationRange: lock.core.migrationVersion,
       destructive: false,
