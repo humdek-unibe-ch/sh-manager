@@ -8,7 +8,7 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `1.6.1`). Registry releases
+- **The manager tool** uses its own semver (currently `1.6.2`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
@@ -19,6 +19,17 @@ A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instanc
 ## [1.6.2] - 2026-06-17
 
 ### Fixed
+- **The GUI kept showing the previous manager version after `self-update`
+  because the release was tagged without bumping the code.** `v1.6.2` was
+  tagged from a commit that only edited the changelog, so the published
+  `:v1.6.2` image still had `package.json` and `MANAGER_VERSION` at `1.6.1` and
+  self-reported `1.6.1` everywhere (CLI `--version`, the web console header,
+  inventory stamps, and the "current version" `self-update` compares against) —
+  even though the update mechanism pulled and restarted correctly. The version
+  is now bumped in both files, and a new release guard
+  (`npm run version:check`, run in `manager-release.yml`) fails the release when
+  the git tag, root `package.json`, and `MANAGER_VERSION` disagree, so a
+  tag-only release can never publish an image that reports a stale version.
 - **Critical: frontend-only updates now ALWAYS enforce the running core's
   `requiredFrontendRange`, even when the installed core release has left the
   registry index.** Previously, if the core version an instance runs was no
