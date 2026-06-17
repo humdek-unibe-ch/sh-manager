@@ -1,7 +1,15 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
 // @vitest-environment jsdom
-import { describe, it, expect, vi } from 'vitest';
+/**
+ * Operations console dashboard/shell: the admin shell, environment status
+ * checks, manager version + self-update banner, and sign-out. Renders through
+ * the shared Mantine-aware `../../test/render` and the in-memory
+ * `../../test/fake-client`. The instance create-wizard flows live in the
+ * sibling `OperationsConsole.instance-flows.test.tsx`. The test bodies are
+ * unchanged.
+ */
+import { describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, userEvent } from '../../test/render';
 import { OperationsConsole } from './OperationsConsole';
 import { makeFakeClient } from '../../test/fake-client';

@@ -1,7 +1,44 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
-import { describe, it, expect } from 'vitest';
-import { isProblemLogLine } from './OperationLog';
+// @vitest-environment jsdom
+/**
+ * Operation log viewer rendering + the errors-only log filter.
+ *
+ * The render test was split out of the original `InstanceManagement.test.tsx`
+ * (renders through the shared Mantine-aware `../../test/render` and the
+ * in-memory `../../test/fake-client`); the `isProblemLogLine` unit tests are the
+ * original `OperationLog.test.tsx` cases. The test bodies are unchanged.
+ */
+import { describe, expect, it } from 'vitest';
+import { render, screen } from '../../test/render';
+import { OperationLog, isProblemLogLine } from './OperationLog';
+import { makeFakeClient, fakeOperation } from '../../test/fake-client';
+
+describe('OperationLog', () => {
+  it('renders the journaled log lines and the failure message', async () => {
+    const client = makeFakeClient({
+      operations: [
+        fakeOperation({
+          id: 'op-fail',
+          kind: 'instance_update',
+          status: 'failed',
+          log: ['backup: ok', 'migrate: error'],
+          error: 'Migration Version123 failed; instance rolled back.',
+          result: null,
+        }),
+      ],
+    });
+    render(<OperationLog client={client} operationId="op-fail" />);
+
+    expect(await screen.findByText(/backup: ok/)).toBeInTheDocument();
+    expect(screen.getByText(/migrate: error/)).toBeInTheDocument();
+    expect(screen.getByText('Operation failed')).toBeInTheDocument();
+    expect(screen.getByText(/rolled back/i)).toBeInTheDocument();
+    // The per-kind step checklist renders alongside the raw log.
+    expect(screen.getByText('Resolve & plan update')).toBeInTheDocument();
+    expect(screen.getByText('Run database migrations')).toBeInTheDocument();
+  });
+});
 
 describe('isProblemLogLine (errors-only log filter)', () => {
   it('keeps lines that report a problem', () => {
