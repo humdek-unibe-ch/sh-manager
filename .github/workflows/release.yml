@@ -37,6 +37,14 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # Fail fast (before the build/push) when a tag is pushed without bumping
+      # the code: the tag, root package.json, and MANAGER_VERSION must all match,
+      # so the published image never self-reports a stale version (the v1.6.2
+      # image that kept reporting 1.6.1 after a tag-only release).
+      - name: Verify the tag matches the code version
+        run: npm run version:check
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
       - name: Quality gate
         run: npm run check
       - name: Release smoke (install + update + multi-instance isolation)

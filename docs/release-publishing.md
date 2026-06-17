@@ -76,7 +76,8 @@ release.
 The manager ships as the single privileged Docker image
 (`ghcr.io/humdek-unibe-ch/sh-manager`). Release flow:
 
-1. Bump the version in exactly **two** places (they must match):
+1. Bump the version in exactly **two** places (they must match, and they must
+   match the tag you push in step 4):
    - `packages/schemas/src/version.ts` → `MANAGER_VERSION` — the single
      source of truth the CLI (`--version`), web UI, inventory stamps, and
      `requiresManager` checks all import;
@@ -88,6 +89,17 @@ The manager ships as the single privileged Docker image
 5. If the change alters a compatibility contract (`requiresManager`, schema
    versions, lock/manifest shape), coordinate it with the registry catalogue and
    the platform repos per the cross-repo compatibility process.
+
+> **Release guard — the tag must match the code.** `manager-release.yml` runs
+> `npm run version:check` (before the build) and fails the release when the git
+> tag, the root `package.json` version, and `MANAGER_VERSION` do not all agree.
+> This prevents a tag-only release (changelog/tag bumped but the code left at the
+> previous version) from publishing an image that self-reports a stale version —
+> the bug behind the `v1.6.2` image that kept reporting `1.6.1` after
+> `self-update`. To check locally before tagging: `npm run version:check -- v<version>`.
+> If a release ever ships mis-stamped, re-cut it from a commit that bumps both
+> version files (operators then pick the corrected image up on the next
+> `self-update`, which sees the higher released version and pulls it).
 
 Operators update via `sh-manager self-update` (checks the GitHub releases
 feed, pulls the new image tags, and restarts the `sh-manager-web` GUI
