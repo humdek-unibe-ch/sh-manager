@@ -8,13 +8,44 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `1.5.8`). Registry releases
+- **The manager tool** uses its own semver (currently `1.6.0`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
   **`0.x`** line (core, frontend, scheduler, worker — all `0.1.0`).
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
+
+## [1.6.0] - 2026-06-17
+
+### Changed
+- **Internal maintainability refactor — no behavior change.** CLI commands (names,
+  arguments, options, help text), BFF routes + response shapes + SSE framing, the
+  registry signature/checksum verification, the Docker guard, and all
+  install/update/backup/restore/lifecycle behavior are byte-for-byte unchanged;
+  the full test suite and the CLI `--help` surface were used as the regression net.
+- **New `@shm/app-actions` package = the shared application-service layer.** The
+  orchestration tier that both apps use (server bootstrap, instance
+  install/update/backup/restore/lifecycle, operation draining, the
+  diagnostic/recovery actions, the real `ActionDeps` wiring, self-update and the
+  Docker/HTTP backend clients) previously lived in `apps/cli/src` and was
+  imported across the app boundary by `apps/web`. It now lives in its own package
+  (split by domain under `actions/<area>`), so `apps/web` no longer reaches into
+  `apps/cli/src`. The package contains no CLI prompts/formatting, no React, and no
+  HTTP-route handling.
+- **Oversized modules split behind stable boundaries.** The CLI action monolith
+  became `app-actions/actions/*`; the web BFF (`server.ts`) was split into
+  `http/*` + `routes/*` behind `createManagerServer`; `apps/web/src/instances.ts`
+  now keeps the public interface/request types while the adapter lives in
+  `instances/adapter.ts` (+ `instances/cms-phase.ts`); `@shm/core`'s `update.ts`
+  was split into `update/{plan,execute,frontend,mysql,shared}.ts` behind its
+  barrel; and `apps/cli/src/bin.ts` keeps the top-level commands while the
+  `server` / `instance` / `admin` command groups moved to `commands/*` registrars.
+- **Large React components + test files decomposed.** `InstanceDetail`,
+  `CreateInstanceWizard`, and `BackupManager` were split into data hooks +
+  presentational sections/steps; the monolithic `cli.test.ts`, `server.test.ts`,
+  and `InstanceManagement.test.tsx` were split into per-area suites sharing common
+  test helpers, with the same assertions and coverage.
 
 ## [1.5.8] - 2026-06-16
 
