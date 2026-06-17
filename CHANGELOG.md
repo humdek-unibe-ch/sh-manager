@@ -8,7 +8,7 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `1.6.2`). Registry releases
+- **The manager tool** uses its own semver (currently `1.6.3`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
@@ -17,6 +17,18 @@ The manager has two version axes (see
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
 
 ## [Unreleased]
+
+## [1.6.3] - 2026-06-17
+
+### Fixed
+- **Version stamping: the manager image now correctly reports its version.** The
+  `v1.6.2` release was tagged without bumping `package.json` and `MANAGER_VERSION`,
+  so the published `:v1.6.2` image self-reported `1.6.1` everywhere (CLI `--version`,
+  web console header, inventory stamps). This release corrects the version to
+  `1.6.3` in all three sources (root `package.json`, `MANAGER_VERSION`, and git
+  tag). A new release guard (`npm run version:check`, run in the CI release
+  workflow) now fails the build when the tag, `package.json`, and `MANAGER_VERSION`
+  disagree, preventing future tag-only releases from shipping mis-stamped images.
 
 ## [1.6.2] - 2026-06-17
 
