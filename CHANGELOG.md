@@ -8,13 +8,66 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `1.6.0`). Registry releases
+- **The manager tool** uses its own semver (currently `1.6.1`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
   **`0.x`** line (core, frontend, scheduler, worker — all `0.1.0`).
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
+
+## [1.6.1] - 2026-06-17
+
+### Added
+- **The create-instance wizard warns about leftover data from a previous,
+  not-fully-removed install of the same id.** When you type an id that still has
+  orphaned Docker volumes (or an instance directory) on the server — the usual
+  cause of a "database Access denied" failure right after reinstalling — the
+  Basics step now shows exactly what was left behind and offers a one-click
+  **Remove leftover data**. You can also just continue: a fresh install already
+  reclaims leftover volumes automatically ("overwrite"). The check never touches
+  a registered instance's data (that stays the audited "Remove instance" path).
+  New BFF endpoints back it: `GET /api/instances/:id/orphans` and
+  `POST /api/instances/:id/orphans/cleanup` (CSRF-guarded).
+
+### Fixed
+- **Maintainers are emailed when the manager is published, the same way as the
+  frontend.** The release workflow now publishes a real, non-draft "latest"
+  GitHub Release with auto-generated notes, so GitHub emails everyone watching
+  the repo's releases — exactly the frontend's mechanism, needing no SMTP setup
+  (Watch → Custom → Releases). The optional explicit SMTP notification now also
+  derives `secure` from the port (`true` for implicit-TLS `465`), so a
+  configured relay no longer silently fails to connect.
+- **The "Open instance" button works for an instance literally named `new`.**
+  The create-instance wizard moved off `/instances/new` — which collided with an
+  instance whose id is `new`, so opening that instance reopened the wizard and
+  the button looked broken — to the dedicated `/new-instance` route. Every valid
+  instance id, including `new`, now has its own reachable workspace.
+- **Reinstalling a removed instance with the same name no longer fails with
+  "Access denied".** A full delete that kept the Docker volumes (or an orphan
+  from an older manager) left the `mysql_data` volume behind; reinstalling the
+  same id generated fresh secrets, but MySQL only applies credentials to an
+  EMPTY data volume, so the leftover rejected them forever and the install died
+  at `wait_db`. A genuinely fresh install (no on-disk secrets) now reclaims those
+  stale, unusable volumes before starting the stack, so reinstalling "just
+  works"; a retry/resume (secrets still present) keeps its matching volumes
+  untouched. The reclaim is reported in the operation log / CLI output.
+- **No more forced logout when installing a plugin (paired with frontend
+  `0.1.19`).** Applying a plugin restarts an instance's Symfony services
+  (`backend`, `worker`, `scheduler` — never the frontend), during which the CMS
+  auth check briefly saw a transient network/5xx error and bounced the operator
+  to the login page. The frontend now treats a transient backend outage as
+  "session kept" (the BFF already preserves the httpOnly cookies and answers an
+  in-flight refresh with `503 logged_in:true`) and only a genuine
+  `401 logged_in:false` expiry signs you out.
+
+### Changed
+- **Full delete removes the Docker volumes by default.** In the remove dialog the
+  "Also delete the Docker volumes (database contents, uploads)" checkbox now
+  defaults to ON for a full delete: keeping the volumes orphans the database (its
+  secrets are deleted with the instance) and blocks reinstalling the same id.
+  Opting out shows an inline warning explaining the consequence. The CLI is
+  unchanged — `instance remove … --delete-volumes` stays explicit.
 
 ## [1.6.0] - 2026-06-17
 
