@@ -213,8 +213,9 @@ Docker / network / filesystem side effects live behind injected boundaries.
 | `@shm/backup` | Backup manifest + integrity, restore/clone planning |
 | `@shm/support` | Secret redaction + support bundle assembly |
 | `@shm/auth` | Local operator authentication (email + password), roles, sessions, CSRF |
-| `apps/cli` | `sh-manager` command-line entrypoint |
-| `apps/web` | `sh-manager-web` localhost web UI: Vite React SPA + Node BFF |
+| `@shm/app-actions` | Shared application-service layer used by both apps (bootstrap, instance install/update/backup/restore/lifecycle, operation draining, recovery, `ActionDeps` wiring, self-update, backend clients) |
+| `apps/cli` | `sh-manager` command-line entrypoint (`commands/*` registrars over `@shm/app-actions`) |
+| `apps/web` | `sh-manager-web` localhost web UI: Vite React SPA + Node BFF (`http/*` + `routes/*`) |
 
 ## Requirements
 
