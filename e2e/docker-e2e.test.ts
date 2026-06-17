@@ -33,7 +33,7 @@ import { promisify } from 'node:util';
 import { composeProjectName } from '@shm/docker';
 import { ManifestStore, instancePaths, readInstanceSecrets } from '@shm/instances';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { ActionDeps } from '../apps/cli/src/actions.js';
+import type { ActionDeps } from '@shm/app-actions';
 import nacl from 'tweetnacl';
 import {
   drainInstancePluginOperations,
@@ -50,8 +50,8 @@ import {
   serverInit,
   serverPurge,
   serverRunScheduledBackups,
-} from '../apps/cli/src/actions.js';
-import { ComposeExecBackendOperationsClient } from '../apps/cli/src/operations-client.js';
+} from '@shm/app-actions';
+import { ComposeExecBackendOperationsClient } from '@shm/app-actions';
 import { buildImages, defaultRepos } from './build-images.mjs';
 import {
   E2E_KEY_ID,

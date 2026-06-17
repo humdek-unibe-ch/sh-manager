@@ -16,7 +16,7 @@
  * translation happens inside the manager (see @shm/docker host-paths); the
  * wrapper stays dumb on purpose.
  */
-import { MANAGER_IMAGE } from './self-update.js';
+import { MANAGER_IMAGE } from '@shm/app-actions';
 
 export type WrapperShell = 'powershell' | 'bash';
 

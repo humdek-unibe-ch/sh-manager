@@ -20,6 +20,7 @@ export default defineConfig({
       '@shm/backup': r('./packages/backup/src/index.ts'),
       '@shm/support': r('./packages/support/src/index.ts'),
       '@shm/auth': r('./packages/auth/src/index.ts'),
+      '@shm/app-actions': r('./packages/app-actions/src/index.ts'),
     },
   },
   test: {
