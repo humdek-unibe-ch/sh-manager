@@ -16,6 +16,26 @@ The manager has two version axes (see
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
 
+## [1.6.2] - 2026-06-17
+
+### Fixed
+- **Critical: frontend-only updates now ALWAYS enforce the running core's
+  `requiredFrontendRange`, even when the installed core release has left the
+  registry index.** Previously, if the core version an instance runs was no
+  longer published, the frontend update fell back to checking only the candidate
+  frontend's own `requiredCoreRange` — silently dropping the core's
+  frontend-compatibility constraint and allowing a potentially incompatible
+  frontend through (e.g. an instance on core `0.1.11` with
+  `requiredFrontendRange ">=0.1.0 <0.1.18"` could wrongly accept frontend
+  `0.1.19`). The installed core's required frontend range is now persisted in the
+  instance lock (`core.requiredFrontendRange`) at install/update time, so the
+  constraint is enforced from the live registry release when available and from
+  the lock otherwise. When the range cannot be determined at all (a pre-1.6 lock
+  whose core is also gone from the registry), the frontend update now fails
+  closed with a clear, actionable error ("Update the core first, then retry the
+  frontend update") instead of bypassing the check. The lock-file schema gains an
+  optional, additive `core.requiredFrontendRange`; older locks stay valid.
+
 ## [1.6.1] - 2026-06-17
 
 ### Added
