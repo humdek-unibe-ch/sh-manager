@@ -37,7 +37,11 @@ export function RemoveInstanceDialog({
   onStarted,
 }: RemoveInstanceDialogProps): JSX.Element {
   const [mode, setMode] = useState<RemoveMode>('remove_containers_keep_data');
-  const [deleteVolumes, setDeleteVolumes] = useState(false);
+  // Default ON: a full delete that KEEPS the Docker volumes orphans the
+  // database volume (its matching secrets are deleted with the instance), which
+  // then blocks reinstalling the same id with "Access denied". Keeping them is
+  // the unusual, advanced choice, so the operator must opt OUT.
+  const [deleteVolumes, setDeleteVolumes] = useState(true);
   const [deleteBackups, setDeleteBackups] = useState(false);
   const [typed, setTyped] = useState('');
 
@@ -83,6 +87,13 @@ export function RemoveInstanceDialog({
             <Checkbox checked={deleteVolumes} onChange={setDeleteVolumes}>
               Also delete the Docker volumes (database contents, uploads)
             </Checkbox>
+            {!deleteVolumes ? (
+              <Alert tone="warning" title="Keeping the volumes blocks reinstalling this id">
+                The database volume is kept, but its secrets are deleted with the instance — so a later
+                install of <Code>{instanceId}</Code> would fail with &quot;Access denied&quot;. Leave this
+                checked unless you specifically need the raw volumes for manual recovery.
+              </Alert>
+            ) : null}
             <Checkbox checked={deleteBackups} onChange={setDeleteBackups}>
               Also delete this instance&apos;s backups
             </Checkbox>

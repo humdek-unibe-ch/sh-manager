@@ -9,6 +9,7 @@ import {
   checkSchemaCompatibility,
   MANAGER_VERSION,
   parseSchemaVersion,
+  releaseVersionMismatch,
   requiresManagerSatisfied,
   SchemaCompatibilityError,
 } from './version.js';
@@ -22,6 +23,31 @@ describe('MANAGER_VERSION', () => {
     const pkgPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'package.json');
     const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { version: string };
     expect(MANAGER_VERSION).toBe(pkg.version);
+  });
+});
+
+describe('releaseVersionMismatch', () => {
+  it('passes when the tag, package.json, and MANAGER_VERSION all agree', () => {
+    expect(releaseVersionMismatch('v1.6.2', '1.6.2', '1.6.2')).toBeNull();
+  });
+
+  it('tolerates a tag with or without the leading v', () => {
+    expect(releaseVersionMismatch('1.6.2', '1.6.2', '1.6.2')).toBeNull();
+  });
+
+  it('fails when the tag is ahead of the code (the v1.6.2-reported-1.6.1 bug)', () => {
+    // The exact regression: tag v1.6.2 pushed while the code is still 1.6.1.
+    const reason = releaseVersionMismatch('v1.6.2', '1.6.1', '1.6.1');
+    expect(reason).toMatch(/tag "v1\.6\.2" does not match package\.json version "1\.6\.1"/);
+  });
+
+  it('fails when MANAGER_VERSION drifts from package.json even if the tag matches', () => {
+    const reason = releaseVersionMismatch('v1.6.2', '1.6.2', '1.6.1');
+    expect(reason).toMatch(/MANAGER_VERSION "1\.6\.1" does not match package\.json version "1\.6\.2"/);
+  });
+
+  it('fails when no tag is supplied', () => {
+    expect(releaseVersionMismatch('', '1.6.2', '1.6.2')).toMatch(/No release tag/);
   });
 });
 

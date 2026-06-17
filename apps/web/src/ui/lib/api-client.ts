@@ -15,6 +15,7 @@ import type {
   BackupSchedulePolicy,
   BackupScheduleStatus,
   BackupSummary,
+  CleanupOrphansResult,
   CloneInstanceRequest,
   CreateInstanceRequest,
   FrontendUpdateInstanceRequest,
@@ -22,6 +23,7 @@ import type {
   InstanceDetail,
   InstanceEnvConfig,
   InstanceLogsResult,
+  InstanceOrphanReport,
   InstanceSummary,
   LoginResult,
   LogService,
@@ -100,6 +102,10 @@ export interface ApiClient {
   // Server-level views used by the create wizard.
   getServerStatus(): Promise<ServerStatus>;
   runPreflight(req: { mode?: 'production' | 'local' }): Promise<PreflightResult>;
+  /** Leftover volumes/dir of a NOT-registered id (create-wizard orphan warning). */
+  scanOrphans(instanceId: string): Promise<InstanceOrphanReport>;
+  /** Remove the orphaned resources reported by {@link scanOrphans} ("remove it"). */
+  cleanupOrphans(instanceId: string): Promise<CleanupOrphansResult>;
 
   // Instance management.
   listInstances(): Promise<InstanceSummary[]>;
@@ -237,6 +243,10 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
 
     getServerStatus: () => request<ServerStatus>('/api/server/status', 'GET'),
     runPreflight: (req) => request<PreflightResult>('/api/server/preflight', 'POST', req),
+    scanOrphans: (instanceId) =>
+      request<InstanceOrphanReport>(`/api/instances/${encodeURIComponent(instanceId)}/orphans`, 'GET'),
+    cleanupOrphans: (instanceId) =>
+      request<CleanupOrphansResult>(`/api/instances/${encodeURIComponent(instanceId)}/orphans/cleanup`, 'POST'),
 
     listInstances: async () =>
       (await request<{ instances: InstanceSummary[] }>('/api/instances', 'GET')).instances,

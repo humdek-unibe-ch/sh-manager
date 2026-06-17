@@ -124,11 +124,30 @@ export interface FrontendUpdateInput {
   /** The instance's installed core version (unchanged by a frontend-only update). */
   coreVersion: string;
   /**
-   * The current core release, when known. When present, its
-   * `frontendCompatibility.requiredFrontendRange` is enforced too, so a
-   * frontend-only update never moves to a frontend the running core forbids.
+   * The current core release, when resolved from the registry. When present, its
+   * `frontendCompatibility.requiredFrontendRange` is the running core's
+   * frontend-compatibility constraint and is enforced, so a frontend-only update
+   * never moves to a frontend the running core forbids.
    */
   currentCore?: CoreRelease | null;
+  /**
+   * The running core's required frontend range as recorded in the instance lock
+   * at install/update time. This is the AUTHORITATIVE fallback when
+   * {@link currentCore} is null because the core release has left the registry
+   * index — it keeps the running core's constraint enforceable regardless.
+   */
+  currentCoreRequiredFrontendRange?: string | null;
+  /**
+   * Require the running core's frontend range to be known before allowing any
+   * candidate. When true and neither {@link currentCore} nor
+   * {@link currentCoreRequiredFrontendRange} provides it, every candidate is
+   * BLOCKED (fail-closed): the running core's `requiredFrontendRange` must
+   * always gate a frontend update, so an unknowable constraint stops the update
+   * with operator guidance instead of silently allowing a possibly incompatible
+   * frontend. Defaults to false so the pure resolver stays composable; the
+   * instance frontend-update action sets it true.
+   */
+  requireCoreFrontendRange?: boolean;
   available: FrontendRelease[];
   /** 'latest' picks the newest compatible non-blocked frontend; or a specific version. */
   target?: 'latest' | string;
@@ -150,22 +169,51 @@ export interface FrontendUpdateResult {
  * can target the same core range), so an instance on the latest core can still
  * have a newer frontend available. The core-driven {@link resolveCoreTarget}
  * never sees that case (it reports `up_to_date`), so this is the dedicated
- * resolver for it. Compatibility is enforced both ways: the candidate must
- * accept the running core (`backendCompatibility.requiredCoreRange`) and, when
- * the current core release is known, the running core must accept the candidate
- * (`frontendCompatibility.requiredFrontendRange`). Downgrades are blocked.
+ * resolver for it. Compatibility is enforced BOTH ways: the candidate must
+ * accept the running core (`backendCompatibility.requiredCoreRange`) AND the
+ * running core must accept the candidate (`frontendCompatibility.requiredFrontendRange`).
+ * The running core's range comes from the live registry release when known,
+ * otherwise from the value recorded in the instance lock — so it is enforced
+ * even after the core release leaves the registry. With `requireCoreFrontendRange`
+ * the resolver fails closed (blocks) when that range cannot be determined at all,
+ * never silently dropping the constraint. Downgrades are blocked.
  */
 export function resolveFrontendUpdate(input: FrontendUpdateInput): FrontendUpdateResult {
   const {
     currentFrontendVersion,
     coreVersion,
     currentCore = null,
+    currentCoreRequiredFrontendRange = null,
+    requireCoreFrontendRange = false,
     available,
     target = 'latest',
     channel = 'stable',
     advisories = [],
   } = input;
   const reasons: string[] = [];
+
+  // The running core's required frontend range: prefer the live registry release,
+  // fall back to the value persisted in the instance lock so the constraint
+  // survives the core release leaving the registry index.
+  const requiredFrontendRange: string | null =
+    currentCore?.frontendCompatibility.requiredFrontendRange ?? currentCoreRequiredFrontendRange ?? null;
+
+  // Fail closed: a frontend update must NEVER bypass the running core's
+  // requiredFrontendRange. When it is required but cannot be determined (the
+  // core release is gone from the registry AND the instance lock predates the
+  // stored range), block with actionable guidance rather than allowing a
+  // potentially incompatible frontend through.
+  if (requireCoreFrontendRange && requiredFrontendRange === null) {
+    return {
+      selected: null,
+      status: 'blocked',
+      reasons: [
+        `Cannot verify frontend compatibility: the running SelfHelp core ${coreVersion} is no longer in the ` +
+          `registry and its required frontend range was not recorded for this instance. Update the core first ` +
+          `(sh-manager instance update), then retry the frontend update.`,
+      ],
+    };
+  }
 
   const isCompatible = (f: FrontendRelease): boolean => {
     if (f.blocked) return false;
@@ -175,7 +223,7 @@ export function resolveFrontendUpdate(input: FrontendUpdateInput): FrontendUpdat
       return false;
     }
     if (!satisfiesLoose(coreVersion, f.backendCompatibility.requiredCoreRange)) return false;
-    if (currentCore && !satisfiesLoose(f.version, currentCore.frontendCompatibility.requiredFrontendRange)) {
+    if (requiredFrontendRange !== null && !satisfiesLoose(f.version, requiredFrontendRange)) {
       return false;
     }
     return true;
@@ -209,10 +257,21 @@ export function resolveFrontendUpdate(input: FrontendUpdateInput): FrontendUpdat
       };
     }
     if (!isCompatible(exact)) {
+      // Distinguish WHICH side of the bidirectional check failed so the operator
+      // knows the action: a frontend the running core forbids needs a core
+      // upgrade first; the generic message covers the candidate-rejects-core and
+      // advisory cases.
+      const forbiddenByCore =
+        requiredFrontendRange !== null && !satisfiesLoose(exact.version, requiredFrontendRange);
       return {
         selected: null,
         status: 'blocked',
-        reasons: [`Frontend ${target} is not compatible with SelfHelp core ${coreVersion}.`],
+        reasons: [
+          forbiddenByCore
+            ? `Frontend ${exact.version} is not accepted by the running SelfHelp core ${coreVersion} ` +
+              `(required frontend range "${requiredFrontendRange}"). Update the core first, then retry the frontend update.`
+            : `Frontend ${target} is not compatible with SelfHelp core ${coreVersion}.`,
+        ],
       };
     }
     return { selected: exact, status: 'ok', reasons };

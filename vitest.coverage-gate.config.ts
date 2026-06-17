@@ -17,7 +17,7 @@ export default defineConfig({
       'packages/backup/src/**/*.test.ts',
       'apps/web/src/backup-scheduler.test.ts',
       'apps/web/src/jobs.test.ts',
-      'apps/cli/src/cli.test.ts',
+      'apps/cli/src/cli-lifecycle.test.ts',
     ],
     coverage: {
       provider: 'v8',

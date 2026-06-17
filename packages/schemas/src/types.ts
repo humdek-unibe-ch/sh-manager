@@ -195,6 +195,15 @@ export interface InstanceLock {
     migrationVersion: string;
     pluginApiVersion: string;
     signedPayloadSha256: string;
+    /**
+     * The installed core's `frontendCompatibility.requiredFrontendRange`,
+     * persisted at install/update time. This is the authoritative source for a
+     * frontend-only update's "does the running core accept this frontend?" gate,
+     * so the constraint is ALWAYS enforceable even when the core release has
+     * since left the registry index. Optional only for forward-compatibility
+     * with pre-1.6 locks (which never stored it); new locks always set it.
+     */
+    requiredFrontendRange?: string;
   };
   services: {
     mysql: LockServiceEntry;

@@ -187,6 +187,137 @@ describe('resolveFrontendUpdate', () => {
   });
 });
 
+describe('resolveFrontendUpdate – running-core requiredFrontendRange enforcement', () => {
+  // The bug scenario: core 0.1.11 forbids frontends >= 0.1.18, frontend 0.1.19
+  // is published targeting a wide core range, and 0.1.17 is the newest the core
+  // still accepts. The core's range must gate the update from EITHER the live
+  // registry release OR the value recorded in the instance lock, and must never
+  // be silently dropped.
+  const CORE_RANGE = '>=0.1.0 <0.1.18';
+  const candidates = [
+    frontend('0.1.17', '>=0.1.0 <0.2.0'),
+    frontend('0.1.19', '>=0.1.0 <0.2.0'),
+  ];
+  const runningCore011 = (): CoreRelease => {
+    const c = core('0.1.11');
+    c.frontendCompatibility = { requiredFrontendRange: CORE_RANGE };
+    return c;
+  };
+
+  it('blocks frontend 0.1.19 (specific target) from the LIVE registry core range', () => {
+    const r = resolveFrontendUpdate({
+      currentFrontendVersion: '0.1.17',
+      coreVersion: '0.1.11',
+      currentCore: runningCore011(),
+      requireCoreFrontendRange: true,
+      available: candidates,
+      target: '0.1.19',
+    });
+    expect(r.status).toBe('blocked');
+    expect(r.selected).toBeNull();
+    expect(r.reasons.join(' ')).toMatch(/not accepted by the running SelfHelp core 0\.1\.11/i);
+    expect(r.reasons.join(' ')).toContain(CORE_RANGE);
+  });
+
+  it('blocks frontend 0.1.19 from the LOCK range even when the core left the registry (currentCore null)', () => {
+    // This is the exact bypass the fix closes: the core release is gone from the
+    // registry, but the range persisted in the lock still forbids 0.1.19.
+    const r = resolveFrontendUpdate({
+      currentFrontendVersion: '0.1.17',
+      coreVersion: '0.1.11',
+      currentCore: null,
+      currentCoreRequiredFrontendRange: CORE_RANGE,
+      requireCoreFrontendRange: true,
+      available: candidates,
+      target: '0.1.19',
+    });
+    expect(r.status).toBe('blocked');
+    expect(r.reasons.join(' ')).toMatch(/required frontend range/i);
+    expect(r.reasons.join(' ')).toContain(CORE_RANGE);
+  });
+
+  it("'latest' selects the newest frontend the lock range allows and skips the forbidden newer one", () => {
+    const r = resolveFrontendUpdate({
+      currentFrontendVersion: '0.1.16',
+      coreVersion: '0.1.11',
+      currentCoreRequiredFrontendRange: CORE_RANGE,
+      requireCoreFrontendRange: true,
+      available: candidates,
+    });
+    expect(r.status).toBe('ok');
+    expect(r.selected?.version).toBe('0.1.17');
+  });
+
+  it('succeeds when both ranges accept the target using ONLY the lock range (no registry core)', () => {
+    const r = resolveFrontendUpdate({
+      currentFrontendVersion: '0.1.16',
+      coreVersion: '0.1.11',
+      currentCore: null,
+      currentCoreRequiredFrontendRange: '>=0.1.0 <0.2.0',
+      requireCoreFrontendRange: true,
+      available: candidates,
+      target: '0.1.19',
+    });
+    expect(r.status).toBe('ok');
+    expect(r.selected?.version).toBe('0.1.19');
+  });
+
+  it('fails closed (blocked) for "latest" when the required range cannot be determined', () => {
+    const r = resolveFrontendUpdate({
+      currentFrontendVersion: '0.1.17',
+      coreVersion: '0.1.11',
+      currentCore: null,
+      currentCoreRequiredFrontendRange: null,
+      requireCoreFrontendRange: true,
+      available: candidates,
+    });
+    expect(r.status).toBe('blocked');
+    expect(r.selected).toBeNull();
+    expect(r.reasons.join(' ')).toMatch(/no longer in the registry/i);
+    expect(r.reasons.join(' ')).toMatch(/Update the core first/i);
+  });
+
+  it('fails closed (blocked) for a specific target when the required range cannot be determined', () => {
+    const r = resolveFrontendUpdate({
+      currentFrontendVersion: '0.1.17',
+      coreVersion: '0.1.11',
+      requireCoreFrontendRange: true,
+      available: candidates,
+      target: '0.1.19',
+    });
+    expect(r.status).toBe('blocked');
+    expect(r.reasons.join(' ')).toMatch(/no longer in the registry/i);
+  });
+
+  it('prefers the LIVE registry core range over the lock range when both are present', () => {
+    // The lock claims a wider range, but the authoritative live release forbids
+    // 0.1.19; the live range must win so a stale/looser lock cannot loosen the gate.
+    const r = resolveFrontendUpdate({
+      currentFrontendVersion: '0.1.17',
+      coreVersion: '0.1.11',
+      currentCore: runningCore011(),
+      currentCoreRequiredFrontendRange: '>=0.1.0 <0.2.0',
+      requireCoreFrontendRange: true,
+      available: candidates,
+      target: '0.1.19',
+    });
+    expect(r.status).toBe('blocked');
+  });
+
+  it('stays permissive when the constraint is not required (pure resolver default, no regression)', () => {
+    // Without requireCoreFrontendRange and with no core info, the resolver keeps
+    // its original permissive behaviour (the app-actions caller opts in to the
+    // fail-closed enforcement).
+    const r = resolveFrontendUpdate({
+      currentFrontendVersion: '0.1.16',
+      coreVersion: '0.1.11',
+      available: candidates,
+    });
+    expect(r.status).toBe('ok');
+    expect(r.selected?.version).toBe('0.1.19');
+  });
+});
+
 function scheduler(version: string, requiredCoreRange: string, blocked = false): SchedulerRelease {
   return {
     kind: 'selfhelp-scheduler-release',

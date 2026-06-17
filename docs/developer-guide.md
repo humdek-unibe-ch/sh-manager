@@ -67,8 +67,9 @@ The suite follows the canonical SelfHelp testing rules (see `AGENTS.md`):
 - **Pure logic** in `packages/*` is unit-tested directly with in-memory fakes
   for the injected boundaries — no Docker, no network, no real registry.
 - **CLI actions** are tested offline against signed **fixture** registries
-  (`apps/cli/src/cli.test.ts`, `admin.test.ts`, `operations-client.test.ts`).
-- **BFF** behaviour is tested via its request handler (`apps/web/src/server.test.ts`).
+  (`apps/cli/src/cli-*.test.ts` + `admin.test.ts`;
+  `packages/app-actions/src/operations-client.test.ts`).
+- **BFF** behaviour is tested via its request handler (`apps/web/src/server-*.test.ts`).
 - **Web UI** tests (`apps/web/src/ui/**/*.test.tsx`) run under jsdom. They render
   components through the shared wrapper in `apps/web/src/ui/test/render.tsx`
   (which provides `MantineProvider`, `QueryClientProvider`, and `Notifications`)
@@ -106,16 +107,23 @@ Run everything with `npm test`; scope while iterating with
 
 ### A new CLI command
 
-1. Add the pure orchestration to `apps/cli/src/actions.ts` (boundary effects via
-   the injected `ActionDeps`).
-2. Wire the Commander subcommand in `apps/cli/src/bin.ts`.
-3. Add an offline test in `apps/cli/src/cli.test.ts` against the signed fixtures.
+1. Add the pure orchestration to `@shm/app-actions` under `src/actions/<area>.ts`
+   (boundary effects via the injected `ActionDeps`). This shared layer is consumed
+   by both the CLI and the web BFF.
+2. Register the Commander subcommand in the matching
+   `apps/cli/src/commands/<group>.ts` registrar (`server`/`instance`/`admin`),
+   which `bin.ts` wires up by passing it a `CliContext`.
+3. Add an offline test against the signed fixtures, next to the action in
+   `@shm/app-actions` or in the matching `apps/cli/src/cli-*.test.ts`.
 
 ### A new package
 
 1. `packages/<name>/` with its own `package.json` (`@shm/<name>`), `tsconfig`,
    and `src/`.
-2. Add the source alias to `vitest.config.ts` and `apps/web/vite.config.ts`.
+2. Add the source alias where the package is resolved: root `tsconfig.json`
+   (`paths`) for typecheck, `vitest.config.ts` for tests, and — only if the
+   **SPA** imports it — `apps/web/vite.config.ts` (the Node BFF resolves it via
+   the tsconfig paths, not Vite).
 3. Keep the logic pure; expose any side effect as an injected interface.
 
 ### A new create-wizard step or field (web UI)

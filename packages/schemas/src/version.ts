@@ -16,8 +16,54 @@ import semver from 'semver';
  * Running manager version — the single source of truth.
  * Update here + root package.json + CHANGELOG.md when releasing (the CLI,
  * web UI, and inventory stamps all import this constant).
+ *
+ * This MUST equal the root `package.json` version (a test pins them together)
+ * AND the published git tag (`v<version>`). The release workflow runs
+ * {@link releaseVersionMismatch} so a tag pushed without bumping the code can
+ * never publish an image that self-reports a stale version (the v1.6.2 image
+ * that still reported 1.6.1 after a tag-only release).
  */
-export const MANAGER_VERSION = '1.5.8';
+export const MANAGER_VERSION = '1.6.3';
+
+/**
+ * Release-time guard: verify the published git tag, the root `package.json`
+ * version, and the compiled-in {@link MANAGER_VERSION} all agree BEFORE the
+ * image is built and pushed.
+ *
+ * Why this exists: a release that bumps only the tag (or only the changelog)
+ * ships an image whose self-reported version — `sh-manager --version`, the web
+ * console header, inventory stamps, and the "current version" `self-update`
+ * compares against — disagrees with its tag. That is exactly how the `v1.6.2`
+ * image kept reporting `1.6.1` after operators updated to it. `npm run check`
+ * (run at release) already pins `MANAGER_VERSION` to `package.json`; this adds
+ * the missing third leg (the tag) so the three can never drift.
+ *
+ * A leading `v` on the tag is optional. Returns `null` when everything matches;
+ * otherwise a human-readable reason the release should fail with.
+ */
+export function releaseVersionMismatch(
+  tag: string,
+  packageVersion: string,
+  managerVersion: string = MANAGER_VERSION,
+): string | null {
+  const tagVersion = tag.trim().replace(/^v/, '');
+  if (!tagVersion) {
+    return 'No release tag provided to verify against the package version.';
+  }
+  if (tagVersion !== packageVersion) {
+    return (
+      `Release tag "${tag}" does not match package.json version "${packageVersion}". ` +
+      `Bump package.json and MANAGER_VERSION to ${tagVersion} before tagging (or tag v${packageVersion}).`
+    );
+  }
+  if (managerVersion !== packageVersion) {
+    return (
+      `MANAGER_VERSION "${managerVersion}" does not match package.json version "${packageVersion}". ` +
+      'Update packages/schemas/src/version.ts so the image reports the released version.'
+    );
+  }
+  return null;
+}
 
 /** Document kinds that carry a `*Version`/`schemaVersion` field. */
 export type SchemaDocKind =

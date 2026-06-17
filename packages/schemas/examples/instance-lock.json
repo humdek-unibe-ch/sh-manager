@@ -14,7 +14,8 @@
     "workerImageDigest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
     "migrationVersion": "Version20260605081254",
     "pluginApiVersion": "0.1.0",
-    "signedPayloadSha256": "sha256:295e603ae29a301284312be75c65cd17f7bb735eba2e8d4f29449954f479750b"
+    "signedPayloadSha256": "sha256:295e603ae29a301284312be75c65cd17f7bb735eba2e8d4f29449954f479750b",
+    "requiredFrontendRange": ">=0.1.0 <0.2.0"
   },
   "services": {
     "mysql": {

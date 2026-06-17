@@ -33,7 +33,7 @@ import { ConsoleDashboard, CONSOLE_STATE_KEY } from './ConsoleDashboard';
 import { CreateInstanceWizard } from './CreateInstanceWizard';
 import { InstanceDetail } from './InstanceDetail';
 import { INSTANCES_KEY, instanceStatusTone } from './InstancesList';
-import { parseConsoleRoute } from './console-route';
+import { parseConsoleRoute, CREATE_INSTANCE_ROUTE } from './console-route';
 import { useManagerEvents } from './use-manager-events';
 import { managerFallbackInterval, useManagerSseConnected } from './manager-sse-status';
 
@@ -105,7 +105,7 @@ export function OperationsConsole({ client, onSignOut }: OperationsConsoleProps)
     if (autoOpenedWizard.current) return;
     if (instancesQuery.data && instancesQuery.data.length === 0) {
       autoOpenedWizard.current = true;
-      navigate('/instances/new');
+      navigate(CREATE_INSTANCE_ROUTE);
     }
   }, [instancesQuery.data, navigate]);
 
@@ -188,7 +188,7 @@ export function OperationsConsole({ client, onSignOut }: OperationsConsoleProps)
 
         <MantineAppShell.Section>
           <Divider my="sm" />
-          <Button variant="primary" block onClick={() => navigate('/instances/new')}>
+          <Button variant="primary" block onClick={() => navigate(CREATE_INSTANCE_ROUTE)}>
             New instance
           </Button>
         </MantineAppShell.Section>
@@ -219,7 +219,7 @@ export function OperationsConsole({ client, onSignOut }: OperationsConsoleProps)
             client={client}
             instances={instances}
             onOpenInstance={select}
-            onCreate={() => navigate('/instances/new')}
+            onCreate={() => navigate(CREATE_INSTANCE_ROUTE)}
             watchedOperationId={watchedOperationId}
             onHideWatched={() => setWatchedOperationId(null)}
           />

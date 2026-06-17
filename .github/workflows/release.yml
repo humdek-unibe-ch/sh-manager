@@ -37,6 +37,14 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # Fail fast (before the build/push) when a tag is pushed without bumping
+      # the code: the tag, root package.json, and MANAGER_VERSION must all match,
+      # so the published image never self-reports a stale version (the v1.6.2
+      # image that kept reporting 1.6.1 after a tag-only release).
+      - name: Verify the tag matches the code version
+        run: npm run version:check
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
       - name: Quality gate
         run: npm run check
       - name: Release smoke (install + update + multi-instance isolation)
@@ -117,24 +125,39 @@ jobs:
           chmod +x /usr/local/bin/cosign
           cosign sign --yes --key env://COSIGN_PRIVATE_KEY "${IMAGE}@${{ steps.build.outputs.digest }}"
 
-      - name: Attach artifacts to the release
+      # Publish a real, "latest" GitHub Release with auto-generated notes — the
+      # same mechanism the frontend release uses. Publishing a (non-draft)
+      # release is what makes GitHub email everyone watching the repo's
+      # releases, so maintainers get a notification on every manager publish
+      # exactly as they do for the frontend (Watch -> Custom -> Releases).
+      - name: Publish the GitHub release (+ artifacts)
         uses: softprops/action-gh-release@v2
         with:
+          name: SelfHelp Manager ${{ github.ref_name }}
+          generate_release_notes: true
+          make_latest: true
+          draft: false
+          prerelease: false
           files: |
             sbom.spdx.json
             trivy-results.sarif
             license-report.txt
 
-      # Best-effort: the release is already published by now, so a mail/SMTP
-      # hiccup must never mark the release run as failed. Only runs when the
-      # NOTIFICATION_EMAIL secret (and the MAIL_* SMTP secrets) are configured.
-      - name: Send release notification email
+      # Optional explicit SMTP notification ON TOP of the GitHub-native release
+      # email above — guarantees delivery to a fixed address even for a
+      # maintainer who does not watch the repo. Best-effort: the release is
+      # already published by now, so a mail/SMTP hiccup must never mark the
+      # release run as failed. Only runs when the NOTIFICATION_EMAIL secret (and
+      # the MAIL_* SMTP secrets) are configured. `secure` is set automatically
+      # for implicit-TLS relays on port 465 (587/STARTTLS uses secure:false).
+      - name: Send release notification email (SMTP, optional)
         if: ${{ env.NOTIFICATION_EMAIL != '' }}
         continue-on-error: true
         uses: dawidd6/action-send-mail@v4
         with:
           server_address: ${{ secrets.MAIL_SERVER }}
           server_port: ${{ secrets.MAIL_PORT }}
+          secure: ${{ secrets.MAIL_PORT == '465' }}
           username: ${{ secrets.MAIL_USERNAME }}
           password: ${{ secrets.MAIL_PASSWORD }}
           subject: SelfHelp Manager ${{ github.ref_name }} released

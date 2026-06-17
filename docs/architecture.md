@@ -59,8 +59,9 @@ sh-manager (CLI)            sh-manager-web (BFF)
 | `@shm/backup` | Backup manifest + integrity (checksums), restore/clone planning + secret policy, the pure backup **schedule engine** (due/catch-up, injected clock) and **GFS retention** classifier/prune planner (slot model + safety invariants). |
 | `@shm/support` | Secret redaction + support-bundle assembly (re-scanned for residual secrets). |
 | `@shm/auth` | Local operator authentication (email + password), roles, sessions, CSRF, password hashing, operator store. |
-| `apps/cli` | `sh-manager` command-line entrypoint + real boundary implementations. |
-| `apps/web` | `sh-manager-web` localhost BFF + the React SPA. |
+| `@shm/app-actions` | The shared **application-service layer** used by *both* apps: server bootstrap, instance install/update/backup/restore/lifecycle, operation draining, the diagnostic/recovery actions, the real `ActionDeps` wiring (`realDeps`/`loadTrustedKeys`), self-update, and the Docker/HTTP backend clients. Split by domain under `actions/<area>`; contains **no** CLI prompts/formatting, **no** React, and **no** HTTP-route handling. |
+| `apps/cli` | `sh-manager` command-line entrypoint: argv handling, the `server`/`instance`/`admin` command registrars (`commands/*`), the wrapper-script generator, and output formatting — thin adapters over `@shm/app-actions`. |
+| `apps/web` | `sh-manager-web` localhost BFF (`http/*` + `routes/*`) + the React SPA. |
 
 ## The web UI and the local BFF
 
@@ -106,6 +107,13 @@ mailer, remove), operations (history + journaled logs), a live `events` stream,
 and registry version listings — see
 [GUI instance management](operator/gui-instance-management.md) for the endpoint
 table.
+
+Internally the BFF is split into small modules behind `createManagerServer`:
+`http/*` (static serving, JSON response helpers, cookies, and the
+loopback/Host-header guard) and `routes/*` (auth, preflight, instance
+management, and the SSE stream). The route table, response shapes, auth/CSRF
+ordering, and SSE framing are unchanged by that split — `apps/web` consumes the
+shared actions from `@shm/app-actions` rather than reaching into `apps/cli`.
 
 ### Live updates (Server-Sent Events, not polling)
 

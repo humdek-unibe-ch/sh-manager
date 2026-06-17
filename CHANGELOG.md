@@ -8,13 +8,142 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `1.5.8`). Registry releases
+- **The manager tool** uses its own semver (currently `1.6.3`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
   **`0.x`** line (core, frontend, scheduler, worker — all `0.1.0`).
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
+
+## [Unreleased]
+
+## [1.6.3] - 2026-06-17
+
+### Fixed
+- **Version stamping: the manager image now correctly reports its version.** The
+  `v1.6.2` release was tagged without bumping `package.json` and `MANAGER_VERSION`,
+  so the published `:v1.6.2` image self-reported `1.6.1` everywhere (CLI `--version`,
+  web console header, inventory stamps). This release corrects the version to
+  `1.6.3` in all three sources (root `package.json`, `MANAGER_VERSION`, and git
+  tag). A new release guard (`npm run version:check`, run in the CI release
+  workflow) now fails the build when the tag, `package.json`, and `MANAGER_VERSION`
+  disagree, preventing future tag-only releases from shipping mis-stamped images.
+
+## [1.6.2] - 2026-06-17
+
+### Fixed
+- **The GUI kept showing the previous manager version after `self-update`
+  because the release was tagged without bumping the code.** `v1.6.2` was
+  tagged from a commit that only edited the changelog, so the published
+  `:v1.6.2` image still had `package.json` and `MANAGER_VERSION` at `1.6.1` and
+  self-reported `1.6.1` everywhere (CLI `--version`, the web console header,
+  inventory stamps, and the "current version" `self-update` compares against) —
+  even though the update mechanism pulled and restarted correctly. The version
+  is now bumped in both files, and a new release guard
+  (`npm run version:check`, run in `manager-release.yml`) fails the release when
+  the git tag, root `package.json`, and `MANAGER_VERSION` disagree, so a
+  tag-only release can never publish an image that reports a stale version.
+- **Critical: frontend-only updates now ALWAYS enforce the running core's
+  `requiredFrontendRange`, even when the installed core release has left the
+  registry index.** Previously, if the core version an instance runs was no
+  longer published, the frontend update fell back to checking only the candidate
+  frontend's own `requiredCoreRange` — silently dropping the core's
+  frontend-compatibility constraint and allowing a potentially incompatible
+  frontend through (e.g. an instance on core `0.1.11` with
+  `requiredFrontendRange ">=0.1.0 <0.1.18"` could wrongly accept frontend
+  `0.1.19`). The installed core's required frontend range is now persisted in the
+  instance lock (`core.requiredFrontendRange`) at install/update time, so the
+  constraint is enforced from the live registry release when available and from
+  the lock otherwise. When the range cannot be determined at all (a pre-1.6 lock
+  whose core is also gone from the registry), the frontend update now fails
+  closed with a clear, actionable error ("Update the core first, then retry the
+  frontend update") instead of bypassing the check. The lock-file schema gains an
+  optional, additive `core.requiredFrontendRange`; older locks stay valid.
+
+## [1.6.1] - 2026-06-17
+
+### Added
+- **The create-instance wizard warns about leftover data from a previous,
+  not-fully-removed install of the same id.** When you type an id that still has
+  orphaned Docker volumes (or an instance directory) on the server — the usual
+  cause of a "database Access denied" failure right after reinstalling — the
+  Basics step now shows exactly what was left behind and offers a one-click
+  **Remove leftover data**. You can also just continue: a fresh install already
+  reclaims leftover volumes automatically ("overwrite"). The check never touches
+  a registered instance's data (that stays the audited "Remove instance" path).
+  New BFF endpoints back it: `GET /api/instances/:id/orphans` and
+  `POST /api/instances/:id/orphans/cleanup` (CSRF-guarded).
+
+### Fixed
+- **Maintainers are emailed when the manager is published, the same way as the
+  frontend.** The release workflow now publishes a real, non-draft "latest"
+  GitHub Release with auto-generated notes, so GitHub emails everyone watching
+  the repo's releases — exactly the frontend's mechanism, needing no SMTP setup
+  (Watch → Custom → Releases). The optional explicit SMTP notification now also
+  derives `secure` from the port (`true` for implicit-TLS `465`), so a
+  configured relay no longer silently fails to connect.
+- **The "Open instance" button works for an instance literally named `new`.**
+  The create-instance wizard moved off `/instances/new` — which collided with an
+  instance whose id is `new`, so opening that instance reopened the wizard and
+  the button looked broken — to the dedicated `/new-instance` route. Every valid
+  instance id, including `new`, now has its own reachable workspace.
+- **Reinstalling a removed instance with the same name no longer fails with
+  "Access denied".** A full delete that kept the Docker volumes (or an orphan
+  from an older manager) left the `mysql_data` volume behind; reinstalling the
+  same id generated fresh secrets, but MySQL only applies credentials to an
+  EMPTY data volume, so the leftover rejected them forever and the install died
+  at `wait_db`. A genuinely fresh install (no on-disk secrets) now reclaims those
+  stale, unusable volumes before starting the stack, so reinstalling "just
+  works"; a retry/resume (secrets still present) keeps its matching volumes
+  untouched. The reclaim is reported in the operation log / CLI output.
+- **No more forced logout when installing a plugin (paired with frontend
+  `0.1.19`).** Applying a plugin restarts an instance's Symfony services
+  (`backend`, `worker`, `scheduler` — never the frontend), during which the CMS
+  auth check briefly saw a transient network/5xx error and bounced the operator
+  to the login page. The frontend now treats a transient backend outage as
+  "session kept" (the BFF already preserves the httpOnly cookies and answers an
+  in-flight refresh with `503 logged_in:true`) and only a genuine
+  `401 logged_in:false` expiry signs you out.
+
+### Changed
+- **Full delete removes the Docker volumes by default.** In the remove dialog the
+  "Also delete the Docker volumes (database contents, uploads)" checkbox now
+  defaults to ON for a full delete: keeping the volumes orphans the database (its
+  secrets are deleted with the instance) and blocks reinstalling the same id.
+  Opting out shows an inline warning explaining the consequence. The CLI is
+  unchanged — `instance remove … --delete-volumes` stays explicit.
+
+## [1.6.0] - 2026-06-17
+
+### Changed
+- **Internal maintainability refactor — no behavior change.** CLI commands (names,
+  arguments, options, help text), BFF routes + response shapes + SSE framing, the
+  registry signature/checksum verification, the Docker guard, and all
+  install/update/backup/restore/lifecycle behavior are byte-for-byte unchanged;
+  the full test suite and the CLI `--help` surface were used as the regression net.
+- **New `@shm/app-actions` package = the shared application-service layer.** The
+  orchestration tier that both apps use (server bootstrap, instance
+  install/update/backup/restore/lifecycle, operation draining, the
+  diagnostic/recovery actions, the real `ActionDeps` wiring, self-update and the
+  Docker/HTTP backend clients) previously lived in `apps/cli/src` and was
+  imported across the app boundary by `apps/web`. It now lives in its own package
+  (split by domain under `actions/<area>`), so `apps/web` no longer reaches into
+  `apps/cli/src`. The package contains no CLI prompts/formatting, no React, and no
+  HTTP-route handling.
+- **Oversized modules split behind stable boundaries.** The CLI action monolith
+  became `app-actions/actions/*`; the web BFF (`server.ts`) was split into
+  `http/*` + `routes/*` behind `createManagerServer`; `apps/web/src/instances.ts`
+  now keeps the public interface/request types while the adapter lives in
+  `instances/adapter.ts` (+ `instances/cms-phase.ts`); `@shm/core`'s `update.ts`
+  was split into `update/{plan,execute,frontend,mysql,shared}.ts` behind its
+  barrel; and `apps/cli/src/bin.ts` keeps the top-level commands while the
+  `server` / `instance` / `admin` command groups moved to `commands/*` registrars.
+- **Large React components + test files decomposed.** `InstanceDetail`,
+  `CreateInstanceWizard`, and `BackupManager` were split into data hooks +
+  presentational sections/steps; the monolithic `cli.test.ts`, `server.test.ts`,
+  and `InstanceManagement.test.tsx` were split into per-area suites sharing common
+  test helpers, with the same assertions and coverage.
 
 ## [1.5.8] - 2026-06-16
 

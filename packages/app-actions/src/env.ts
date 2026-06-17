@@ -231,6 +231,14 @@ export function realDeps(root: string, trustedKeys: TrustedKeysFile, opts: RealD
         `tar czf /backup/${base} -C /data .`,
       ]);
     },
+    volumeExists: async (volumeName): Promise<boolean> => {
+      try {
+        await execFileAsync('docker', ['volume', 'inspect', volumeName]);
+        return true;
+      } catch {
+        return false;
+      }
+    },
     removeVolumes: async (volumeNames): Promise<void> => {
       for (const name of volumeNames) {
         await execFileAsync('docker', ['volume', 'rm', name]);

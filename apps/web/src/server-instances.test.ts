@@ -1,354 +1,20 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+/**
+ * Instance management APIs (list / detail / health / logs / lifecycle / backup / operations) behind the BFF.
+ *
+ * Split out of the original monolithic `server.test.ts`; the shared BFF
+ * harness (fake actions/stores, ephemeral test server, login, SPA dir +
+ * cleanup) lives in `server-test-support`. The test bodies are unchanged.
+ */
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { describe, it, expect, afterEach, beforeEach } from 'vitest';
-import { createOperator, emptyOperatorTable, InMemoryOperatorStore, type OperatorStore } from '@shm/auth';
-import { browseUrl, createManagerServer, isLoopbackHost, type ManagerServerHandle } from './server.js';
+import { beforeEach, describe, expect, it } from 'vitest';
 import type { BootstrapActions } from './actions.js';
 import { AuditLog, InstanceLocks, OperationJournal, OperationRunner } from './jobs.js';
 import type { ManagerInstanceActions } from './instances.js';
-
-function fakeActions(overrides: Partial<BootstrapActions> = {}): BootstrapActions {
-  return {
-    async checkDocker() {
-      return { dockerAvailable: true, dockerComposeAvailable: true };
-    },
-    async checkInternet() {
-      return { ok: true, severity: 'ok' };
-    },
-    async checkRegistry() {
-      return { ok: true, signatureVerified: true };
-    },
-    async checkResources() {
-      return { status: 'ok' };
-    },
-    ...overrides,
-  };
-}
-
-function emptyStore(): OperatorStore {
-  return new InMemoryOperatorStore(emptyOperatorTable());
-}
-
-function configuredStore(): OperatorStore {
-  const created = createOperator(emptyOperatorTable(), {
-    email: 'owner@example.com',
-    displayName: 'Owner',
-    password: 'correct horse battery staple',
-    roles: ['server_owner'],
-  });
-  return new InMemoryOperatorStore(created.table);
-}
-
-/**
- * Test servers always bind an EPHEMERAL port: the fixed default (8765) may be
- * taken on a developer machine by a real running manager GUI, and parallel
- * test files must never fight over one port.
- */
-function testServer(
-  options: Partial<Parameters<typeof createManagerServer>[0]> & { actions: BootstrapActions },
-): ManagerServerHandle {
-  return createManagerServer({ port: 0, operatorStore: configuredStore(), ...options });
-}
-
-let handles: ManagerServerHandle[] = [];
-let tmpDirs: string[] = [];
-
-async function start(handle: ManagerServerHandle): Promise<string> {
-  handles.push(handle);
-  const { host, port } = await handle.listen();
-  const h = host === '::1' ? '[::1]' : host;
-  return `http://${h}:${port}`;
-}
-
-/** A throwaway built-SPA directory (index.html + a hashed asset) for cache tests. */
-async function makeSpaDir(): Promise<string> {
-  const dir = await mkdtemp(path.join(tmpdir(), 'shm-spa-'));
-  tmpDirs.push(dir);
-  await writeFile(path.join(dir, 'index.html'), '<!doctype html><title>shell</title>');
-  await mkdir(path.join(dir, 'assets'));
-  await writeFile(path.join(dir, 'assets', 'app-abc123.js'), 'console.log(1)');
-  return dir;
-}
-
-async function login(base: string, email = 'owner@example.com', password = 'correct horse battery staple') {
-  const res = await fetch(base + '/api/login', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
-  });
-  const cookie = (res.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
-  const { csrfToken } = (await res.json()) as { csrfToken: string };
-  return { cookie, csrfToken };
-}
-
-afterEach(async () => {
-  await Promise.all(handles.map((h) => h.close().catch(() => undefined)));
-  handles = [];
-  await Promise.all(tmpDirs.map((d) => rm(d, { recursive: true, force: true }).catch(() => undefined)));
-  tmpDirs = [];
-});
-
-describe('isLoopbackHost', () => {
-  it('recognises loopback hosts', () => {
-    expect(isLoopbackHost('127.0.0.1')).toBe(true);
-    expect(isLoopbackHost('::1')).toBe(true);
-    expect(isLoopbackHost('localhost')).toBe(true);
-    expect(isLoopbackHost('example.com')).toBe(false);
-  });
-});
-
-describe('browseUrl', () => {
-  it('maps a wildcard bind (in-container) to a localhost URL the operator can open', () => {
-    expect(browseUrl('0.0.0.0', 8765)).toBe('http://localhost:8765');
-    expect(browseUrl('::', 8765)).toBe('http://localhost:8765');
-  });
-
-  it('keeps explicit binds as-is (bracketing IPv6)', () => {
-    expect(browseUrl('127.0.0.1', 8765)).toBe('http://127.0.0.1:8765');
-    expect(browseUrl('::1', 9000)).toBe('http://[::1]:9000');
-  });
-});
-
-describe('manager server binding', () => {
-  it('binds to 127.0.0.1 by default', async () => {
-    const base = await start(testServer({ actions: fakeActions() }));
-    expect(base).toContain('127.0.0.1');
-  });
-
-  it('refuses a non-loopback bind unless explicitly allowed', () => {
-    expect(() => testServer({ actions: fakeActions(), host: '0.0.0.0' })).not.toThrow();
-    expect(() => testServer({ actions: fakeActions(), host: '203.0.113.5' })).toThrow(/non-loopback/);
-    expect(() => testServer({ actions: fakeActions(), host: '203.0.113.5', allowNonLocal: true })).not.toThrow();
-  });
-
-  it('rejects foreign Host headers (DNS-rebinding guard)', async () => {
-    // fetch()/undici refuses to override Host, so drive the raw http client.
-    const { request } = await import('node:http');
-    const base = await start(testServer({ actions: fakeActions() }));
-    const { port } = new URL(base);
-    const status = await new Promise<number>((resolve, reject) => {
-      const req = request(
-        { host: '127.0.0.1', port, path: '/api/auth/meta', headers: { host: 'evil.example.com' } },
-        (res) => {
-          res.resume();
-          resolve(res.statusCode ?? 0);
-        },
-      );
-      req.on('error', reject);
-      req.end();
-    });
-    expect(status).toBe(421);
-  });
-});
-
-describe('authentication', () => {
-  it('rejects API access without a session', async () => {
-    const base = await start(testServer({ actions: fakeActions() }));
-    expect((await fetch(base + '/api/state')).status).toBe(401);
-    expect((await fetch(base + '/api/instances')).status).toBe(401);
-    expect((await fetch(base + '/api/manager/update-check')).status).toBe(401);
-  });
-
-  it('exposes only a boolean pre-auth (auth/meta) and the static shell', async () => {
-    const base = await start(testServer({ actions: fakeActions(), managerVersion: '9.9.9' }));
-    const meta = await fetch(base + '/api/auth/meta');
-    expect(meta.status).toBe(200);
-    const body = (await meta.json()) as { operatorsConfigured: boolean; managerVersion?: string };
-    expect(body.operatorsConfigured).toBe(true);
-    expect(body.managerVersion).toBe('9.9.9');
-    expect(JSON.stringify(body)).not.toContain('owner@example.com');
-
-    expect((await fetch(base + '/')).status).toBe(200);
-  });
-
-  it('serves the SPA shell as no-cache but hashed assets immutable (so a manager update is picked up)', async () => {
-    // Regression: serveStatic set no Cache-Control, so browsers cached
-    // index.html and kept loading the OLD hashed bundle after a manager update
-    // ("I ran the update but still see the old GUI"). The shell must revalidate;
-    // content-hashed files under assets/ are safe to cache forever.
-    const dir = await makeSpaDir();
-    const base = await start(testServer({ actions: fakeActions(), clientDir: dir }));
-
-    const shell = await fetch(base + '/');
-    expect(shell.status).toBe(200);
-    expect(shell.headers.get('cache-control')).toBe('no-cache');
-
-    const asset = await fetch(base + '/assets/app-abc123.js');
-    expect(asset.status).toBe(200);
-    expect(asset.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
-  });
-
-  it('allows access after login and enforces CSRF on mutations', async () => {
-    const base = await start(testServer({ actions: fakeActions() }));
-    const { cookie, csrfToken } = await login(base);
-    expect(cookie).toContain('shm_session=');
-
-    const state = await fetch(base + '/api/state', { headers: { cookie } });
-    expect(state.status).toBe(200);
-
-    // Mutation without CSRF is refused; with the token it succeeds.
-    const noCsrf = await fetch(base + '/api/logout', { method: 'POST', headers: { cookie } });
-    expect(noCsrf.status).toBe(403);
-    const withCsrf = await fetch(base + '/api/logout', { method: 'POST', headers: { cookie, 'x-shm-csrf': csrfToken } });
-    expect(withCsrf.status).toBe(200);
-  });
-
-  it('rejects bad credentials', async () => {
-    const base = await start(testServer({ actions: fakeActions() }));
-    const res = await fetch(base + '/api/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'owner@example.com', password: 'wrong' }),
-    });
-    expect(res.status).toBe(401);
-  });
-
-  it('recovers the CSRF token from /api/state so reloads keep mutations working', async () => {
-    // Regression: the SPA held the CSRF token only in memory, so after a page
-    // reload every POST — including sign out — failed with 403 even though
-    // the session cookie was still valid.
-    const base = await start(testServer({ actions: fakeActions() }));
-    const { cookie } = await login(base);
-
-    // Simulated reload: a fresh client knows only the cookie, not the token.
-    const state = (await (await fetch(base + '/api/state', { headers: { cookie } })).json()) as {
-      session?: { email: string; csrfToken: string };
-    };
-    expect(state.session?.email).toBe('owner@example.com');
-    expect(state.session?.csrfToken).toBeTruthy();
-
-    const logout = await fetch(base + '/api/logout', {
-      method: 'POST',
-      headers: { cookie, 'x-shm-csrf': state.session!.csrfToken },
-    });
-    expect(logout.status).toBe(200);
-
-    const after = await fetch(base + '/api/state', { headers: { cookie } });
-    expect(after.status).toBe(401);
-  });
-});
-
-describe('first-run operator setup', () => {
-  it('reports operatorsConfigured=false and creates the first operator with a session', async () => {
-    const store = emptyStore();
-    const base = await start(testServer({ actions: fakeActions(), operatorStore: store }));
-
-    const meta = (await (await fetch(base + '/api/auth/meta')).json()) as { operatorsConfigured: boolean };
-    expect(meta.operatorsConfigured).toBe(false);
-
-    const res = await fetch(base + '/api/setup/operator', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'first@example.org', password: 'a sufficiently long pw' }),
-    });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { email: string; roles: string[]; csrfToken: string };
-    expect(body.email).toBe('first@example.org');
-    expect(body.roles).toContain('server_owner');
-
-    // The setup response signs the operator in (cookie + CSRF token).
-    const cookie = (res.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
-    const state = await fetch(base + '/api/state', { headers: { cookie } });
-    expect(state.status).toBe(200);
-
-    // And the account persists: meta flips, login works.
-    const after = (await (await fetch(base + '/api/auth/meta')).json()) as { operatorsConfigured: boolean };
-    expect(after.operatorsConfigured).toBe(true);
-  });
-
-  it('hard-locks once any operator exists (409) — never a backdoor on a configured manager', async () => {
-    const base = await start(testServer({ actions: fakeActions() }));
-    const res = await fetch(base + '/api/setup/operator', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'evil@example.org', password: 'a sufficiently long pw' }),
-    });
-    expect(res.status).toBe(409);
-  });
-
-  it('rejects weak passwords with the policy reason', async () => {
-    const base = await start(testServer({ actions: fakeActions(), operatorStore: emptyStore() }));
-    const res = await fetch(base + '/api/setup/operator', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'first@example.org', password: 'short' }),
-    });
-    expect(res.status).toBe(400);
-    expect(((await res.json()) as { error: string }).error).toMatch(/12 characters/);
-  });
-});
-
-describe('authenticated manager endpoints', () => {
-  it('exposes the manager self-update check as GET /api/manager/update-check', async () => {
-    const base = await start(
-      testServer({
-        actions: fakeActions({
-          checkManagerUpdate: async () => ({
-            currentVersion: '0.1.4',
-            latestVersion: '0.2.0',
-            updateAvailable: true,
-            runtime: 'docker',
-            instructions: ['docker pull ghcr.io/humdek-unibe-ch/sh-manager:v0.2.0'],
-          }),
-        }),
-      }),
-    );
-    const { cookie } = await login(base);
-    const res = await fetch(base + '/api/manager/update-check', { headers: { cookie } });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { updateAvailable: boolean; latestVersion: string };
-    expect(body.updateAvailable).toBe(true);
-    expect(body.latestVersion).toBe('0.2.0');
-  });
-
-  it('lists registry versions against the server-default registry', async () => {
-    const calls: { url: string; channel: string; kind: string | undefined }[] = [];
-    const base = await start(
-      testServer({
-        actions: fakeActions({
-          listVersions: async (registryUrl, channel, kind) => {
-            calls.push({ url: registryUrl, channel, kind });
-            return { versions: ['0.2.0', '0.1.0'] };
-          },
-        }),
-        defaultRegistryUrl: 'https://registry.example.com/',
-      }),
-    );
-    const { cookie } = await login(base);
-    const res = await fetch(base + '/api/registry/versions', { headers: { cookie } });
-    expect(res.status).toBe(200);
-    expect(((await res.json()) as { versions: string[] }).versions).toEqual(['0.2.0', '0.1.0']);
-    expect(calls[0]).toEqual({ url: 'https://registry.example.com/', channel: 'stable', kind: 'core' });
-
-    await fetch(base + '/api/registry/versions?channel=test', { headers: { cookie } });
-    expect(calls[1]?.channel).toBe('test');
-
-    // The frontend-only update dialog reads the independent frontend feed.
-    await fetch(base + '/api/registry/versions?kind=frontend', { headers: { cookie } });
-    expect(calls[2]?.kind).toBe('frontend');
-  });
-
-  it('answers /api/state with the manager version and the session identity', async () => {
-    const base = await start(testServer({ actions: fakeActions(), managerVersion: '1.0.6' }));
-    const { cookie } = await login(base);
-    const res = await fetch(base + '/api/state', { headers: { cookie } });
-    // The version-bearing state response must be uncacheable, or a browser keeps
-    // showing the previous managerVersion after an update (the "still see the old
-    // GUI version" report) even across a hard refresh.
-    expect(res.headers.get('cache-control')).toBe('no-store');
-    const body = (await res.json()) as {
-      mode: string;
-      managerVersion?: string;
-      session?: { email: string };
-    };
-    expect(body.mode).toBe('persistent');
-    expect(body.managerVersion).toBe('1.0.6');
-    expect(body.session?.email).toBe('owner@example.com');
-  });
-});
+import { fakeActions, login, start, testServer } from './server-test-support.js';
 
 describe('instance management APIs', () => {
   /** PUT /backup-schedule calls captured by the fake (asserted per test). */
@@ -393,6 +59,17 @@ describe('instance management APIs', () => {
       },
       async serverStatus() {
         return { initialized: true, serverId: 'srv-1', proxyNetwork: 'selfhelp-proxy', instanceCount: 1 };
+      },
+      async scanOrphans(id) {
+        // 'ghost' models a removed-but-not-fully-deleted id; everything else clean.
+        if (id === 'ghost') {
+          return { instanceId: id, registered: false, volumes: ['selfhelp_ghost_mysql_data'], hasDirectory: false, hasOrphans: true };
+        }
+        return { instanceId: id, registered: id === 'clinic-a', volumes: [], hasDirectory: false, hasOrphans: false };
+      },
+      async cleanupOrphans(id) {
+        if (id === 'clinic-a') throw new Error(`"${id}" is a registered instance — refusing to delete its data here.`);
+        return { removedVolumes: ['selfhelp_ghost_mysql_data'], removedDirectory: false };
       },
       async mailer(id) {
         if (id !== 'clinic-a') throw new Error('not found');
@@ -543,6 +220,34 @@ describe('instance management APIs', () => {
       const { base } = await managementBase(tmpRoot);
       const res = await fetch(base + '/api/instances');
       expect(res.status).toBe(401);
+    } finally {
+      await rm(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('scans and cleans orphaned resources for a not-registered id (CSRF-guarded)', async () => {
+    const tmpRoot = await mkdtemp(path.join(tmpdir(), 'shm-mgmt-'));
+    try {
+      const { base, cookie, csrfToken } = await managementBase(tmpRoot);
+      const authed = { cookie };
+      const mutating = { cookie, 'Content-Type': 'application/json', 'x-shm-csrf': csrfToken };
+
+      // Read scan needs auth, works for an id that is not a live instance.
+      expect((await fetch(base + '/api/instances/ghost/orphans')).status).toBe(401);
+      const scan = await fetch(base + '/api/instances/ghost/orphans', { headers: authed });
+      expect(scan.status).toBe(200);
+      const report = (await scan.json()) as { hasOrphans: boolean; volumes: string[] };
+      expect(report.hasOrphans).toBe(true);
+      expect(report.volumes).toContain('selfhelp_ghost_mysql_data');
+
+      // Cleanup is state-changing, so CSRF is required (same guard as remove).
+      const noCsrf = await fetch(base + '/api/instances/ghost/orphans/cleanup', { method: 'POST', headers: { cookie } });
+      expect(noCsrf.status).toBe(403);
+
+      const cleanup = await fetch(base + '/api/instances/ghost/orphans/cleanup', { method: 'POST', headers: mutating });
+      expect(cleanup.status).toBe(200);
+      const result = (await cleanup.json()) as { removedVolumes: string[] };
+      expect(result.removedVolumes).toContain('selfhelp_ghost_mysql_data');
     } finally {
       await rm(tmpRoot, { recursive: true, force: true });
     }
@@ -1077,73 +782,6 @@ describe('instance management APIs', () => {
       expect(operationId).toMatch(/^op-/);
       expect(await waitForOperation(base, cookie, operationId)).toBe('succeeded');
     } finally {
-      await rm(tmpRoot, { recursive: true, force: true });
-    }
-  });
-});
-
-describe('operation event stream (SSE)', () => {
-  /** A manager wired with a real operation journal we can mutate in-test. */
-  async function sseServer(tmpRoot: string): Promise<{ base: string; cookie: string; journal: OperationJournal }> {
-    const journal = new OperationJournal(tmpRoot);
-    const runner = new OperationRunner(journal, new AuditLog(tmpRoot), new InstanceLocks(tmpRoot));
-    // The SSE endpoint only reads `journal`; the instance actions are never
-    // invoked from /api/events, so a minimal stand-in keeps the test focused.
-    const instances = {} as unknown as ManagerInstanceActions;
-    const base = await start(
-      testServer({ actions: fakeActions(), instanceManagement: { instances, runner, journal } }),
-    );
-    const { cookie } = await login(base);
-    return { base, cookie, journal };
-  }
-
-  it('requires an authenticated session', async () => {
-    const tmpRoot = await mkdtemp(path.join(tmpdir(), 'shm-sse-'));
-    try {
-      const { base } = await sseServer(tmpRoot);
-      const res = await fetch(base + '/api/events');
-      expect(res.status).toBe(401);
-      await res.text(); // release the socket
-    } finally {
-      await rm(tmpRoot, { recursive: true, force: true });
-    }
-  });
-
-  it('pushes a live operation event the moment the journal changes', async () => {
-    const tmpRoot = await mkdtemp(path.join(tmpdir(), 'shm-sse-'));
-    const ac = new AbortController();
-    try {
-      const { base, cookie, journal } = await sseServer(tmpRoot);
-      const res = await fetch(base + '/api/events', { headers: { cookie }, signal: ac.signal });
-      expect(res.status).toBe(200);
-      expect(res.headers.get('content-type')).toContain('text/event-stream');
-
-      const reader = res.body!.getReader();
-      const decoder = new TextDecoder();
-      let text = '';
-      // Safety net so a quiet stream can never hang the suite.
-      const guard = setTimeout(() => ac.abort(), 8000);
-      const readUntil = async (predicate: (t: string) => boolean): Promise<void> => {
-        while (!predicate(text)) {
-          const { value, done } = await reader.read();
-          if (done) throw new Error(`SSE stream ended early; got:\n${text}`);
-          if (value) text += decoder.decode(value, { stream: true });
-        }
-      };
-
-      // Wait until the stream is live (so the server-side subscription exists),
-      // THEN cause a change and read the pushed frame.
-      await readUntil((t) => t.includes(': connected'));
-      const op = await journal.create('instance_backup', 'sse-demo');
-      await journal.complete(op.id, { ok: true });
-      await readUntil((t) => t.includes(op.id) && t.includes('"status":"succeeded"'));
-
-      expect(text).toContain('event: operation');
-      expect(text).toContain('"instanceId":"sse-demo"');
-      clearTimeout(guard);
-      await reader.cancel().catch(() => undefined);
-    } finally {
-      ac.abort();
       await rm(tmpRoot, { recursive: true, force: true });
     }
   });

@@ -114,6 +114,11 @@ describe('buildInstanceInstallArtifacts', () => {
     expect(a.lock.core.migrationVersion).toBe('Version20260605081254');
   });
 
+  it("persists the core's required frontend range in the lock (so frontend-only updates can always enforce it)", () => {
+    const a = buildInstanceInstallArtifacts(installInput('production'));
+    expect(a.lock.core.requiredFrontendRange).toBe('>=1.5.0 <1.6.0');
+  });
+
   it('preserves the BFF URL invariant in the generated env', () => {
     const a = buildInstanceInstallArtifacts(installInput('production'));
     expect(a.envText).toContain('NEXT_PUBLIC_API_URL=/api');

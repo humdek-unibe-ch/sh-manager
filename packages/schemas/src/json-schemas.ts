@@ -200,6 +200,10 @@ export const instanceLockSchema: JsonSchema = {
         migrationVersion: { type: 'string' },
         pluginApiVersion: { type: 'string' },
         signedPayloadSha256: sha256Field,
+        // Optional + additive: the installed core's required frontend range,
+        // persisted so frontend-only updates can always enforce it (pre-1.6
+        // locks omit it and stay valid).
+        requiredFrontendRange: { type: 'string' },
       },
     },
     services: {

@@ -16,7 +16,8 @@
       "@shm/core": ["packages/core/src/index.ts"],
       "@shm/backup": ["packages/backup/src/index.ts"],
       "@shm/support": ["packages/support/src/index.ts"],
-      "@shm/auth": ["packages/auth/src/index.ts"]
+      "@shm/auth": ["packages/auth/src/index.ts"],
+      "@shm/app-actions": ["packages/app-actions/src/index.ts"]
     },
     "strict": true,
     "noUncheckedIndexedAccess": true,

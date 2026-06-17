@@ -16,8 +16,8 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import type { ComposeResult, ComposeRunner } from '@shm/docker';
 import { instancePaths } from '@shm/instances';
-import type { ActionDeps } from '../apps/cli/src/actions.js';
-import { loadTrustedKeys, realDeps } from '../apps/cli/src/env.js';
+import type { ActionDeps } from '@shm/app-actions';
+import { loadTrustedKeys, realDeps } from '@shm/app-actions';
 
 const execFileAsync = promisify(execFile);
 
