@@ -96,25 +96,38 @@ npm run build`). `sh-manager self-update --check` only reports (exit `2`
 when an update exists), and the "Manager version" card in the web operations
 console shows the same status.
 
-### Release notification email (optional)
+### Release notification email
 
-The `manager-release` workflow can email a maintainer when a tag is published
-(the image is built, scanned, signed, and the GitHub release is created). It is
-a best-effort, non-blocking step: it runs only when `NOTIFICATION_EMAIL` is set,
-and `continue-on-error` keeps an SMTP hiccup from failing an already-published
-release. Configure these repository **secrets** to enable it (leave them unset
-to skip mail entirely):
+There are two independent ways the `manager-release` workflow notifies a
+maintainer when a tag is published (image built, scanned, signed, GitHub release
+created). They mirror the frontend, so the manager emails you the same way.
+
+1. **GitHub-native release email (no secrets, like the frontend).** The workflow
+   publishes a real, non-draft "latest" GitHub Release with auto-generated notes
+   (`softprops/action-gh-release`). Publishing a release makes GitHub email every
+   user **watching the repository's releases** — this is exactly how the frontend
+   (`frontend-release.yml`) notifies, and it needs no SMTP configuration. To
+   receive it, watch `sh-manager` on GitHub: **Watch → Custom → Releases** (the
+   same subscription you have on the frontend repo).
+2. **Optional explicit SMTP email (fixed recipient).** On top of the native
+   email, the workflow can send mail to a fixed address even for someone who does
+   not watch the repo. It is best-effort and non-blocking: it runs only when
+   `NOTIFICATION_EMAIL` is set, and `continue-on-error` keeps an SMTP hiccup from
+   failing an already-published release. Configure these repository **secrets**
+   to enable it (leave them unset to use only the native email):
 
 | Secret | Purpose |
 | --- | --- |
-| `NOTIFICATION_EMAIL` | Recipient address; **unset = the step is skipped**. |
-| `MAIL_SERVER` | SMTP host (e.g. an authenticated relay reachable from GitHub runners). |
-| `MAIL_PORT` | SMTP port (`465` TLS or `587` STARTTLS). |
+| `NOTIFICATION_EMAIL` | Recipient address; **unset = the SMTP step is skipped**. |
+| `MAIL_SERVER` | SMTP host (an authenticated relay reachable from GitHub runners). |
+| `MAIL_PORT` | SMTP port (`465` implicit TLS or `587` STARTTLS). |
 | `MAIL_USERNAME` / `MAIL_PASSWORD` | SMTP credentials. |
 
-The mail body links to the release and the commit; no secrets are included.
-A passwordless campus relay will not work from GitHub-hosted runners — use an
-authenticated relay or a transactional-mail provider.
+`secure` is derived automatically (`true` for port `465`, `false`/STARTTLS for
+`587`), so an implicit-TLS relay no longer silently fails to connect. The mail
+body links to the release and the commit; no secrets are included. A passwordless
+campus relay will not work from GitHub-hosted runners — use an authenticated
+relay or a transactional-mail provider, or rely on the native email above.
 
 ## Publishing platform artifacts (core / frontend / scheduler / worker / plugins)
 
