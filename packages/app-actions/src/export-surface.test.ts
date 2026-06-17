@@ -83,6 +83,9 @@ describe('shared application-action export surface', () => {
       instanceRepair: 'function',
       instanceSafeMode: 'function',
       instancePluginRecover: 'function',
+      // orphan discovery + cleanup (create-wizard "leftover data" flow)
+      scanInstanceOrphans: 'function',
+      cleanupInstanceOrphans: 'function',
     });
   });
 

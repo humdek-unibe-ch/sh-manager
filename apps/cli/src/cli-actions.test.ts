@@ -7,14 +7,24 @@
  * {@link ActionDeps} builder + fixtures live in `cli-test-support`. The test
  * bodies are unchanged.
  */
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { TrustedKeysFile } from '@shm/schemas';
 import { RecordingComposeRunner, type ComposeResult } from '@shm/docker';
 import { LockStore, ManifestStore, instancePaths } from '@shm/instances';
-import { doctor, instanceInstall, instanceList, serverInit, serverStartProxy, serverProxyLogs, ensureProxyRunning } from '@shm/app-actions';
+import {
+  cleanupInstanceOrphans,
+  doctor,
+  instanceInstall,
+  instanceList,
+  scanInstanceOrphans,
+  serverInit,
+  serverStartProxy,
+  serverProxyLogs,
+  ensureProxyRunning,
+} from '@shm/app-actions';
 import type { ActionDeps } from '@shm/app-actions';
 import { buildActionDeps, readExample } from './cli-test-support.js';
 
@@ -541,6 +551,140 @@ describe('CLI actions (offline)', () => {
     // Fail-fast: a handful of conclusive rejections, never the full 60-attempt budget.
     const dbalCalls = denyRunner.calls.filter((c) => c.args.join(' ').includes('dbal:run-sql'));
     expect(dbalCalls.length).toBe(3);
+  });
+
+  it('a fresh install reclaims a stale orphaned mysql volume before bringing the stack up', async () => {
+    // Regression: removing an instance without deleting its volumes (a
+    // full_delete that kept volumes, or an orphan from an older manager) left
+    // the mysql_data volume behind. Reinstalling the same id generated fresh
+    // secrets, but MySQL only honours MYSQL_USER/PASSWORD on an EMPTY volume, so
+    // the leftover rejected them ("Access denied") forever. A fresh install (no
+    // on-disk secrets) must drop the stale volume first.
+    const d = await makeDeps();
+    await serverInit(d, { serverId: 'dev', mode: 'local' });
+    const events: string[] = [];
+    d.runner = new RecordingComposeRunner((args: string[]): ComposeResult => {
+      if (args.join(' ') === 'up -d') events.push('up');
+      return { stdout: '', stderr: '' };
+    });
+    d.volumeExists = async (name) => name === 'selfhelp_demo1_mysql_data';
+    d.removeVolumes = async (names) => {
+      events.push(`rm:${names.join(',')}`);
+    };
+
+    await instanceInstall(d, {
+      instanceId: 'demo1',
+      displayName: 'Demo 1',
+      mode: 'local',
+      localPort: 8080,
+      registryUrl: 'https://humdek-unibe-ch.github.io/sh2-plugin-registry/',
+      version: 'latest',
+      bringUp: true,
+    });
+
+    // Only the volume that exists is removed, and strictly BEFORE the stack
+    // comes up so MySQL re-initialises with the new credentials.
+    expect(events).toEqual(['rm:selfhelp_demo1_mysql_data', 'up']);
+  });
+
+  it('a retry/resume install reuses on-disk secrets and never reclaims the matching volumes', async () => {
+    const d = await makeDeps();
+    await serverInit(d, { serverId: 'dev', mode: 'local' });
+    const opts = {
+      instanceId: 'demo1',
+      displayName: 'Demo 1',
+      mode: 'local' as const,
+      localPort: 8080,
+      registryUrl: 'https://humdek-unibe-ch.github.io/sh2-plugin-registry/',
+      version: 'latest',
+      bringUp: true,
+    };
+    // First install writes this instance's secrets to disk.
+    await instanceInstall(d, opts);
+
+    // Re-run with the volumes "present": because the secrets are still on disk
+    // they MATCH the volumes, so a retry must keep them (deleting would destroy
+    // a correctly-initialised database).
+    const removed: string[][] = [];
+    d.volumeExists = async () => true;
+    d.removeVolumes = async (names) => {
+      removed.push(names);
+    };
+    await instanceInstall(d, opts);
+
+    expect(removed).toEqual([]);
+  });
+
+  it('scanInstanceOrphans surfaces leftover volumes for a not-registered id', async () => {
+    const d = await makeDeps();
+    await serverInit(d, { serverId: 'dev', mode: 'local' });
+    d.volumeExists = async (name) =>
+      name === 'selfhelp_ghost_mysql_data' || name === 'selfhelp_ghost_uploads';
+
+    const report = await scanInstanceOrphans(d, 'ghost');
+    expect(report.registered).toBe(false);
+    expect(report.volumes).toEqual(['selfhelp_ghost_mysql_data', 'selfhelp_ghost_uploads']);
+    expect(report.hasOrphans).toBe(true);
+  });
+
+  it('scanInstanceOrphans never flags a registered instance as orphaned', async () => {
+    const d = await makeDeps();
+    await serverInit(d, { serverId: 'dev', mode: 'local' });
+    await instanceInstall(d, {
+      instanceId: 'demo1',
+      displayName: 'Demo 1',
+      mode: 'local',
+      localPort: 8080,
+      registryUrl: 'https://humdek-unibe-ch.github.io/sh2-plugin-registry/',
+      version: 'latest',
+      bringUp: true,
+    });
+    // Even with every volume "present", a live instance's data is never an orphan.
+    d.volumeExists = async () => true;
+
+    const report = await scanInstanceOrphans(d, 'demo1');
+    expect(report.registered).toBe(true);
+    expect(report.hasOrphans).toBe(false);
+    expect(report.volumes).toEqual([]);
+  });
+
+  it('cleanupInstanceOrphans removes the orphaned volumes and the leftover directory', async () => {
+    const d = await makeDeps();
+    await serverInit(d, { serverId: 'dev', mode: 'local' });
+    const dir = instancePaths('ghost', root).dir;
+    await mkdir(dir, { recursive: true });
+    await writeFile(path.join(dir, 'leftover.txt'), 'x');
+    const removed: string[][] = [];
+    d.volumeExists = async (name) => name === 'selfhelp_ghost_mysql_data';
+    d.removeVolumes = async (names) => {
+      removed.push(names);
+    };
+
+    const res = await cleanupInstanceOrphans(d, 'ghost');
+    expect(res.removedVolumes).toEqual(['selfhelp_ghost_mysql_data']);
+    expect(res.removedDirectory).toBe(true);
+    expect(removed).toEqual([['selfhelp_ghost_mysql_data']]);
+    // Nothing left to clean afterwards.
+    d.volumeExists = async () => false;
+    expect((await scanInstanceOrphans(d, 'ghost')).hasOrphans).toBe(false);
+  });
+
+  it('cleanupInstanceOrphans refuses to delete a registered instance (use audited remove)', async () => {
+    const d = await makeDeps();
+    await serverInit(d, { serverId: 'dev', mode: 'local' });
+    await instanceInstall(d, {
+      instanceId: 'demo1',
+      displayName: 'Demo 1',
+      mode: 'local',
+      localPort: 8080,
+      registryUrl: 'https://humdek-unibe-ch.github.io/sh2-plugin-registry/',
+      version: 'latest',
+      bringUp: true,
+    });
+    d.removeVolumes = async () => {
+      throw new Error('must not be called for a registered instance');
+    };
+    await expect(cleanupInstanceOrphans(d, 'demo1')).rejects.toThrow(/registered instance/i);
   });
 
   it('persists the generated admin password to secrets/admin_password and reuses it on a resumed install', async () => {

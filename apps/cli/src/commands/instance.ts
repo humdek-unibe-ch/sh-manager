@@ -102,6 +102,7 @@ export function registerInstance(program: Command, ctx: CliContext): void {
           adminPassword: opts.adminPassword,
           pluginManifests: opts.pluginManifest as string[] | undefined,
           mailerDsn: opts.mailerDsn as string | undefined,
+          log: (line) => console.log(line),
         });
         console.log(`Installed ${opts.id} (SelfHelp ${res.version}) at ${res.instanceDir}${res.broughtUp ? ' [started]' : ''}`);
         for (const w of res.domainWarnings) console.log(`  warning: ${w}`);

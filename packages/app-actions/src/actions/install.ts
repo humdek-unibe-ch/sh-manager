@@ -33,6 +33,7 @@ import {
   persistOrReuseAdminPassword,
   readManifestFriendly,
   realSleep,
+  reclaimStaleInstanceVolumes,
   registryClient,
   type ActionDeps,
 } from './shared.js';
@@ -120,6 +121,12 @@ export interface InstanceInstallOptions {
    * journals these so the create wizard can show a real step checklist.
    */
   onStep?: (step: string) => void | Promise<void>;
+  /**
+   * Free-text progress log (distinct from {@link onStep}, which drives the step
+   * checklist). Used for one-off notices such as reclaiming a stale Docker
+   * volume from a previous install; the GUI mirrors it into the operation log.
+   */
+  log?: (line: string) => void | Promise<void>;
 }
 
 function selectCoreRef<T extends { version: string; channel: string; blocked?: boolean }>(refs: T[], channel: string, target?: string): T {
@@ -202,6 +209,12 @@ export async function instanceInstall(
   // `server init` failed to start the proxy would otherwise install the
   // instance but leave it unreachable on every retry.
   if (bringUp) await ensureProxyRunning(deps, opts.mode);
+  // Fresh install over a name whose previous instance was removed but whose
+  // Docker volumes lingered: drop those stale volumes so MySQL re-initialises
+  // with the new credentials (otherwise it rejects them — the "remove then
+  // reinstall the same id fails with Access denied" report). No-op on a
+  // retry/resume (on-disk secrets present) — those volumes still match.
+  if (bringUp) await reclaimStaleInstanceVolumes(deps, opts.instanceId, opts.log);
   const res = await installInstance(artifacts, {
     root: deps.root,
     runner: deps.runner,

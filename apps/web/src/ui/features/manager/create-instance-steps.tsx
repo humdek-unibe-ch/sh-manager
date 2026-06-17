@@ -118,6 +118,8 @@ export function BasicsStep({ form }: { form: CreateInstanceForm }): JSX.Element 
     mailerDsn,
     setMailerDsn,
     mailerError,
+    orphans,
+    cleanupOrphans,
   } = form;
   return (
     <Stack gap="md">
@@ -165,6 +167,46 @@ export function BasicsStep({ form }: { form: CreateInstanceForm }): JSX.Element 
           />
         </Stack>
       </Paper>
+      {orphans?.hasOrphans ? (
+        <Alert tone="warning" title={`Leftover data found for "${instanceId}"`}>
+          <Stack gap="xs">
+            <Text size="sm">
+              This id was installed before and not fully removed. Reusing it can collide with that
+              leftover state — the usual cause of a &quot;database Access denied&quot; failure right
+              after install.
+            </Text>
+            {orphans.volumes.length > 0 ? (
+              <Text size="sm">
+                Orphaned Docker volume{orphans.volumes.length === 1 ? '' : 's'}:{' '}
+                <Code>{orphans.volumes.join(', ')}</Code>
+              </Text>
+            ) : null}
+            {orphans.hasDirectory ? (
+              <Text size="sm">A leftover instance directory also exists on the server.</Text>
+            ) : null}
+            <Text size="sm" c="dimmed">
+              <strong>Remove it</strong> for a clean slate, or just <strong>continue</strong> — a fresh
+              install automatically reclaims leftover volumes before starting the database.
+            </Text>
+            {cleanupOrphans.isError ? (
+              <Text size="sm" c="red">
+                {cleanupOrphans.error instanceof ApiError
+                  ? cleanupOrphans.error.message
+                  : 'Could not remove the leftover data.'}
+              </Text>
+            ) : null}
+            <Group>
+              <Button
+                variant="secondary"
+                loading={cleanupOrphans.isPending}
+                onClick={() => cleanupOrphans.mutate()}
+              >
+                Remove leftover data
+              </Button>
+            </Group>
+          </Stack>
+        </Alert>
+      ) : null}
       <Alert tone="info" title="About the admin password">
         The generated admin password is never shown in the browser: it is written to a restricted (0600)
         file on the server and the install log shows the file path — read it over SSH after the install

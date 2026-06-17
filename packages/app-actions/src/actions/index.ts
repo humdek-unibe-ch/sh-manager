@@ -20,4 +20,5 @@ export * from './operations.js';
 export * from './backup.js';
 export * from './restore.js';
 export * from './lifecycle.js';
+export * from './orphans.js';
 export * from './support.js';

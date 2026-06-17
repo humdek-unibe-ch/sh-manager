@@ -18,8 +18,10 @@ import type { BackupOrigin, BackupSchedulePolicy, InstanceManifest } from '@shm/
 
 export type {
   BackupScheduleStatus,
+  CleanupOrphansResult,
   InstanceEnvConfig,
   InstanceEnvEntry,
+  InstanceOrphanReport,
   PruneExecutionReport,
 } from '@shm/app-actions';
 import type { RemoveMode } from '@shm/instances';
@@ -27,9 +29,11 @@ import {
   LOG_SERVICES,
   type ActionDeps,
   type BackupScheduleStatus,
+  type CleanupOrphansResult,
   type InstanceEnvConfig,
   type InstalledPluginInfo,
   type InstanceLogsResult,
+  type InstanceOrphanReport,
   type LogService,
   type MailerStatus,
   type ProxyLogsResult,
@@ -195,6 +199,18 @@ export interface ManagerInstanceActions {
   livePlugins(instanceId: string): Promise<InstalledPluginInfo[] | null>;
   /** Is this state root an initialized server (inventory exists)? */
   serverStatus(): Promise<ServerStatus>;
+  /**
+   * Leftover Docker volumes / instance directory for an id that is NOT a
+   * registered instance — drives the create wizard's "orphaned data" warning so
+   * the operator can clean up before reinstalling a previously-removed id.
+   */
+  scanOrphans(instanceId: string): Promise<InstanceOrphanReport>;
+  /**
+   * Removes the orphaned volumes/directory reported by {@link scanOrphans}
+   * ("remove it"). Refuses to touch a registered instance's data (use the
+   * audited `remove` for that). Runs directly (CSRF-guarded), not journalled.
+   */
+  cleanupOrphans(instanceId: string): Promise<CleanupOrphansResult>;
   /** Redacted outbound-mail configuration of an instance. */
   mailer(instanceId: string): Promise<MailerStatus>;
   /** Effective non-secret environment of an instance (read-only view). */

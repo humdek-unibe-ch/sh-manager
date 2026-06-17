@@ -120,6 +120,20 @@ export async function routeInstanceManagement(
     sendJson(res, 200, detail);
     return true;
   }
+  if (rest === '/orphans' && ctx.method === 'GET') {
+    // Read-only scan for leftover volumes/dir of a NOT-registered id (drives the
+    // create wizard's "orphaned data" warning) — works for ids with no instance.
+    sendJson(res, 200, await im.instances.scanOrphans(instanceId));
+    return true;
+  }
+  if (rest === '/orphans/cleanup' && ctx.method === 'POST') {
+    // Destructive but bounded: only removes orphaned resources of an id that is
+    // NOT a registered instance (the action itself hard-guards that). Runs
+    // directly (CSRF-protected by the central guard) rather than through the
+    // instance-scoped operation journal, since there is no instance to lock.
+    sendJson(res, 200, await im.instances.cleanupOrphans(instanceId));
+    return true;
+  }
   if (rest === '/backups' && ctx.method === 'GET') {
     sendJson(res, 200, { backups: await im.instances.backups(instanceId) });
     return true;

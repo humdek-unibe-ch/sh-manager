@@ -195,7 +195,9 @@ describe('InstanceDetail', () => {
 
   it('full delete demands the typed "delete <id>" confirmation; remove-containers does not', async () => {
     const user = userEvent.setup();
-    render(<InstanceDetail client={makeFakeClient()} instanceId="clinic-a" />);
+    const client = makeFakeClient();
+    const removeSpy = vi.spyOn(client, 'removeInstance');
+    render(<InstanceDetail client={client} instanceId="clinic-a" />);
 
     await user.click(await screen.findByRole('button', { name: /remove…/i }));
     const dialog = await screen.findByRole('dialog');
@@ -210,11 +212,20 @@ describe('InstanceDetail', () => {
     const deleteButton = within(dialog).getByRole('button', { name: /delete instance/i });
     expect(deleteButton).toBeDisabled();
 
+    // The Docker volumes checkbox defaults to ON, so a full delete leaves no
+    // orphaned mysql_data volume that would block reinstalling the same id.
+    const deleteVolumesBox = within(dialog).getByRole('checkbox', { name: /delete the docker volumes/i });
+    expect(deleteVolumesBox).toBeChecked();
+
     await user.type(within(dialog).getByLabelText(/type the confirmation/i), 'delete clinic-a');
     expect(deleteButton).toBeEnabled();
 
     await user.click(deleteButton);
     expect(await screen.findByText(/instance_remove finished/)).toBeInTheDocument();
+    expect(removeSpy).toHaveBeenCalledWith(
+      'clinic-a',
+      expect.objectContaining({ mode: 'full_delete', deleteVolumes: true }),
+    );
   });
 
   it('shows a Disable toggle for an active instance and confirms the reversible stop', async () => {

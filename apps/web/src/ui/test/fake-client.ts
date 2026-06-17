@@ -15,9 +15,11 @@ import type {
   BackupScheduleStatus,
   BackupSummary,
   CheckResult,
+  CleanupOrphansResult,
   InstanceDetail,
   InstanceEnvConfig,
   InstanceLogsResult,
+  InstanceOrphanReport,
   InstanceSummary,
   LogService,
   MailerStatus,
@@ -68,6 +70,8 @@ export interface FakeClientOptions {
   backupSchedules?: Record<string, BackupScheduleStatus>;
   /** Retention preview served by previewBackupPrune (default: keep everything). */
   prunePreview?: PruneExecutionReport;
+  /** Orphaned volumes per (not-registered) instance id, for the wizard warning. */
+  orphans?: Record<string, string[]>;
 }
 
 export function fakeInstance(overrides: Partial<InstanceSummary> = {}): InstanceSummary {
@@ -247,6 +251,7 @@ export function makeFakeClient(opts: FakeClientOptions = {}): ApiClient {
   const mailers: Record<string, MailerStatus> = { ...(opts.mailers ?? {}) };
   const envConfigs: Record<string, InstanceEnvConfig> = { ...(opts.envConfigs ?? {}) };
   const schedules: Record<string, BackupScheduleStatus> = { ...(opts.backupSchedules ?? {}) };
+  const orphanVolumes: Record<string, string[]> = { ...(opts.orphans ?? {}) };
   let opCounter = operations.length;
   let operatorsConfigured = opts.operatorsConfigured ?? true;
   let signedIn = false;
@@ -328,6 +333,23 @@ export function makeFakeClient(opts: FakeClientOptions = {}): ApiClient {
         resources: opts.preflight?.resources ?? OK,
         registryUrl: FAKE_REGISTRY_URL,
       };
+    },
+    async scanOrphans(instanceId): Promise<InstanceOrphanReport> {
+      const registered = instances.some((i) => i.instanceId === instanceId);
+      const volumes = !registered ? (orphanVolumes[instanceId] ?? []) : [];
+      return {
+        instanceId,
+        registered,
+        volumes,
+        hasDirectory: false,
+        hasOrphans: !registered && volumes.length > 0,
+      };
+    },
+    async cleanupOrphans(instanceId): Promise<CleanupOrphansResult> {
+      if (opts.failMutations) throw opts.failMutations;
+      const removedVolumes = orphanVolumes[instanceId] ?? [];
+      delete orphanVolumes[instanceId];
+      return { removedVolumes, removedDirectory: false };
     },
 
     async listInstances() {

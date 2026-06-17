@@ -59,6 +59,8 @@ function fakeInstances(b: FakeBehaviour): ManagerInstanceActions {
     livePlugins: unsupported,
     health: unsupported,
     serverStatus: unsupported,
+    scanOrphans: unsupported,
+    cleanupOrphans: unsupported,
     mailer: unsupported,
     envConfig: unsupported,
     logs: unsupported,

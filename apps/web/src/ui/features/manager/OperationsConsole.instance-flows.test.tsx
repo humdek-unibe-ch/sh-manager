@@ -95,6 +95,33 @@ describe('OperationsConsole instance flows', () => {
     expect(screen.getByRole('button', { name: 'Instance website1' })).toBeInTheDocument();
   });
 
+  it('warns about leftover data for a previously-removed id and clears it on request', async () => {
+    const user = userEvent.setup();
+    render(
+      <OperationsConsole
+        client={makeFakeClient({ orphans: { 'ghost-1': ['selfhelp_ghost-1_mysql_data'] } })}
+      />,
+    );
+
+    await screen.findByText('Server operations');
+    await user.click(screen.getAllByRole('button', { name: /new instance/i })[0]!);
+    await screen.findByText('Create a new instance');
+    await passWelcomeAndPreflight(user);
+
+    // Basics: choose the id of a previously-removed-but-not-fully-deleted instance.
+    const idInput = await screen.findByLabelText(/instance id/i);
+    await user.clear(idInput);
+    await user.type(idInput, 'ghost-1');
+
+    // The orphan scan (debounced) surfaces the leftover volume.
+    expect(await screen.findByText(/leftover data found/i)).toBeInTheDocument();
+    expect(screen.getByText(/selfhelp_ghost-1_mysql_data/)).toBeInTheDocument();
+
+    // "Remove leftover data" cleans it, and the warning disappears.
+    await user.click(screen.getByRole('button', { name: /remove leftover data/i }));
+    await waitFor(() => expect(screen.queryByText(/leftover data found/i)).not.toBeInTheDocument());
+  });
+
   it('rejects invalid wizard input with the SAME validation the server runs', async () => {
     const user = userEvent.setup();
     render(<OperationsConsole client={makeFakeClient()} />);

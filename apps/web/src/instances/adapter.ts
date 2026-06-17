@@ -17,6 +17,7 @@ import {
   drainInstanceOperations,
   drainInstancePluginOperations,
   hasPendingPluginOperations,
+  cleanupInstanceOrphans,
   instanceBackup,
   instanceBackupPrune,
   instanceBackupScheduleGet,
@@ -36,6 +37,7 @@ import {
   instanceRemove,
   instanceRestore,
   instanceRunScheduledBackup,
+  scanInstanceOrphans,
   instanceSetAddress,
   instanceSetEnv,
   instanceSetMailer,
@@ -223,6 +225,14 @@ export function buildInstanceActions(opts: BuildInstanceActionsOptions): Manager
       };
     },
 
+    async scanOrphans(instanceId) {
+      return scanInstanceOrphans(deps, instanceId);
+    },
+
+    async cleanupOrphans(instanceId) {
+      return cleanupInstanceOrphans(deps, instanceId);
+    },
+
     async mailer(instanceId) {
       return instanceGetMailer(deps, instanceId);
     },
@@ -292,6 +302,10 @@ export function buildInstanceActions(opts: BuildInstanceActionsOptions): Manager
         // renders these as a live step checklist (registry → compose → start →
         // wait_db → migrations → … → health).
         onStep: (step) => ctx.setPhase(step),
+        // One-off notices (e.g. reclaiming a stale volume from a previous
+        // install of this id) stream into the operation log without moving the
+        // checklist marker.
+        log: (line) => ctx.log(line),
       };
       const res = await instanceInstall(deps, installOpts);
       await ctx.log(`Installed ${req.instanceId} at version ${res.version}.`);

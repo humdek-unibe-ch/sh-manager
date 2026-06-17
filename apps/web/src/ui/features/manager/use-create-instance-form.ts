@@ -60,6 +60,27 @@ export function useCreateInstanceForm(client: ApiClient, onStarted: (operationId
 
   const preflightOk = preflightData !== null && PREFLIGHT_ORDER.every((k) => preflightData[k].ok);
 
+  // Detect leftover state (Docker volumes / instance dir) from a PREVIOUS,
+  // not-fully-removed install of this id so the wizard can warn before
+  // reinstalling. Debounced so typing the id does not hammer the server's
+  // `docker volume inspect`, and only queried for a syntactically valid id.
+  const [debouncedId, setDebouncedId] = useState('');
+  useEffect(() => {
+    const valid = instanceId !== '' && INSTANCE_ID_RE.test(instanceId);
+    const handle = setTimeout(() => setDebouncedId(valid ? instanceId : ''), 400);
+    return () => clearTimeout(handle);
+  }, [instanceId]);
+  const orphansQuery = useQuery({
+    queryKey: ['manager', 'orphans', debouncedId],
+    queryFn: () => client.scanOrphans(debouncedId),
+    enabled: debouncedId !== '',
+  });
+  const orphans = orphansQuery.data ?? null;
+  const cleanupOrphans = useMutation({
+    mutationFn: () => client.cleanupOrphans(debouncedId),
+    onSuccess: () => orphansQuery.refetch(),
+  });
+
   const onName = (value: string): void => {
     // Auto-suggest the id while the operator hasn't customised it.
     const autoLinked = !instanceId || instanceId === slugify(displayName);
@@ -167,6 +188,9 @@ export function useCreateInstanceForm(client: ApiClient, onStarted: (operationId
     preflightData,
     preflightOk,
     onName,
+    orphans,
+    orphansQuery,
+    cleanupOrphans,
     idError,
     emailError,
     mailerError,

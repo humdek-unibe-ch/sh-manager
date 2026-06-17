@@ -60,6 +60,17 @@ describe('instance management APIs', () => {
       async serverStatus() {
         return { initialized: true, serverId: 'srv-1', proxyNetwork: 'selfhelp-proxy', instanceCount: 1 };
       },
+      async scanOrphans(id) {
+        // 'ghost' models a removed-but-not-fully-deleted id; everything else clean.
+        if (id === 'ghost') {
+          return { instanceId: id, registered: false, volumes: ['selfhelp_ghost_mysql_data'], hasDirectory: false, hasOrphans: true };
+        }
+        return { instanceId: id, registered: id === 'clinic-a', volumes: [], hasDirectory: false, hasOrphans: false };
+      },
+      async cleanupOrphans(id) {
+        if (id === 'clinic-a') throw new Error(`"${id}" is a registered instance — refusing to delete its data here.`);
+        return { removedVolumes: ['selfhelp_ghost_mysql_data'], removedDirectory: false };
+      },
       async mailer(id) {
         if (id !== 'clinic-a') throw new Error('not found');
         return { configured: true, redactedDsn: 'smtp://mailer:***@mail.example.org:587' };
@@ -209,6 +220,34 @@ describe('instance management APIs', () => {
       const { base } = await managementBase(tmpRoot);
       const res = await fetch(base + '/api/instances');
       expect(res.status).toBe(401);
+    } finally {
+      await rm(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('scans and cleans orphaned resources for a not-registered id (CSRF-guarded)', async () => {
+    const tmpRoot = await mkdtemp(path.join(tmpdir(), 'shm-mgmt-'));
+    try {
+      const { base, cookie, csrfToken } = await managementBase(tmpRoot);
+      const authed = { cookie };
+      const mutating = { cookie, 'Content-Type': 'application/json', 'x-shm-csrf': csrfToken };
+
+      // Read scan needs auth, works for an id that is not a live instance.
+      expect((await fetch(base + '/api/instances/ghost/orphans')).status).toBe(401);
+      const scan = await fetch(base + '/api/instances/ghost/orphans', { headers: authed });
+      expect(scan.status).toBe(200);
+      const report = (await scan.json()) as { hasOrphans: boolean; volumes: string[] };
+      expect(report.hasOrphans).toBe(true);
+      expect(report.volumes).toContain('selfhelp_ghost_mysql_data');
+
+      // Cleanup is state-changing, so CSRF is required (same guard as remove).
+      const noCsrf = await fetch(base + '/api/instances/ghost/orphans/cleanup', { method: 'POST', headers: { cookie } });
+      expect(noCsrf.status).toBe(403);
+
+      const cleanup = await fetch(base + '/api/instances/ghost/orphans/cleanup', { method: 'POST', headers: mutating });
+      expect(cleanup.status).toBe(200);
+      const result = (await cleanup.json()) as { removedVolumes: string[] };
+      expect(result.removedVolumes).toContain('selfhelp_ghost_mysql_data');
     } finally {
       await rm(tmpRoot, { recursive: true, force: true });
     }

@@ -44,6 +44,7 @@ import {
   instancePaths,
   nodeSecretIO,
   proxyDir,
+  readInstanceSecrets,
   validateDomainForInstall,
   writeFileAtomic,
   type GenerateSecretsOptions,
@@ -79,6 +80,8 @@ export interface ActionDeps {
   removeNetwork?: (name: string) => Promise<void>;
   /** Archive a named Docker volume into `outFile` (real impl uses `docker run … tar`). */
   archiveVolume?: (volumeName: string, outFile: string) => Promise<void>;
+  /** True when a named Docker volume exists (real impl uses `docker volume inspect`). */
+  volumeExists?: (volumeName: string) => Promise<boolean>;
   /** Delete named Docker volumes (full-delete only; real impl uses `docker volume rm`). */
   removeVolumes?: (volumeNames: string[]) => Promise<void>;
   /** Restore a backup `.tgz` (from {@link archiveVolume}) into a named volume, replacing its contents. */
@@ -136,6 +139,63 @@ export function dbCredentialMismatchError(instanceId: string, lastErr: unknown):
       `  sh-manager instance remove ${instanceId} --mode full_delete --delete-volumes --confirm "delete ${instanceId}"\n` +
       `Underlying error: ${errMessage(lastErr)}`,
   );
+}
+
+/** Persistent Docker volume names for one instance, in a stable order. */
+export function instanceDataVolumes(instanceId: string): string[] {
+  const project = composeProjectName(instanceId);
+  return [
+    `${project}_mysql_data`,
+    `${project}_uploads`,
+    `${project}_plugin_artifacts`,
+    `${project}_plugin_artifacts_public`,
+  ];
+}
+
+/**
+ * Reclaim stale Docker volumes left behind by a PREVIOUS install of this id
+ * before a FRESH install brings the stack up — so reinstalling a removed
+ * instance with the same name "just works".
+ *
+ * The official MySQL image applies `MYSQL_USER`/`MYSQL_PASSWORD` only when it
+ * initialises an EMPTY data volume. If an instance was fully removed WITHOUT
+ * deleting its volumes (a `full_delete` that kept volumes, an orphan from an
+ * older manager, or an aborted attempt), reinstalling generates a fresh secret
+ * set — but the leftover `mysql_data` volume still carries the OLD credentials,
+ * so every connection fails with "Access denied" forever and the install dies
+ * at `wait_db`. Those volumes are unusable (their matching secrets are gone)
+ * and belong to no current instance, so a fresh install removes them to start
+ * MySQL on a clean slate.
+ *
+ * Runs ONLY when there are no reusable on-disk secrets — i.e. a genuinely fresh
+ * install. A retry/resume (secrets present) reuses them and the matching volumes
+ * are left untouched, so an in-flight install is never destroyed. No-op when the
+ * `volumeExists`/`removeVolumes` helpers are unavailable (it then degrades to
+ * the existing fail-fast `wait_db` remediation message).
+ */
+export async function reclaimStaleInstanceVolumes(
+  deps: ActionDeps,
+  instanceId: string,
+  log?: (line: string) => void | Promise<void>,
+): Promise<string[]> {
+  if (!deps.volumeExists || !deps.removeVolumes) return [];
+  // Reusable on-disk secrets mean this is a retry/resume over volumes that
+  // MATCH the secrets — never reclaim those.
+  const existingSecrets = await readInstanceSecrets(instancePaths(instanceId, deps.root).secretsDir);
+  if (existingSecrets) return [];
+
+  const stale: string[] = [];
+  for (const name of instanceDataVolumes(instanceId)) {
+    if (await deps.volumeExists(name)) stale.push(name);
+  }
+  if (stale.length === 0) return [];
+
+  await log?.(
+    `Reclaiming ${stale.length} stale Docker volume(s) from a previous install of "${instanceId}" ` +
+      `(no matching secrets remain, so the database could never authenticate against them): ${stale.join(', ')}.`,
+  );
+  await deps.removeVolumes(stale);
+  return stale;
 }
 
 export function secretGenOptions(deps: ActionDeps): GenerateSecretsOptions {
