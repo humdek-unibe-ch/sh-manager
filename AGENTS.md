@@ -105,6 +105,30 @@ These rules apply to every documentation change in active SelfHelp2 repositories
 - Add the SPDX header to every new source file in the existing format.
 - Keep patches small and focused; do not modernize or refactor unrelated areas opportunistically.
 
+## Linting & Quality Gate (mandatory)
+
+Linting and the project quality gate are **mandatory whenever code changes**. ESLint is configured strict and production-ready (flat config in `eslint.config.mjs`). The type-checked TypeScript surface (`**/*.{ts,tsx,mts}`) extends typescript-eslint's flagship **`strictTypeChecked` + `stylisticTypeChecked`** presets via `projectService`, so the full real type-safety rule set (`no-unsafe-*`, `no-base-to-string`, `restrict-*`, `no-floating-promises`/`no-misused-promises`, `use-unknown-in-catch-callback-variable`, …) is enforced rather than a hand-picked subset.
+
+- After changing any TypeScript/JavaScript/React code, you MUST run `npm run lint`. If it fails, fix the issues before finishing — do not hand back red lint. CI runs lint as a **blocking, zero-warning** gate (`npm run lint -- --max-warnings=0`); the config sets every enforced rule to `error`, so a clean local `npm run lint` matches CI. Generated output (`dist/**`, `dist-web/**`, `coverage/**`, `*.d.ts`) is ignored by the flat config so the run is deterministic.
+- `npm run lint:fix` may be used for the auto-fixable subset, but review every auto-fix: it must be behavior-preserving (e.g. `no-unnecessary-type-assertion` can disagree with `tsc` — verify with `npm run typecheck`).
+- For larger or cross-cutting changes, run the full gate `npm run check` (typecheck + lint + test + validate:schemas + headers:check).
+- For changes affecting build output, CLI behavior, Docker/update/registry logic, schemas, or the web app, also run the relevant command: `npm run build`, `npm run validate:schemas`, and/or the targeted tests for the touched area.
+- Lint fixes MUST be behavior-preserving. Never change functionality, control flow, return values, public exports, or async behavior just to satisfy lint. If preserving behavior conflicts with a lint rule, preserving behavior wins.
+- Hard rules enforced by ESLint (do not regress them):
+  - No unused imports.
+  - No unused variables/parameters unless intentionally prefixed with `_`.
+  - No explicit `any` in production code (allowed only via a narrow, documented inline exception).
+  - No floating/unhandled promises (`no-floating-promises`) and no misused promises (`no-misused-promises`) — mark intentional fire-and-forget with `void`.
+  - No `any` propagation through the type system (`no-unsafe-*`), relaxed only at the documented Commander CLI / test boundaries in `eslint.config.mjs`.
+  - No unchecked stringification (`restrict-template-expressions`, `no-base-to-string`): numbers/booleans are allowed in templates, but objects/`any`/nullish must be stringified deliberately.
+  - Consistent, side-effect-free type imports (`consistent-type-imports`) and no duplicate imports.
+  - `react-hooks/rules-of-hooks` for the React web UI (`apps/web/**`) — never call hooks conditionally or in loops. `exhaustive-deps` is intentionally off (changing dependency arrays alters effect timing) and `eslint-plugin-react-hooks` is scoped to `apps/web` only, never the Node/CLI packages.
+  - SPDX headers must be preserved on every source file.
+- A small set of preset rules are **intentionally turned off** in `eslint.config.mjs` because they are not type-safety rules and enforcing them would force behavior changes or pure churn — each carries an inline reason. Do not re-enable them without revisiting that reasoning: `require-await` (dropping `async` changes throw→reject semantics + breaks the uniform async-dep shape), `no-empty-function` (intentional no-ops/EPIPE swallow/stubs), `no-confusing-void-expression` (React `() => handler()` shorthand), `no-unnecessary-condition` (would delete deliberate runtime/SECURITY guards at untyped registry/Docker/JSON boundaries, e.g. `verifyReleaseSignature`), `no-non-null-assertion` (reviewed invariants; the escape hatch we actually ban is `any`), and `prefer-nullish-coalescing` (the code uses `||`/`a ? a : b` for *falsy* fallbacks where `??` would change behavior). Non-shipped code (tests/e2e/scripts) additionally relaxes a few pedantic type-style rules.
+- Do **not** disable ESLint rules globally or file-wide to hide problems. A narrow, single-line `eslint-disable-next-line <rule>` with a comment explaining why is acceptable only when the rule is a verified false positive or the only behavior-preserving option; keep such exceptions minimal.
+- CI enforces the gate as **blocking** on every PR/push to `main` (`ci.yml`: typecheck → lint `--max-warnings=0` → test → coverage gate → schema/signature validation → headers → build) and again before any tagged image/release (`release.yml` runs `npm run check`, which includes lint `--max-warnings=0`, plus the release smoke). Never merge or release on a red gate, and do not weaken these workflows to go green.
+- The final response for any code change MUST state which commands were run (`lint`/`typecheck`/`test`/`build`/`check` as applicable) and their result.
+
 ## Testing Rules
 
 - **Run only the tests related to your change.** Scope every run to the touched code (`npx vitest run <path>`, a `-t` filter, or the single new test file). Run the whole suite only before a release/tag.
