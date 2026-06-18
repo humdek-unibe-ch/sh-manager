@@ -37,7 +37,7 @@ export interface FrontendUpdatePlanInput {
   requireCoreFrontendRange?: boolean;
   frontendReleases: FrontendRelease[];
   channel?: ReleaseChannel;
-  target?: 'latest' | string;
+  target?: string;
   advisories?: SecurityAdvisory[];
 }
 

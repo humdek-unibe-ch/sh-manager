@@ -33,7 +33,7 @@ function expectSurface(mod: Record<string, unknown>, surface: Surface): void {
 
 describe('shared application-action export surface', () => {
   it('actions.ts exports every action consumed across boundaries', () => {
-    expectSurface(actions as unknown as Record<string, unknown>, {
+    expectSurface(actions, {
       // server / bootstrap
       serverInit: 'function',
       ensureProxyRunning: 'function',
@@ -90,7 +90,7 @@ describe('shared application-action export surface', () => {
   });
 
   it('env.ts exports the real ActionDeps wiring', () => {
-    expectSurface(env as unknown as Record<string, unknown>, {
+    expectSurface(env, {
       loadTrustedKeys: 'function',
       localhostProbeHost: 'function',
       rewriteLocalhostUrl: 'function',
@@ -100,7 +100,7 @@ describe('shared application-action export surface', () => {
   });
 
   it('self-update.ts exports the check/apply surface', () => {
-    expectSurface(selfUpdate as unknown as Record<string, unknown>, {
+    expectSurface(selfUpdate, {
       MANAGER_RELEASES_LATEST_URL: 'string',
       MANAGER_IMAGE: 'string',
       MANAGER_REPO_URL: 'string',
@@ -117,14 +117,14 @@ describe('shared application-action export surface', () => {
   });
 
   it('operations-client.ts exports both backend operation clients', () => {
-    expectSurface(operationsClient as unknown as Record<string, unknown>, {
+    expectSurface(operationsClient, {
       HttpBackendOperationsClient: 'function',
       ComposeExecBackendOperationsClient: 'function',
     });
   });
 
   it('plugin-state-client.ts exports the plugin-state surface', () => {
-    expectSurface(pluginStateClient as unknown as Record<string, unknown>, {
+    expectSurface(pluginStateClient, {
       parseRunbookCommand: 'function',
       ComposeExecPluginStateClient: 'function',
       composePluginExecDeps: 'function',

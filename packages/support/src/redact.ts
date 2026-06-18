@@ -44,7 +44,7 @@ export function redactString(text: string): string {
 /** Deep-redacts an object by key name and value content. */
 export function redactObject<T>(value: T): T {
   if (typeof value === 'string') return redactString(value) as unknown as T;
-  if (Array.isArray(value)) return value.map((v) => redactObject(v)) as unknown as T;
+  if (Array.isArray(value)) return value.map((v: unknown) => redactObject(v)) as unknown as T;
   if (value && typeof value === 'object') {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {

@@ -18,6 +18,35 @@ A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instanc
 
 ## [Unreleased]
 
+### Changed
+- **Strict, type-checked linting adopted as the state-of-the-art baseline.** The
+  type-aware ESLint surface now extends typescript-eslint's `strictTypeChecked` +
+  `stylisticTypeChecked` presets instead of a hand-picked subset, so the full
+  real type-safety rule set is enforced (`no-base-to-string`, `restrict-*`,
+  `no-unsafe-enum-comparison`, `only-throw-error`, `unbound-method`,
+  `use-unknown-in-catch-callback-variable`, and more). Production code was fixed
+  to comply in a behavior-preserving way (redundant `String()`/casts removed,
+  `.match`→`RegExp.exec`, optional chaining, dynamic `delete` replaced with
+  filtered rebuilds, typed `catch` variables). A small set of non-type-safety
+  preset rules are turned off with documented reasons (see `AGENTS.md`) because
+  satisfying them would change runtime behavior (`require-await`,
+  `no-unnecessary-condition`, `prefer-nullish-coalescing`, `no-non-null-assertion`,
+  `no-confusing-void-expression`, `no-empty-function`); `restrict-template-expressions`
+  allows numbers/booleans but still flags object/`any`/nullish interpolation.
+- **Quality gate hardened to match the frontend reference standard.** The CI
+  lint step (`ci.yml`) and the aggregate `npm run check` script now run ESLint
+  with `--max-warnings=0`, so a lint warning fails the build deterministically
+  (the flat config already sets every enforced rule to `error`; this guards
+  against future warn-level rules silently passing). No rules were weakened.
+- **React Hooks linting for the web admin UI.** Added `eslint-plugin-react-hooks`
+  (dev-only) and enabled `react-hooks/rules-of-hooks` (error) scoped to
+  `apps/web/**` — the repo's only React surface. `exhaustive-deps` is left off
+  on purpose (changing dependency arrays would alter effect timing), and the
+  plugin is not applied to the Node/CLI packages. The existing `apps/web` code
+  already complies; no application code changed.
+- Documented the blocking lint/typecheck/test/build gate (PR + release) in
+  `AGENTS.md` "Linting & Quality Gate (mandatory)".
+
 ## [1.6.3] - 2026-06-17
 
 ### Fixed

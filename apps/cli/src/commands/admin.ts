@@ -30,7 +30,9 @@ export function registerAdmin(program: Command, ctx: CliContext): void {
         // Same convention as `instance install --admin-password`: omitted =
         // generate a strong one and print it exactly once (never stored in clear).
         const generated = provided === undefined || provided === '' ? randomBytes(18).toString('base64url') : undefined;
-        const password = generated ?? (provided as string);
+        // When `generated` is undefined, `provided` was a non-empty string; tsc
+        // cannot correlate the two branches, so the non-null assertion is needed.
+        const password = generated ?? provided!;
         const store = fileOperatorStore(program.opts().root as string);
         const op = await adminCreate(store, {
           email: opts.email,

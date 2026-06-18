@@ -36,6 +36,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ActionDeps } from '@shm/app-actions';
 import nacl from 'tweetnacl';
 import {
+  ComposeExecBackendOperationsClient,
   drainInstancePluginOperations,
   hasPendingPluginOperations,
   instanceBackup,
@@ -51,7 +52,6 @@ import {
   serverPurge,
   serverRunScheduledBackups,
 } from '@shm/app-actions';
-import { ComposeExecBackendOperationsClient } from '@shm/app-actions';
 import { buildImages, defaultRepos } from './build-images.mjs';
 import {
   E2E_KEY_ID,

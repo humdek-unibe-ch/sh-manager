@@ -41,7 +41,7 @@ async function readPkg(file: string): Promise<PkgJson | null> {
 function licenseOf(pkg: PkgJson): string {
   if (typeof pkg.license === 'string') return pkg.license;
   if (pkg.license && typeof pkg.license === 'object' && pkg.license.type) return pkg.license.type;
-  if (pkg.licenses && pkg.licenses[0]?.type) return pkg.licenses[0].type!;
+  if (pkg.licenses?.[0]?.type) return pkg.licenses[0].type;
   return 'UNKNOWN';
 }
 

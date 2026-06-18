@@ -184,12 +184,12 @@ export function realDeps(root: string, trustedKeys: TrustedKeysFile, opts: RealD
       return probes;
     },
     resourceFacts: async (requiredPorts): Promise<PreflightResourceFacts> => {
-      const fs = await statfs(root).catch(() => ({ bavail: 0, bsize: 0 }) as { bavail: number; bsize: number });
+      const fs = await statfs(root).catch(() => ({ bavail: 0, bsize: 0 }));
       const ports: { port: number; free: boolean }[] = [];
       for (const p of requiredPorts) ports.push({ port: p, free: await portFree(p) });
       return {
         requiredPortsFree: ports,
-        diskBytesFree: Number(fs.bavail) * Number(fs.bsize),
+        diskBytesFree: fs.bavail * fs.bsize,
         memoryBytesTotal: os.totalmem(),
         cpuCount: os.cpus().length,
         dockerAvailable: await dockerAvailable(),

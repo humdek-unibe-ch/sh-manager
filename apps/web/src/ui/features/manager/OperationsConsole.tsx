@@ -105,12 +105,12 @@ export function OperationsConsole({ client, onSignOut }: OperationsConsoleProps)
     if (autoOpenedWizard.current) return;
     if (instancesQuery.data && instancesQuery.data.length === 0) {
       autoOpenedWizard.current = true;
-      navigate(CREATE_INSTANCE_ROUTE);
+      void navigate(CREATE_INSTANCE_ROUTE);
     }
   }, [instancesQuery.data, navigate]);
 
   const select = (id: string | null): void => {
-    navigate(id ? `/instances/${id}` : '/');
+    void navigate(id ? `/instances/${id}` : '/');
     closeNav();
   };
 
@@ -188,7 +188,7 @@ export function OperationsConsole({ client, onSignOut }: OperationsConsoleProps)
 
         <MantineAppShell.Section>
           <Divider my="sm" />
-          <Button variant="primary" block onClick={() => navigate(CREATE_INSTANCE_ROUTE)}>
+          <Button variant="primary" block onClick={() => { void navigate(CREATE_INSTANCE_ROUTE); }}>
             New instance
           </Button>
         </MantineAppShell.Section>
@@ -201,7 +201,7 @@ export function OperationsConsole({ client, onSignOut }: OperationsConsoleProps)
           <CreateInstanceWizard
             key={String(createOpen)}
             client={client}
-            onClose={() => navigate('/')}
+            onClose={() => { void navigate('/'); }}
             onStarted={(operationId) => {
               setWatchedOperationId(operationId);
               // The new instance shows up in the inventory as the install
@@ -211,7 +211,7 @@ export function OperationsConsole({ client, onSignOut }: OperationsConsoleProps)
             }}
             onOpenInstance={(instanceId) => {
               void queryClient.invalidateQueries({ queryKey: INSTANCES_KEY });
-              navigate(`/instances/${instanceId}`);
+              void navigate(`/instances/${instanceId}`);
             }}
           />
         ) : selectedId === null ? (
@@ -219,7 +219,7 @@ export function OperationsConsole({ client, onSignOut }: OperationsConsoleProps)
             client={client}
             instances={instances}
             onOpenInstance={select}
-            onCreate={() => navigate(CREATE_INSTANCE_ROUTE)}
+            onCreate={() => { void navigate(CREATE_INSTANCE_ROUTE); }}
             watchedOperationId={watchedOperationId}
             onHideWatched={() => setWatchedOperationId(null)}
           />

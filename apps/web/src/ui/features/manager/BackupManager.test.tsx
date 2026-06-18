@@ -62,7 +62,7 @@ describe('Scheduled backups card', () => {
     // The time control is a native HH:MM picker, so a nonsense clock value can no
     // longer be typed. An EMPTY time is still possible (cleared field) and is
     // caught by the server-identical validation, surfaced in the UI.
-    const time = (await screen.findByLabelText(/Run time/)) as HTMLInputElement;
+    const time = await screen.findByLabelText<HTMLInputElement>(/Run time/);
     expect(time.type).toBe('time');
     await user.clear(time);
     await user.click(screen.getByRole('button', { name: 'Save schedule' }));

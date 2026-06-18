@@ -47,7 +47,7 @@ export function useInstanceDetail(client: ApiClient, instanceId: string) {
   // only runs while SSE is down AND the operation is still running.
   const watchedQuery = useQuery({
     queryKey: ['manager', 'operation', watchedOperationId],
-    queryFn: () => client.getOperation(watchedOperationId as string),
+    queryFn: () => client.getOperation(watchedOperationId!),
     enabled: watchedOperationId !== null,
     refetchInterval: (q) => (!sseConnected && q.state.data?.status === 'running' ? 2_000 : false),
   });

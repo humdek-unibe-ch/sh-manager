@@ -27,7 +27,7 @@ startWebUi({
   ...(flag('allow-non-local') ? { allowNonLocal: true } : {}),
   ...(arg('client-dir') !== undefined ? { clientDir: arg('client-dir') } : {}),
   ...(arg('trusted-keys') !== undefined ? { trustedKeysPath: arg('trusted-keys') } : {}),
-}).catch((err) => {
+}).catch((err: unknown) => {
   console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
   process.exit(1);
 });

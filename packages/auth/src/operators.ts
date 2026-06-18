@@ -139,7 +139,7 @@ export function createOperator(
   now: Date = new Date(),
 ): OperatorResult {
   const email = normaliseEmail(input.email);
-  if (!email || !email.includes('@')) throw new Error('A valid email is required.');
+  if (!email?.includes('@')) throw new Error('A valid email is required.');
   if (findOperatorByEmail(table, email)) throw new Error(`An operator with email ${email} already exists.`);
   assertRoles(input.roles);
   if (input.roles.length === 0) throw new Error('At least one role is required.');
@@ -219,7 +219,7 @@ export interface LocalAuthResult {
 /** Authenticate a local operator by email + password (constant-time verify). */
 export function authenticateLocal(table: OperatorTable, email: string, password: string): LocalAuthResult {
   const operator = findOperatorByEmail(table, email);
-  if (!operator || !operator.passwordHash) {
+  if (!operator?.passwordHash) {
     // Spend a verify cycle against a dummy hash to reduce user-enumeration timing signal.
     verifyPassword(password, 'scrypt$16384$8$1$64$AAAA$AAAA');
     return { ok: false, reason: 'Invalid credentials.' };

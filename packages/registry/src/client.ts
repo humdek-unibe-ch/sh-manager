@@ -173,7 +173,7 @@ export class RegistryClient {
     }
     const release = validation.value;
     const verification = verifyReleaseSignature(
-      release as unknown as { security: { signature: string; keyId: string } } & Record<string, unknown>,
+      release,
       this.trustedKeys,
     );
     if (!verification.verified && !this.allowUnsigned) {

@@ -43,14 +43,14 @@ describe('verifyEd25519', () => {
 describe('verifyReleaseSignature', () => {
   it('verifies a release signed by a trusted active key', () => {
     const { signed, trusted } = makeSignedRelease();
-    const r = verifyReleaseSignature(signed as never, trusted);
+    const r = verifyReleaseSignature(signed, trusted);
     expect(r.verified).toBe(true);
     expect(r.keyId).toBe('humdek-2026-01');
   });
 
   it('rejects an unsigned release', () => {
     const { trusted } = makeSignedRelease();
-    const r = verifyReleaseSignature({ security: { signature: '', keyId: 'humdek-2026-01' } } as never, trusted);
+    const r = verifyReleaseSignature({ security: { signature: '', keyId: 'humdek-2026-01' } }, trusted);
     expect(r.verified).toBe(false);
     expect(r.reason).toMatch(/unsigned/i);
   });
@@ -58,14 +58,14 @@ describe('verifyReleaseSignature', () => {
   it('rejects a release signed with keyId "dev" in production', () => {
     const { signed, trusted } = makeSignedRelease();
     (signed.security as { keyId: string }).keyId = 'dev';
-    const r = verifyReleaseSignature(signed as never, trusted);
+    const r = verifyReleaseSignature(signed, trusted);
     expect(r.verified).toBe(false);
   });
 
   it('rejects a release whose key is revoked', () => {
     const { signed, trusted } = makeSignedRelease();
     trusted.keys[0]!.status = 'revoked';
-    const r = verifyReleaseSignature(signed as never, trusted);
+    const r = verifyReleaseSignature(signed, trusted);
     expect(r.verified).toBe(false);
     expect(r.reason).toMatch(/no active trusted key/i);
   });
@@ -73,7 +73,7 @@ describe('verifyReleaseSignature', () => {
   it('rejects a tampered release body', () => {
     const { signed, trusted } = makeSignedRelease();
     (signed as Record<string, unknown>).version = '9.9.9';
-    const r = verifyReleaseSignature(signed as never, trusted);
+    const r = verifyReleaseSignature(signed, trusted);
     expect(r.verified).toBe(false);
   });
 });

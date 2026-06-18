@@ -171,7 +171,7 @@ export const realExec: ExecLike = async (cmd, args, opts = {}) => {
     maxBuffer: 32 * 1024 * 1024,
     ...(isWinCmdShim ? { shell: true } : {}),
   });
-  return { stdout: String(stdout), stderr: String(stderr) };
+  return { stdout, stderr };
 };
 
 export interface ApplySelfUpdateOptions {

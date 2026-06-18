@@ -5,8 +5,7 @@
  * inventory, manifest and lock must never be left half-written.
  */
 import { constants } from 'node:fs';
-import { copyFile, mkdir, rename, writeFile } from 'node:fs/promises';
-import { readFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 export async function writeFileAtomic(

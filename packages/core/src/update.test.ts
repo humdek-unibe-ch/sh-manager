@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
 import { describe, expect, it } from 'vitest';
-import type { CoreRelease, FrontendRelease, PluginRelease } from '@shm/schemas';
+import type { CoreRelease, FrontendRelease, PluginRelease, RuntimeServicePolicy } from '@shm/schemas';
 import { RecordingComposeRunner } from '@shm/docker';
 import {
   evaluateMysqlMajorUpgrade,
@@ -14,7 +14,6 @@ import {
   type FrontendUpdatePlan,
   type UpdatePlan,
 } from './update.js';
-import type { RuntimeServicePolicy } from '@shm/schemas';
 import type { PreflightResourceFacts } from './preflight.js';
 import type { ApprovedUpdate } from './instance-scope.js';
 import type { HealthReport } from './health.js';

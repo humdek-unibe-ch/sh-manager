@@ -97,7 +97,7 @@ const STEP_MAPS: Record<OperationKind, StepDef[]> = {
  * admin UI", so we give it a clearer name. The live phase (set by the drain)
  * carries the specifics ("Installing plugin X 0.2.1").
  */
-export function operationKindLabel(kind: OperationKind | string): string {
+export function operationKindLabel(kind: string): string {
   if (kind === 'cms_operations_drain') return 'Plugin / CMS operation';
   // Spell out the core update so it is unmistakably a core-stack update (vs. the
   // `instance_frontend_update` frontend-only swap) in the operation history.

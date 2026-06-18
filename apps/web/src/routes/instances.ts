@@ -109,7 +109,7 @@ export async function routeInstanceManagement(
     return true;
   }
 
-  const m = path.match(/^\/api\/instances\/([^/]+)(\/.*)?$/);
+  const m = /^\/api\/instances\/([^/]+)(\/.*)?$/.exec(path);
   if (!m) return false;
   const instanceId = requireInstanceId(m[1]);
   const rest = m[2] ?? '';
@@ -152,16 +152,18 @@ export async function routeInstanceManagement(
     // Server-authoritative validation: the client must send a complete,
     // well-formed policy; anything else is rejected with the exact problems.
     const raw = (ctx.body ?? {}) as Partial<BackupSchedulePolicy>;
-    const policy: BackupSchedulePolicy = {
-      enabled: raw.enabled as boolean,
-      time: raw.time as string,
+    // Trust nothing from the body: assemble the claimed shape and let
+    // validateSchedulePolicy reject anything missing/malformed at runtime.
+    const policy = {
+      enabled: raw.enabled,
+      time: raw.time,
       retention: {
-        daily: raw.retention?.daily as number,
-        weekly: raw.retention?.weekly as number,
-        monthly: raw.retention?.monthly as number,
-        maxAgeDays: raw.retention?.maxAgeDays as number,
+        daily: raw.retention?.daily,
+        weekly: raw.retention?.weekly,
+        monthly: raw.retention?.monthly,
+        maxAgeDays: raw.retention?.maxAgeDays,
       },
-    };
+    } as BackupSchedulePolicy;
     const problems = validateSchedulePolicy(policy);
     if (problems.length > 0) throw new HttpError(400, problems.join(' '));
     sendJson(res, 200, await im.instances.setBackupSchedule(instanceId, policy));
@@ -232,7 +234,7 @@ export async function routeInstanceManagement(
         throw new HttpError(400, `The value for ${key} must be a string.`);
       }
     }
-    const req = { overrides } as SetEnvRequest;
+    const req = { overrides };
     await start('instance_set_env', instanceId, (opCtx) => im.instances.setEnv(instanceId, req, opCtx));
     return true;
   }
@@ -260,7 +262,7 @@ export async function routeInstanceManagement(
     await start('instance_backup', instanceId, (opCtx) => im.instances.backup(instanceId, opCtx));
     return true;
   }
-  const restoreMatch = rest.match(/^\/backups\/([a-z0-9-]+)\/restore$/i);
+  const restoreMatch = /^\/backups\/([a-z0-9-]+)\/restore$/i.exec(rest);
   if (restoreMatch && ctx.method === 'POST') {
     const backupId = restoreMatch[1]!;
     await start('instance_restore', instanceId, (opCtx) => im.instances.restore(instanceId, { backupId }, opCtx));

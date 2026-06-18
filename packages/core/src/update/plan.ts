@@ -28,7 +28,7 @@ export interface UpdatePlanInput {
   instanceId: string;
   currentVersion: string;
   channel?: ReleaseChannel;
-  target?: 'latest' | string;
+  target?: string;
   coreReleases: CoreRelease[];
   frontendReleases: FrontendRelease[];
   pluginReleases: PluginRelease[];

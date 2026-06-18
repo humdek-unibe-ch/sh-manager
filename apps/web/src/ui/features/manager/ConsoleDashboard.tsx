@@ -94,7 +94,7 @@ export function ConsoleDashboard({
 
   const overall = useMemo<{ tone: BadgeTone; label: string }>(() => {
     if (preflight.isPending || !checks) return { tone: 'pending', label: 'Checking…' };
-    const results = CHECKS.map((c) => checks[c]).filter(Boolean) as CheckResult[];
+    const results = CHECKS.map((c) => checks[c]).filter(Boolean);
     if (results.length === 0) return { tone: 'pending', label: 'Unknown' };
     if (results.some((r) => r.severity === 'error' || !r.ok)) return { tone: 'error', label: 'Needs attention' };
     if (results.some((r) => r.severity === 'warning')) return { tone: 'warning', label: 'Degraded' };
