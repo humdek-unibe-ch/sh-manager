@@ -78,6 +78,11 @@ function errMessage(err: unknown): string {
 async function runStep(
   steps: ProvisionStepResult[],
   name: ProvisionStepName,
+  // `fn` may resolve to a detail string OR nothing; several deps are
+  // `() => Promise<void>` (waitForDatabase/runMigrations/warmCaches), so
+  // narrowing to `string | undefined` would reject them. The void-in-union is
+  // intentional for this step-callback contract.
+  // eslint-disable-next-line @typescript-eslint/no-invalid-void-type
   fn: () => Promise<string | void>,
   onPhase: ProvisionDeps['onPhase'],
 ): Promise<boolean> {

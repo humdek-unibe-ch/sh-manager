@@ -164,33 +164,33 @@ export function createManagerServer(options: ManagerServerOptions): ManagerServe
     if (options.instanceManagement) {
       if (path === '/api/events' && ctx.method === 'GET') {
         startEventStream(srv, res);
-        return;
+        return undefined;
       }
       if (path === '/api/operations' && ctx.method === 'GET') {
         const instanceId = ctx.url.searchParams.get('instanceId') ?? undefined;
         sendJson(res, 200, {
           operations: await options.instanceManagement.journal.list(instanceId !== undefined ? { instanceId } : {}),
         });
-        return;
+        return undefined;
       }
-      const opMatch = path.match(/^\/api\/operations\/([a-z0-9-]+)$/i);
+      const opMatch = /^\/api\/operations\/([a-z0-9-]+)$/i.exec(path);
       if (opMatch && ctx.method === 'GET') {
         const record = await options.instanceManagement.journal.get(opMatch[1]!);
         if (!record) throw new HttpError(404, 'Operation not found.');
         sendJson(res, 200, record);
-        return;
+        return undefined;
       }
     }
 
     // Static SPA: shell at "/", hashed assets under any other non-API GET path.
     if (ctx.method === 'GET' && !isApi) {
       if (path === '/') return serveAppShell(clientDir, res);
-      if (clientDir && (await serveStatic(clientDir, path, res))) return;
+      if (clientDir && (await serveStatic(clientDir, path, res))) return undefined;
       // Unknown non-API path: serve the shell so the SPA can render (no client router today, but safe).
       return serveAppShell(clientDir, res);
     }
 
-    if (await routeInstanceManagement(srv, ctx, res)) return;
+    if (await routeInstanceManagement(srv, ctx, res)) return undefined;
 
     if (path === '/api/state' && ctx.method === 'GET') {
       // Authenticated sessions get their identity + CSRF token back so a page

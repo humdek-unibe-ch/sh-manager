@@ -353,7 +353,7 @@ async function newestBackupManifestSnapshot(
     try {
       const raw: unknown = JSON.parse(await readFile(path.join(backupsDir, name, 'selfhelp.instance.json'), 'utf8'));
       const v = validateInstanceManifest(raw);
-      if (!v.valid || !v.value || v.value.instanceId !== instanceId) continue;
+      if (!v.valid || v.value?.instanceId !== instanceId) continue;
       const backupMeta = JSON.parse(
         await readFile(path.join(backupsDir, name, 'backup-manifest.json'), 'utf8'),
       ) as BackupManifest;

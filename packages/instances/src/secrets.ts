@@ -108,8 +108,8 @@ export function generateInstanceSecrets(options: GenerateSecretsOptions = {}): I
     redisPassword: urlSafeToken(24),
     mercureJwtSecret: hexToken(32),
     jwtPassphrase,
-    jwtPrivateKeyPem: String(privateKey),
-    jwtPublicKeyPem: String(publicKey),
+    jwtPrivateKeyPem: privateKey,
+    jwtPublicKeyPem: publicKey,
     managerToken: urlSafeToken(32),
   };
 }
@@ -153,7 +153,7 @@ export function withMailerDsn(secrets: InstanceSecrets, mailerDsn: string | unde
  * unchanged — there is nothing secret to hide.
  */
 export function redactMailerDsn(dsn: string): string {
-  const scheme = dsn.match(/^[a-z][a-z0-9+.-]*:\/\//i);
+  const scheme = /^[a-z][a-z0-9+.-]*:\/\//i.exec(dsn);
   if (!scheme) return dsn;
   const prefix = scheme[0];
   const rest = dsn.slice(prefix.length);

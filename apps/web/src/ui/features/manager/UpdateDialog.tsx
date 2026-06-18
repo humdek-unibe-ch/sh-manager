@@ -64,7 +64,7 @@ export function UpdateDialog({
         <SegmentedControl
           fullWidth
           value={mode}
-          onChange={(v) => setMode(v as UpdateMode)}
+          onChange={(v) => setMode(v)}
           data={[
             { label: 'SelfHelp core (+ matching frontend)', value: 'core' },
             { label: 'Frontend only (keep core)', value: 'frontend' },

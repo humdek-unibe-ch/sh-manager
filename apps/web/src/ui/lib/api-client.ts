@@ -196,7 +196,7 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     const data = parseJson(await res.text());
     if (!res.ok) {
       const message =
-        (data && typeof data === 'object' && 'error' in data && typeof (data as { error: unknown }).error === 'string'
+        (data && typeof data === 'object' && 'error' in data && typeof (data).error === 'string'
           ? (data as { error: string }).error
           : null) ?? `Request failed (${res.status}).`;
       throw new ApiError(res.status, message);

@@ -86,7 +86,7 @@ const argv = stripRedundantManagerToken(process.argv);
 // commander parses root options anywhere in argv, so a global `--version`
 // swallows `instance install/update ... --version <x>` — the CLI printed the
 // manager version and exited instead of installing the requested version.
-if (argv.length === 3 && ['--version', '-V', 'version'].includes(argv[2] as string)) {
+if (argv.length === 3 && ['--version', '-V', 'version'].includes(argv[2]!)) {
   console.log(MANAGER_VERSION);
   process.exit(0);
 }

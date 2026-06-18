@@ -90,7 +90,7 @@ export function validateCloneInstance(req: CloneInstanceShape): string[] {
   if (req.sourceMode === 'production') {
     if (!req.targetDomain || !HOSTNAME_RE.test(req.targetDomain)) {
       errors.push('A valid public domain is required to clone a production instance.');
-    } else if (req.sourceDomain && req.targetDomain.toLowerCase() === req.sourceDomain.toLowerCase()) {
+    } else if (req.targetDomain.toLowerCase() === req.sourceDomain?.toLowerCase()) {
       errors.push('The clone must not reuse the source domain.');
     }
   } else {

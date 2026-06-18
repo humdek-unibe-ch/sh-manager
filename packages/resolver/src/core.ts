@@ -16,7 +16,7 @@ export interface CoreTargetInput {
   currentVersion: string;
   available: CoreRelease[];
   /** 'latest' picks the newest compatible non-blocked release; or a specific version. */
-  target?: 'latest' | string;
+  target?: string;
   channel?: ReleaseChannel;
   advisories?: SecurityAdvisory[];
 }
@@ -150,7 +150,7 @@ export interface FrontendUpdateInput {
   requireCoreFrontendRange?: boolean;
   available: FrontendRelease[];
   /** 'latest' picks the newest compatible non-blocked frontend; or a specific version. */
-  target?: 'latest' | string;
+  target?: string;
   channel?: ReleaseChannel;
   advisories?: SecurityAdvisory[];
 }

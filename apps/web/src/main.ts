@@ -26,9 +26,7 @@ import { AuditLog, InstanceLocks, OperationJournal, OperationRunner } from './jo
 import { buildInstanceActions } from './instances.js';
 import { CmsOperationsPoller } from './poller.js';
 import { BackupSchedulerLoop } from './backup-scheduler.js';
-import { doctor } from '@shm/app-actions';
-import { loadTrustedKeys, realDeps } from '@shm/app-actions';
-import { checkSelfUpdate } from '@shm/app-actions';
+import { checkSelfUpdate, doctor, loadTrustedKeys, realDeps } from '@shm/app-actions';
 
 const execFileAsync = promisify(execFile);
 

@@ -65,7 +65,7 @@ export function RemoveInstanceDialog({
   return (
     <Modal opened={opened} onClose={onClose} title={`Remove ${instanceId}`} size="lg" centered>
       <Stack gap="md">
-        <Radio.Group value={mode} onChange={(v) => setMode(v as RemoveMode)} label="What should happen?">
+        <Radio.Group value={mode} onChange={(v) => setMode(v)} label="What should happen?">
           <Stack gap="xs" mt="xs">
             <Radio
               value="remove_containers_keep_data"

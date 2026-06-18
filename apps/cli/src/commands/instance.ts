@@ -575,9 +575,12 @@ export function registerInstance(program: Command, ctx: CliContext): void {
           if (eq <= 0) throw new Error(`--set expects KEY=VALUE, got "${kv}".`);
           overrides[kv.slice(0, eq).trim()] = kv.slice(eq + 1);
         }
-        for (const k of unsets) delete overrides[k.trim()];
+        const unsetKeys = new Set(unsets.map((k) => k.trim()));
+        const finalOverrides = Object.fromEntries(
+          Object.entries(overrides).filter(([k]) => !unsetKeys.has(k)),
+        );
 
-        const res = await instanceSetEnv(d, id, { overrides, restart: opts.restart as boolean });
+        const res = await instanceSetEnv(d, id, { overrides: finalOverrides, restart: opts.restart as boolean });
         console.log(`Applied ${res.applied} environment override${res.applied === 1 ? '' : 's'}.`);
         console.log(res.restarted ? 'Instance restarted with the new environment.' : 'Config written. Restart pending (docker compose up -d).');
         if (res.health) console.log(formatHealth(res.health));

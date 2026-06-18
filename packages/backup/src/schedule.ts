@@ -45,7 +45,7 @@ export function validateSchedulePolicy(policy: BackupSchedulePolicy): string[] {
   const problems: string[] = [];
   if (typeof policy.enabled !== 'boolean') problems.push('enabled must be a boolean.');
   if (typeof policy.time !== 'string' || !TIME_RE.test(policy.time)) {
-    problems.push(`time must be HH:MM (24h), got "${String(policy.time)}".`);
+    problems.push(`time must be HH:MM (24h), got "${policy.time}".`);
   }
   const r = policy.retention;
   if (!r || typeof r !== 'object') {

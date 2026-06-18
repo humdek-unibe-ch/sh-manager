@@ -41,7 +41,7 @@ export function useManagerEvents(options: UseManagerEventsOptions = {}): void {
   const { factory, enabled = true } = options;
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled) return undefined;
 
     let operationIds = new Set<string>();
     let instanceIds = new Set<string>();

@@ -580,7 +580,7 @@ export async function instanceSetEnv(deps: ActionDeps, instanceId: string, opts:
     if (MANAGER_CONTROLLED_ENV_KEYS.includes(key)) {
       throw new Error(`${key} is managed by the manager and cannot be edited here${key === 'MAILER_DSN' ? ' — use the outbound-email settings instead' : ''}.`);
     }
-    const value = String(rawValue);
+    const value = rawValue;
     if (/[\r\n]/.test(value)) {
       throw new Error(`The value for ${key} must be a single line (no newlines).`);
     }

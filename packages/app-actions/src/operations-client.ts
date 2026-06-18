@@ -64,7 +64,7 @@ function statusBody(update: OperationStatusUpdate): string {
 
 /** Shared DTO -> domain mapping + instance-scope re-check for both transports. */
 function toPendingOperation(dto: PendingOperationDto | null, trustedInstanceId: string): PendingOperation | null {
-  if (dto === null || dto === undefined || dto.operation_id === undefined) return null;
+  if (dto?.operation_id === undefined) return null;
 
   if (dto.instance_id !== trustedInstanceId) {
     throw new CrossInstanceError({

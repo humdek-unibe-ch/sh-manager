@@ -224,7 +224,7 @@ async function readSchedulerState(root: string): Promise<BackupSchedulerState> {
   try {
     const raw = await readFile(schedulerStatePath(root), 'utf8');
     const parsed = JSON.parse(raw) as BackupSchedulerState;
-    if (parsed && parsed.version === 1 && parsed.instances) return parsed;
+    if (parsed?.version === 1 && parsed.instances) return parsed;
   } catch {
     // First run / unreadable state: start fresh (worst case one extra backup).
   }
@@ -385,7 +385,7 @@ export async function instanceHasDueScheduledBackup(
   } catch {
     return false; // broken manifest: never attempt a backup blind
   }
-  if (!policy || !policy.enabled) return false;
+  if (!policy?.enabled) return false;
   const state = (await readSchedulerState(deps.root)).instances[instanceId];
   return isBackupDue(policy, state ? new Date(state.lastRunAt) : null, now);
 }
@@ -408,7 +408,7 @@ export async function instanceRunScheduledBackup(
   const now = opts.now ?? (deps.now ? new Date(deps.now()) : new Date());
 
   const policy = (await new ManifestStore(instanceId, deps.root).read()).backupSchedule;
-  if (!policy || !policy.enabled) {
+  if (!policy?.enabled) {
     return { instanceId, action: 'skipped_not_due', detail: 'no enabled backup schedule' };
   }
 
@@ -491,7 +491,7 @@ export async function serverRunScheduledBackups(
       log(`Scheduled backups: cannot read manifest of ${instanceId}: ${err instanceof Error ? err.message : String(err)}`);
       continue;
     }
-    if (!policy || !policy.enabled) continue;
+    if (!policy?.enabled) continue;
 
     if (instance.status !== 'active') {
       entries.push({ instanceId, action: 'skipped_not_active', detail: `instance status is "${instance.status}"` });

@@ -36,7 +36,7 @@ function run<T>(schemaName: string, data: unknown): ValidationResult<T> {
   if (!validate) {
     return { valid: false, errors: [`Unknown schema "${schemaName}".`] };
   }
-  const valid = validate(data) as boolean;
+  const valid = validate(data);
   if (valid) {
     return { valid: true, value: data as T, errors: [] };
   }

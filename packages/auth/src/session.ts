@@ -81,8 +81,7 @@ export function getSession(table: SessionTable, sessionId: string, now: Date = n
 
 export function destroySession(table: SessionTable, sessionId: string): SessionTable {
   if (!(sessionId in table.sessions)) return table;
-  const next = { ...table.sessions };
-  delete next[sessionId];
+  const next = Object.fromEntries(Object.entries(table.sessions).filter(([id]) => id !== sessionId));
   return { sessions: next };
 }
 

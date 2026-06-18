@@ -67,7 +67,7 @@ export function SafeModeDialog({
           </Button>
           <Button
             variant="secondary"
-            loading={start.isPending && start.variables === false}
+            loading={start.isPending && !start.variables}
             disabled={start.isPending}
             onClick={() => start.mutate(false)}
           >
@@ -75,7 +75,7 @@ export function SafeModeDialog({
           </Button>
           <Button
             variant="primary"
-            loading={start.isPending && start.variables === true}
+            loading={start.isPending && start.variables}
             disabled={start.isPending}
             onClick={() => start.mutate(true)}
           >

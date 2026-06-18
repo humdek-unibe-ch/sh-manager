@@ -525,7 +525,7 @@ export async function ensureProxyRunning(deps: ActionDeps, mode: InstanceMode): 
   // stored elsewhere); without it we leave the file as-is and still attempt the
   // bring-up so a current compose is unaffected.
   const existing = await readFile(composePath, 'utf8').catch(() => '');
-  const letsencryptEmail = existing.match(/acme\.email=([^\s'"]+)/)?.[1];
+  const letsencryptEmail = (/acme\.email=([^\s'"]+)/.exec(existing))?.[1];
   if (letsencryptEmail) {
     const boot = buildServerBootstrap({
       serverId: inventory?.serverId ?? 'selfhelp',
