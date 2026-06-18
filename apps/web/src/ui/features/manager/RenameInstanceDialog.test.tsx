@@ -31,7 +31,7 @@ describe('RenameInstanceDialog', () => {
     const user = userEvent.setup();
     renderDialog('Clinic A');
 
-    const input = (await screen.findByLabelText(/Display name/i)) as HTMLInputElement;
+    const input = await screen.findByLabelText<HTMLInputElement>(/Display name/i);
     expect(input.value).toBe('Clinic A');
     // The immutable technical id is shown for reference.
     expect(screen.getByText('clinic-a')).toBeInTheDocument();

@@ -39,7 +39,7 @@ function fake(opts: FakeOptions = {}): { deps: PluginExecDeps; calls: RecordedCa
     exec: async (service, cmd, execOpts) => {
       const joined = cmd.join(' ');
       calls.push({ service, cmd: joined, ...(execOpts?.user ? { user: execOpts.user } : {}), ...(execOpts?.env ? { env: execOpts.env } : {}) });
-      if (opts.failMatching && opts.failMatching.pattern.test(joined)) {
+      if (opts.failMatching?.pattern.test(joined)) {
         throw new Error(opts.failMatching.message);
       }
       if (joined.includes(`test -f ${PLUGIN_STATE_MARKER}`)) {
