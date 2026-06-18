@@ -16,7 +16,7 @@ The manager has two version axes (see
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
 
-## [Unreleased]
+## [1.6.4] - 2026-06-18
 
 ### Changed
 - **Strict, type-checked linting adopted as the state-of-the-art baseline.** The
