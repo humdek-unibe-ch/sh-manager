@@ -256,8 +256,11 @@ export function buildInstanceInstallArtifacts(input: InstanceInstallInput): Inst
       publicFrontendUrl,
       registryUrl: input.registry.url,
       ...(input.pluginTrustedKeys ? { pluginTrustedKeys: input.pluginTrustedKeys } : {}),
-      // Tell the frontend admin panel where to embed the preview iframe.
-      ...(mobilePreview ? { mobilePreviewEnabled: true } : {}),
+      // Tell the frontend admin panel where to embed the preview iframe, and stamp
+      // the provisioned preview version for the CMS System-Maintenance page.
+      ...(mobilePreview
+        ? { mobilePreviewEnabled: true, mobilePreviewVersion: mobilePreview.version }
+        : {}),
       ...(input.envOverrides ? { envOverrides: input.envOverrides } : {}),
     }),
   );

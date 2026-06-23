@@ -525,6 +525,15 @@ function envInputFromManifest(deps: ActionDeps, manifest: InstanceManifest) {
     publicFrontendUrl: manifest.routing.publicFrontendUrl,
     registryUrl: manifest.registry.url,
     pluginTrustedKeys: formatTrustedKeysEnv(deps.trustedKeys),
+    // Mirror install/update: when a preview was provisioned, the panel origin +
+    // the manager-owned version stamp are managed defaults (so the env editor
+    // classifies them as managed, not operator-custom).
+    ...(manifest.versions.mobilePreview
+      ? {
+          mobilePreviewEnabled: true,
+          mobilePreviewVersion: manifest.versions.mobilePreview,
+        }
+      : {}),
   };
 }
 

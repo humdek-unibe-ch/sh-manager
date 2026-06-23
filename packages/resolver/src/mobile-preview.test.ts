@@ -155,6 +155,44 @@ describe('evaluateMobilePluginCompatibility (dual-axis plugin gate)', () => {
     expect(r.blocked[0]?.message).toMatch(/Expo SDK/);
   });
 
+  it('blocks an RN/Expo-declaring plugin when the preview omits those versions (manual-path provenance gap)', () => {
+    // Regression for the manual publish path that used to drop reactNativeVersion
+    // / expoSdkVersion from the descriptor: a preview missing them cannot prove
+    // a plugin's RN/Expo compatibility, so the gate BLOCKS (fail-closed). The
+    // assemble-release builtFrom fallback keeps the fields populated so this
+    // false block does not happen for real published previews.
+    const previewMissingRuntime = { mobileRendererVersion: '0.1.0', bundledPlugins: [] };
+    const installed: InstalledPluginForMobileGate[] = [
+      {
+        id: 'sh2-shp-survey-js',
+        version: '0.2.23',
+        mobileCompatibility: '>=0.1.0 <0.2.0',
+        reactNativeCompatibility: '^0.83.0',
+        expoSdkCompatibility: '^55.0.0',
+      },
+    ];
+    const r = evaluateMobilePluginCompatibility(previewMissingRuntime, installed);
+    expect(r.status).toBe('blocked');
+    expect(r.blocked[0]?.message).toMatch(/unknown React Native version/);
+  });
+
+  it('renders native when the preview carries matching RN + Expo versions', () => {
+    // The positive counterpart: with RN/Expo present and in range (the shape the
+    // fixed publish paths always emit), a bundled compatible plugin is native.
+    const installed: InstalledPluginForMobileGate[] = [
+      {
+        id: 'sh2-shp-survey-js',
+        version: '0.2.23',
+        mobileCompatibility: '>=0.1.0 <0.2.0',
+        reactNativeCompatibility: '^0.83.0',
+        expoSdkCompatibility: '^55.0.0',
+      },
+    ];
+    const r = evaluateMobilePluginCompatibility(img, installed);
+    expect(r.status).toBe('ok');
+    expect(r.evaluations[0]?.verdict).toBe('native');
+  });
+
   it('warns when a compatible plugin is not baked into the image (open-on-web fallback)', () => {
     const installed: InstalledPluginForMobileGate[] = [
       { id: 'acme-foreign-plugin', version: '1.0.0', mobileCompatibility: '>=0.1.0 <0.2.0' },

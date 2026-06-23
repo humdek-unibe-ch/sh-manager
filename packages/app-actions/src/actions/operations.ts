@@ -21,7 +21,7 @@ import {
   type UpdateExecutionReport,
 } from '@shm/core';
 import { pluginSeams, readManifestFriendly, type ActionDeps, type PluginDrainOverrides } from './shared.js';
-import { instanceFrontendUpdate, instanceUpdate } from './update.js';
+import { instanceFrontendUpdate, instanceMobilePreviewUpdate, instanceUpdate } from './update.js';
 
 // ---------------------------------------------------------------------------
 // CMS <-> Manager update loop (consume backend-requested operations)
@@ -38,6 +38,9 @@ export function buildOperationExecutor(deps: ActionDeps): OperationExecutor {
   return async (approved, op, phase) => {
     if (op.kind === 'frontend') {
       return executeFrontendOperation(deps, approved, op, phase);
+    }
+    if (op.kind === 'mobile-preview') {
+      return executeMobilePreviewOperation(deps, approved, op, phase);
     }
 
     await phase('preflight_running', 10, `Resolving update to ${op.targetVersion}.`);
@@ -100,6 +103,60 @@ async function executeFrontendOperation(
   return {
     instanceId: res.report.instanceId,
     targetVersion: res.report.targetFrontendVersion,
+    ok: res.report.ok,
+    rolledBack: res.report.rolledBack,
+    steps: res.report.steps,
+  };
+}
+
+/**
+ * Runs a CMS-requested MOBILE-PREVIEW-only operation. It reuses
+ * {@link instanceMobilePreviewUpdate} and maps its lightweight report onto the
+ * shared {@link UpdateExecutionReport} shape (target = the preview version) so
+ * the operations loop writes it back like any other update. Requesting it onto
+ * an instance with no preview yet is the enable/bootstrap path: the action
+ * provisions the `selfhelp-mobile-preview` container from the rewritten compose.
+ * A blocked plan or a blocking plugin↔preview gate is surfaced as a failed
+ * report (with the resolver/gate reasons) instead of silently doing nothing.
+ */
+async function executeMobilePreviewOperation(
+  deps: ActionDeps,
+  approved: ApprovedUpdate,
+  op: PendingOperation,
+  phase: PhaseReporter,
+): Promise<UpdateExecutionReport> {
+  // A backend that omits the explicit target lets the manager resolve the
+  // newest compatible preview ('latest'); otherwise honor the requested version.
+  const targetPreview = op.targetMobilePreviewVersion ?? op.targetVersion;
+  await phase('preflight_running', 10, `Resolving mobile-preview update to ${targetPreview}.`);
+
+  const res = await instanceMobilePreviewUpdate(deps, approved.instanceId, { target: targetPreview });
+
+  if (!res.executed || !res.report) {
+    // Surface the resolver's reasons (e.g. "no compatible preview published —
+    // it installs automatically once one exists" or a blocking plugin↔preview
+    // gate) so the CMS-driven loop is as actionable as the CLI.
+    const reasons = [
+      ...res.plan.reasons,
+      ...(res.pluginGate?.status === 'blocked' ? res.pluginGate.blocked.map((b) => b.message) : []),
+    ];
+    const detail = reasons.length > 0
+      ? `plan status: ${res.plan.status} - ${reasons.join('; ')}`
+      : `plan status: ${res.plan.status}`;
+    return {
+      instanceId: approved.instanceId,
+      targetVersion: targetPreview,
+      ok: false,
+      rolledBack: false,
+      steps: [{ name: 'plan', status: 'failed', detail }],
+    };
+  }
+
+  await phase('update_running', 60);
+  await phase('health_check_running', 90);
+  return {
+    instanceId: res.report.instanceId,
+    targetVersion: res.report.targetMobilePreviewVersion,
     ok: res.report.ok,
     rolledBack: res.report.rolledBack,
     steps: res.report.steps,

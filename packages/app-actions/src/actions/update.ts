@@ -361,27 +361,14 @@ export async function instanceMobilePreviewUpdate(
   const lock = await lockStore.read();
   const channel = opts.channel ?? manifest.registry.channel;
 
-  // The preview is opt-in: with no preview installed there is nothing to update.
-  // Surface a clear, non-throwing blocked plan instead of resolving against an
-  // empty current version.
-  if (!manifest.images.mobilePreview || !manifest.versions.mobilePreview) {
-    return {
-      plan: {
-        instanceId,
-        kind: 'mobile-preview',
-        currentMobilePreviewVersion: '0.0.0',
-        targetMobilePreviewVersion: null,
-        status: 'blocked',
-        mobilePreview: null,
-        reasons: [
-          'This instance has no mobile preview installed. Install the preview through a core update or install flow first.',
-        ],
-        steps: [],
-      },
-      pluginGate: null,
-      executed: false,
-    };
-  }
+  // The preview ships with every instance, but one installed before any
+  // compatible preview existed (or one that was removed) may not have it yet.
+  // Rather than refuse, this command BOOTSTRAPS it: a missing preview is treated
+  // as the sentinel version 0.0.0 so the resolver picks the newest compatible
+  // release and `executeMobilePreviewUpdate`'s `up -d --no-deps mobile-preview`
+  // CREATES the container from the rewritten compose.
+  const bootstrapping = !manifest.images.mobilePreview || !manifest.versions.mobilePreview;
+  const currentMobilePreviewVersion = manifest.versions.mobilePreview ?? '0.0.0';
 
   const client = registryClient(deps, manifest.registry.url);
   const index = await client.getIndex();
@@ -389,12 +376,31 @@ export async function instanceMobilePreviewUpdate(
 
   const plan = planMobilePreviewUpdate({
     instanceId,
-    currentMobilePreviewVersion: manifest.versions.mobilePreview,
+    currentMobilePreviewVersion,
     coreVersion: manifest.versions.selfhelp,
     mobilePreviewReleases,
     channel,
     ...(opts.target ? { target: opts.target } : {}),
   });
+
+  // Bootstrapping with nothing compatible published: the resolver reports the
+  // sentinel "0.0.0 is up to date", which is misleading. Surface a clear,
+  // non-throwing blocked plan so the operator knows the preview will install
+  // automatically once a compatible release exists.
+  if (bootstrapping && plan.mobilePreview === null) {
+    return {
+      plan: {
+        ...plan,
+        status: 'blocked',
+        reasons: [
+          `No selfhelp-mobile-preview release compatible with SelfHelp core ${manifest.versions.selfhelp} ` +
+            `is published on the ${channel} channel yet; it installs automatically once one is available.`,
+        ],
+      },
+      pluginGate: null,
+      executed: false,
+    };
+  }
 
   // Dual-axis plugin↔preview gate against the SELECTED preview: block when an
   // installed plugin's native renderer is incompatible with the target preview's
@@ -495,9 +501,14 @@ export async function instanceMobilePreviewUpdate(
         await manifestStore.write(snap.manifest);
         await lockStore.write(snap.lock);
       }
-      // Recreate ONLY the preview from the restored (previous) compose. The core
-      // stack was never touched, so a full `up -d` is unnecessary.
-      await deps.runner.run(paths.dir, composeCommands.upService('mobile-preview'));
+      // A bootstrap (the instance had NO preview before) restores a compose that
+      // no longer declares the service, so recreating it would fail; the orphaned
+      // just-created container is reaped by the next full `docker compose up -d`.
+      // A normal swap recreates ONLY the PREVIOUS preview from the restored
+      // compose (the core stack was never touched, so a full `up -d` is moot).
+      if (!bootstrapping) {
+        await deps.runner.run(paths.dir, composeCommands.upService('mobile-preview'));
+      }
     },
     ...(opts.onStep ? { onStep: opts.onStep } : {}),
   });

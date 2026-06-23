@@ -73,6 +73,16 @@ describe('HttpBackendOperationsClient', () => {
     expect(op).toMatchObject({ operationId: 'op_9', kind: 'frontend', targetFrontendVersion: '0.1.7' });
   });
 
+  it('maps a mobile-preview-only operation (kind + target_mobile_preview_version)', async () => {
+    const captured: Captured[] = [];
+    const c = client(captured, {
+      status: 200,
+      body: { status: 200, data: { ...pendingDto, kind: 'mobile-preview', target_mobile_preview_version: '0.2.3' } },
+    });
+    const op = await c.fetchPending('inst-a');
+    expect(op).toMatchObject({ operationId: 'op_9', kind: 'mobile-preview', targetMobilePreviewVersion: '0.2.3' });
+  });
+
   it('returns null when nothing is pending (404 or empty data)', async () => {
     const captured: Captured[] = [];
     expect(await client(captured, { status: 404 }).fetchPending('inst-a')).toBeNull();

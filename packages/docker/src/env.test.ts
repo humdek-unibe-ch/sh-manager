@@ -147,6 +147,28 @@ describe('mobile-preview origin env (admin panel)', () => {
     // be re-asserted like the routing/identity keys.
     expect(MANAGER_CONTROLLED_ENV_KEYS).not.toContain('NEXT_PUBLIC_MOBILE_PREVIEW_ORIGIN');
   });
+
+  it('stamps SELFHELP_MOBILE_PREVIEW_VERSION when a preview version was provisioned', () => {
+    // Mirrors SELFHELP_FRONTEND_VERSION: the CMS System-Maintenance page reads
+    // this to report the provisioned preview image version instead of "unknown".
+    const env = buildInstanceEnv({
+      ...input,
+      mobilePreviewEnabled: true,
+      mobilePreviewVersion: '0.1.11',
+    });
+    expect(env.SELFHELP_MOBILE_PREVIEW_VERSION).toBe('0.1.11');
+  });
+
+  it('omits the version stamp when no preview version is known (panel self-reports)', () => {
+    const env = buildInstanceEnv({ ...input, mobilePreviewEnabled: true });
+    expect(env).not.toHaveProperty('SELFHELP_MOBILE_PREVIEW_VERSION');
+  });
+
+  it('treats the version stamp as a manager-controlled key (operators cannot fake it)', () => {
+    // Unlike the origin, the version is a trustworthy provisioning fact, so it is
+    // re-asserted like SELFHELP_FRONTEND_VERSION.
+    expect(MANAGER_CONTROLLED_ENV_KEYS).toContain('SELFHELP_MOBILE_PREVIEW_VERSION');
+  });
 });
 
 describe('plugin trust env (verification chain, security)', () => {
