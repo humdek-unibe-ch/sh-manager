@@ -170,3 +170,44 @@ There are two distinct paths, and they never cross:
   [`operator/rehearsal-publish-install-update.md`](operator/rehearsal-publish-install-update.md);
   the automated equivalent is the manager Docker e2e (`SHM_E2E=1 npm run e2e`,
   `.github/workflows/e2e-docker.yml`).
+
+## Mobile per-instance distribution (future / design)
+
+The SelfHelp **mobile** app differs from the web artifacts above: React Native
+cannot safely load arbitrary JS at runtime, so the per-instance plugin set **and**
+the private HeroUI Pro UI tier are **bundled per EAS profile** — each CMS instance
+gets its own mobile binary. This is not built in the manager yet; it is recorded
+here so it can be implemented later.
+
+Intended shape (so a manager-side feature can target it):
+
+1. A **private** CI job builds the Pro-enabled app for an instance/profile (the
+   HeroUI Pro token is injected only in CI — never committed, never in the
+   registry, never in docs), producing a versioned artifact/image.
+2. The artifact is published to a private registry and referenced **by immutable
+   image digest** (not a floating tag), mirroring how the platform artifacts above
+   are pinned.
+3. The manager records, per instance, the pinned mobile build digest plus the
+   mobile plugin lock set (`selfhelp.plugins.mobile.lock.json`) and surfaces
+   version drift against the live backend `/cms-api/v1/plugins/manifest`.
+4. JS-only updates ship via `eas update --branch <profile>` without store review;
+   native/Pro-dependency changes require a new binary.
+
+Credential boundary (important):
+
+- The only secret the **manager** ever holds for this is a **private
+  Docker/registry pull credential** — it pulls the pre-built image **by digest**
+  and never builds Pro UI itself.
+- The **HeroUI Pro license token lives only in the private CI** that builds the
+  image. It is never in the manager, never in `sh2-registry`, never in this repo,
+  and never in any committed file or doc.
+- There is **no npm publishing**: `@selfhelp/mobile-pro-ui` is a private,
+  build-time-aliased package consumed only by the private CI build — it is not
+  pushed to a registry and the manager does not install it.
+
+The canonical, code-level description (the OSS vs Pro adapter contract,
+build-time tier selection, and the private `@selfhelp/mobile-pro-ui` package) is
+the mobile repo's developer doc
+`sh-selfhelp_mobile/docs/developer/mobile-ui-tiers-and-distribution.md`. Treat
+that file as the source of truth and keep this section as the manager-side
+pointer only.

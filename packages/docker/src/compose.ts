@@ -21,6 +21,17 @@ const DEFAULT_LOG_MAX_SIZE_MB = 10;
 const DEFAULT_LOG_MAX_FILES = 5;
 
 /**
+ * Optional `selfhelp-mobile-preview` service wiring. The Node static+proxy
+ * server (`web-preview/server.mjs`) listens on this port, serves the Expo web
+ * export under {@link MOBILE_PREVIEW_BASE_PATH}, and reverse-proxies a narrow
+ * allowlist of `/cms-api` calls to the PRIVATE backend over the instance
+ * network — so the backend never gets a Traefik router of its own.
+ */
+const MOBILE_PREVIEW_INTERNAL_PORT = 8080;
+const MOBILE_PREVIEW_BASE_PATH = '/mobile-preview';
+const BACKEND_INTERNAL_PORT = 8080;
+
+/**
  * Secret wiring conventions (kept in sync with `@shm/instances` secrets module).
  * Compose never inlines a secret value: it loads them from a `0600` env file and
  * mounts the JWT keypair read-only.
@@ -313,6 +324,51 @@ export function buildInstanceCompose(spec: InstanceComposeSpec): ComposeDocument
     redis,
     mercure,
   };
+
+  // Optional mobile-preview service: only when the instance opted in (an image
+  // ref is present). It edge-routes under /mobile-preview in production and
+  // proxies a narrow allowlist of /cms-api calls to the PRIVATE backend over the
+  // instance network. The image is the shared selfhelp-mobile-preview build; it
+  // talks to the backend by service name, so the backend stays private (no
+  // router of its own). The open-on-web plugin fallback derives the frontend
+  // origin from the browser, so production (preview + frontend share the Traefik
+  // host) needs no per-instance frontend-origin env.
+  if (spec.images.mobilePreview) {
+    const previewNetworks = spec.mode === 'production' ? ['instance', proxyNetwork] : ['instance'];
+    const mobilePreview = baseService(spec.images.mobilePreview, previewNetworks, spec.resources, []);
+    // The preview server reads ONLY its own (non-secret) env; it never loads the
+    // Symfony .env, so an empty env_file list keeps baseService from attaching
+    // one. Its config is set explicitly here.
+    delete mobilePreview.env_file;
+    mobilePreview.environment = {
+      PORT: String(MOBILE_PREVIEW_INTERNAL_PORT),
+      SELFHELP_PREVIEW_BASE_URL: MOBILE_PREVIEW_BASE_PATH,
+      SELFHELP_BACKEND_INTERNAL_URL: `http://backend:${BACKEND_INTERNAL_PORT}`,
+    };
+    mobilePreview.depends_on = { backend: { condition: 'service_started' } };
+    if (spec.mode === 'production') {
+      const domain = spec.domain;
+      if (!domain) throw new Error('Production compose requires a domain.');
+      // Host && PathPrefix is more specific than the frontend's bare Host rule,
+      // so Traefik routes /mobile-preview here (same mechanism as the Mercure
+      // router above) while everything else falls through to the frontend.
+      mobilePreview.labels = [
+        'traefik.enable=true',
+        `traefik.docker.network=${proxyNetwork}`,
+        `traefik.http.routers.${id}-mobile-preview.rule=Host(\`${domain}\`) && PathPrefix(\`${MOBILE_PREVIEW_BASE_PATH}\`)`,
+        `traefik.http.routers.${id}-mobile-preview.entrypoints=websecure`,
+        `traefik.http.routers.${id}-mobile-preview.tls=true`,
+        `traefik.http.routers.${id}-mobile-preview.tls.certresolver=letsencrypt`,
+        `traefik.http.services.${id}-mobile-preview.loadbalancer.server.port=${MOBILE_PREVIEW_INTERNAL_PORT}`,
+      ];
+    } else if (spec.localPort !== undefined) {
+      // Local mode: publish on a deterministic loopback port (frontend port +
+      // 2000) for manual testing. The open-on-web fallback origin is the preview
+      // host here (a known local-only limitation; production shares the host).
+      mobilePreview.ports = [`127.0.0.1:${spec.localPort + 2000}:${MOBILE_PREVIEW_INTERNAL_PORT}`];
+    }
+    services['mobile-preview'] = mobilePreview;
+  }
 
   if (includeMailpit) {
     const mailpit = baseService('axllent/mailpit:latest', ['instance'], spec.resources);

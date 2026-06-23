@@ -1,17 +1,26 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
 import { describe, expect, it } from 'vitest';
-import type { CoreRelease, FrontendRelease, PluginRelease, RuntimeServicePolicy } from '@shm/schemas';
+import type {
+  CoreRelease,
+  FrontendRelease,
+  MobilePreviewRelease,
+  PluginRelease,
+  RuntimeServicePolicy,
+} from '@shm/schemas';
 import { RecordingComposeRunner } from '@shm/docker';
 import {
   evaluateMysqlMajorUpgrade,
   executeFrontendUpdate,
+  executeMobilePreviewUpdate,
   executeUpdate,
   imageMajor,
   planFrontendUpdate,
+  planMobilePreviewUpdate,
   planUpdate,
   resolveTargetRuntimeImages,
   type FrontendUpdatePlan,
+  type MobilePreviewUpdatePlan,
   type UpdatePlan,
 } from './update.js';
 import type { PreflightResourceFacts } from './preflight.js';
@@ -56,6 +65,21 @@ function mkFrontend(version: string, requiredCoreRange: string): FrontendRelease
     image: `ghcr.io/selfhelp/frontend:${version}`,
     digest: 'sha256:f',
     backendCompatibility: { requiredCoreRange, requiredApiVersion: '2.1' },
+    security: { signature: 'sig', keyId: 'official-2026' },
+  };
+}
+
+function mkMobilePreview(version: string, requiredCoreRange: string): MobilePreviewRelease {
+  return {
+    kind: 'selfhelp-mobile-preview-release',
+    id: `selfhelp-mobile-preview-${version}`,
+    version,
+    channel: 'stable',
+    image: `ghcr.io/selfhelp/selfhelp-mobile-preview:${version}`,
+    digest: 'sha256:m',
+    backendCompatibility: { requiredCoreRange, requiredApiVersion: '2.1' },
+    mobileRendererVersion: '0.1.0',
+    bundledPlugins: [],
     security: { signature: 'sig', keyId: 'official-2026' },
   };
 }
@@ -581,6 +605,115 @@ describe('executeFrontendUpdate', () => {
     });
     await expect(
       executeFrontendUpdate(blocked, {
+        runner: new RecordingComposeRunner(), instanceDir: '/tmp/x',
+        snapshot: async () => undefined, applyArtifacts: async () => undefined,
+        checkHealth: async () => healthy, rollback: async () => undefined,
+      }),
+    ).rejects.toThrow(/not ok/i);
+  });
+});
+
+describe('planMobilePreviewUpdate', () => {
+  const previews = [
+    mkMobilePreview('0.2.0', '>=0.1.0 <0.3.0'),
+    mkMobilePreview('0.2.3', '>=0.1.0 <0.3.0'),
+  ];
+
+  it('selects the newest core-compatible preview newer than the installed one', () => {
+    const plan = planMobilePreviewUpdate({
+      instanceId: 'website1', currentMobilePreviewVersion: '0.2.0', coreVersion: '0.1.19', mobilePreviewReleases: previews,
+    });
+    expect(plan.kind).toBe('mobile-preview');
+    expect(plan.status).toBe('ok');
+    expect(plan.targetMobilePreviewVersion).toBe('0.2.3');
+    expect(plan.steps.some((s) => s.includes('--no-deps'))).toBe(true);
+  });
+
+  it('reports up_to_date when the installed preview is already newest', () => {
+    const plan = planMobilePreviewUpdate({
+      instanceId: 'website1', currentMobilePreviewVersion: '0.2.3', coreVersion: '0.1.19', mobilePreviewReleases: previews,
+    });
+    expect(plan.status).toBe('up_to_date');
+    expect(plan.mobilePreview).toBeNull();
+  });
+
+  it('blocks a preview whose required core range excludes the running core', () => {
+    const plan = planMobilePreviewUpdate({
+      instanceId: 'website1', currentMobilePreviewVersion: '0.2.0', coreVersion: '0.5.0',
+      mobilePreviewReleases: [mkMobilePreview('0.2.3', '>=0.1.0 <0.3.0')], target: '0.2.3',
+    });
+    expect(plan.status).toBe('blocked');
+    expect(plan.mobilePreview).toBeNull();
+  });
+});
+
+describe('executeMobilePreviewUpdate', () => {
+  const okPlan = (): MobilePreviewUpdatePlan =>
+    planMobilePreviewUpdate({
+      instanceId: 'website1', currentMobilePreviewVersion: '0.2.0', coreVersion: '0.1.19',
+      mobilePreviewReleases: [mkMobilePreview('0.2.3', '>=0.1.0 <0.3.0')],
+    });
+  const healthy: HealthReport = { instanceId: 'website1', overall: 'healthy', services: [], checkedAt: 'now' };
+  const unhealthy: HealthReport = { instanceId: 'website1', overall: 'unhealthy', services: [], checkedAt: 'now' };
+
+  it('recreates ONLY the preview container, never the core stack', async () => {
+    const runner = new RecordingComposeRunner();
+    const order: string[] = [];
+    const report = await executeMobilePreviewUpdate(okPlan(), {
+      runner, instanceDir: '/tmp/website1',
+      snapshot: async () => { order.push('snapshot'); },
+      applyArtifacts: async () => { order.push('apply'); },
+      checkHealth: async () => { order.push('health'); return healthy; },
+      rollback: async () => { order.push('rollback'); },
+    });
+    expect(report.ok).toBe(true);
+    expect(report.rolledBack).toBe(false);
+    expect(report.targetMobilePreviewVersion).toBe('0.2.3');
+    expect(order).toEqual(['snapshot', 'apply', 'health']);
+    // `--no-deps` keeps the backend/frontend/db running untouched — unlike the
+    // frontend swap, no other service reads the preview version.
+    expect(runner.calls.map((c) => c.args)).toEqual([
+      ['pull', 'mobile-preview'],
+      ['up', '-d', '--no-deps', 'mobile-preview'],
+    ]);
+  });
+
+  it('aborts before any mutation when the snapshot fails', async () => {
+    const runner = new RecordingComposeRunner();
+    let applied = false;
+    const report = await executeMobilePreviewUpdate(okPlan(), {
+      runner, instanceDir: '/tmp/website1',
+      snapshot: async () => { throw new Error('snap failed'); },
+      applyArtifacts: async () => { applied = true; },
+      checkHealth: async () => healthy,
+      rollback: async () => undefined,
+    });
+    expect(report.ok).toBe(false);
+    expect(applied).toBe(false);
+    expect(runner.calls).toHaveLength(0);
+  });
+
+  it('rolls back the config when health fails after the swap', async () => {
+    let rolledBackReason = '';
+    const report = await executeMobilePreviewUpdate(okPlan(), {
+      runner: new RecordingComposeRunner(), instanceDir: '/tmp/website1',
+      snapshot: async () => undefined,
+      applyArtifacts: async () => undefined,
+      checkHealth: async () => unhealthy,
+      rollback: async (reason) => { rolledBackReason = reason; },
+    });
+    expect(report.ok).toBe(false);
+    expect(report.rolledBack).toBe(true);
+    expect(rolledBackReason).toMatch(/health/);
+  });
+
+  it('refuses to execute a non-ok plan', async () => {
+    const blocked = planMobilePreviewUpdate({
+      instanceId: 'website1', currentMobilePreviewVersion: '0.2.3', coreVersion: '0.1.19',
+      mobilePreviewReleases: [mkMobilePreview('0.2.3', '>=0.1.0 <0.3.0')],
+    });
+    await expect(
+      executeMobilePreviewUpdate(blocked, {
         runner: new RecordingComposeRunner(), instanceDir: '/tmp/x',
         snapshot: async () => undefined, applyArtifacts: async () => undefined,
         checkHealth: async () => healthy, rollback: async () => undefined,

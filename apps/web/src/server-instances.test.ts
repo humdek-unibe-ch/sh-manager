@@ -107,6 +107,15 @@ describe('instance management APIs', () => {
       async frontendUpdateDryRun() {
         return { status: 'ok', kind: 'frontend', currentFrontendVersion: '0.1.5', targetFrontendVersion: '0.1.7' };
       },
+      async mobilePreviewUpdateDryRun() {
+        return {
+          status: 'ok',
+          kind: 'mobile-preview',
+          currentMobilePreviewVersion: '0.2.0',
+          targetMobilePreviewVersion: '0.2.3',
+          pluginGate: null,
+        };
+      },
       async create() {
         return { version: '0.1.0' };
       },
@@ -114,6 +123,9 @@ describe('instance management APIs', () => {
         return { executed: true };
       },
       async frontendUpdate() {
+        return { executed: true };
+      },
+      async mobilePreviewUpdate() {
         return { executed: true };
       },
       async backup() {

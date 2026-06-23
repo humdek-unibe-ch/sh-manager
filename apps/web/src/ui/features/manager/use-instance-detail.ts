@@ -108,6 +108,18 @@ export function useInstanceDetail(client: ApiClient, instanceId: string) {
     retry: false,
   });
 
+  // Check for mobile-preview-only update availability. The preview is OPTIONAL,
+  // so this only runs once the detail load confirms the instance has one
+  // installed — instances without a preview never issue the dry-run.
+  const hasMobilePreview = Boolean(detailQuery.data?.manifest?.versions.mobilePreview);
+  const mobilePreviewUpdateCheck = useQuery({
+    queryKey: ['manager', 'instance', instanceId, 'mobile-preview-update-check'],
+    queryFn: () => client.mobilePreviewUpdateDryRun(instanceId, {}),
+    enabled: hasMobilePreview,
+    refetchInterval: hasMobilePreview ? managerFallbackInterval(sseConnected, 300_000) : false,
+    retry: false,
+  });
+
   // Live installed plugins, read from the running instance's DB (the source of
   // truth; the manifest's list lags CMS-driven installs). Kept on a SEPARATE
   // key (not the instance prefix) so the chatty SSE log invalidations don't
@@ -146,6 +158,13 @@ export function useInstanceDetail(client: ApiClient, instanceId: string) {
   const coreUpdateAvailable: boolean = corePlan?.status === 'ok' && !!corePlan.targetVersion && corePlan.targetVersion !== manifest?.versions.selfhelp;
   const frontendPlan = frontendUpdateCheck.data?.plan as { status: string; targetFrontendVersion?: string } | null;
   const frontendUpdateAvailable: boolean = frontendPlan?.status === 'ok' && !!frontendPlan.targetFrontendVersion && frontendPlan.targetFrontendVersion !== manifest?.versions.frontend;
+  const mobilePreviewPlan = mobilePreviewUpdateCheck.data?.plan as
+    | { status: string; targetMobilePreviewVersion?: string }
+    | null;
+  const mobilePreviewUpdateAvailable: boolean =
+    mobilePreviewPlan?.status === 'ok' &&
+    !!mobilePreviewPlan.targetMobilePreviewVersion &&
+    mobilePreviewPlan.targetMobilePreviewVersion !== manifest?.versions.mobilePreview;
 
   // The latest version available for a component: the dry-run's target when an
   // update is offered, otherwise the current version when the registry confirms
@@ -165,8 +184,15 @@ export function useInstanceDetail(client: ApiClient, instanceId: string) {
         ? manifest?.versions.frontend ?? null
         : null
     : null;
+  const mobilePreviewLatest: string | null = mobilePreviewPlan
+    ? mobilePreviewUpdateAvailable
+      ? mobilePreviewPlan.targetMobilePreviewVersion ?? null
+      : mobilePreviewPlan.status === 'up_to_date'
+        ? manifest?.versions.mobilePreview ?? null
+        : null
+    : null;
 
-  const anyUpdateAvailable = coreUpdateAvailable || frontendUpdateAvailable;
+  const anyUpdateAvailable = coreUpdateAvailable || frontendUpdateAvailable || mobilePreviewUpdateAvailable;
 
   // One row per managed container, pairing the recorded version (where the
   // manifest tracks one) with the resolved image tag/digest, the latest version
@@ -182,6 +208,19 @@ export function useInstanceDetail(client: ApiClient, instanceId: string) {
         { label: 'SelfHelp', version: manifest.versions.selfhelp, image: null, latest: coreLatest, updateAvailable: coreUpdateAvailable },
         { label: 'Backend', version: manifest.versions.backend, image: manifest.images.backend, latest: coreLatest, updateAvailable: coreUpdateAvailable },
         { label: 'Frontend', version: manifest.versions.frontend, image: manifest.images.frontend, latest: frontendLatest, updateAvailable: frontendUpdateAvailable },
+        // Optional: only instances that opted into the mobile preview carry a
+        // version/image for it, so the row appears only when present.
+        ...(manifest.versions.mobilePreview && manifest.images.mobilePreview
+          ? [
+              {
+                label: 'Mobile preview',
+                version: manifest.versions.mobilePreview,
+                image: manifest.images.mobilePreview,
+                latest: mobilePreviewLatest,
+                updateAvailable: mobilePreviewUpdateAvailable,
+              },
+            ]
+          : []),
         { label: 'Scheduler', version: manifest.versions.scheduler, image: manifest.images.scheduler, latest: coreLatest, updateAvailable: coreUpdateAvailable },
         { label: 'Worker', version: manifest.versions.worker, image: manifest.images.worker, latest: coreLatest, updateAvailable: coreUpdateAvailable },
         { label: 'Plugin API', version: manifest.versions.pluginApi, image: null },
@@ -223,6 +262,11 @@ export function useInstanceDetail(client: ApiClient, instanceId: string) {
     pluginRows,
     pluginsPage,
     corePlan,
+    frontendPlan,
+    mobilePreviewPlan,
+    frontendUpdateAvailable,
+    mobilePreviewUpdateAvailable,
+    hasMobilePreview,
     anyUpdateAvailable,
     componentRows,
   };

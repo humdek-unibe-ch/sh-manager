@@ -18,8 +18,8 @@ export interface VersionSelectProps {
   client: ApiClient;
   /** Release channel previewed in the dropdown (server default when omitted). */
   channel?: string;
-  /** Registry feed to list: `core` (default) or `frontend`. */
-  kind?: 'core' | 'frontend';
+  /** Registry feed to list: `core` (default), `frontend`, or `mobile-preview`. */
+  kind?: 'core' | 'frontend' | 'mobile-preview';
   /** Current selection: `latest` or a pinned version. */
   value: string;
   onChange: (value: string) => void;

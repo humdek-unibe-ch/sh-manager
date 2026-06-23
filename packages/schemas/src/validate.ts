@@ -9,6 +9,8 @@ import type {
   FrontendRelease,
   InstanceLock,
   InstanceManifest,
+  MobilePreviewRelease,
+  PluginRelease,
   RegistryIndex,
   SchedulerRelease,
   ServerInventory,
@@ -62,6 +64,10 @@ export const validateSchedulerRelease = (d: unknown): ValidationResult<Scheduler
   run('schedulerRelease', d);
 export const validateWorkerRelease = (d: unknown): ValidationResult<WorkerRelease> =>
   run('workerRelease', d);
+export const validateMobilePreviewRelease = (d: unknown): ValidationResult<MobilePreviewRelease> =>
+  run('mobilePreviewRelease', d);
+export const validatePluginRelease = (d: unknown): ValidationResult<PluginRelease> =>
+  run('pluginRelease', d);
 export const validateUpdatePreflight = (d: unknown): ValidationResult<UpdatePreflightResult> =>
   run('updatePreflight', d);
 export const validateBackupManifest = (d: unknown): ValidationResult<BackupManifest> =>

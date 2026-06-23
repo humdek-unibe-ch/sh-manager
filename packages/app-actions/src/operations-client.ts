@@ -41,10 +41,12 @@ interface PendingOperationDto {
   approved_by_user_id: number;
   accepted_migration_risk: boolean;
   destructive_migration: boolean;
-  /** Optional. `core` (default, back-compat) or `frontend` (lightweight swap). */
-  kind?: 'core' | 'frontend';
+  /** Optional. `core` (default, back-compat), `frontend`, or `mobile-preview` (lightweight swaps). */
+  kind?: 'core' | 'frontend' | 'mobile-preview';
   /** Optional. The frontend version a `frontend`-kind operation targets (null for core). */
   target_frontend_version?: string | null;
+  /** Optional. The mobile-preview version a `mobile-preview`-kind operation targets (null for core). */
+  target_mobile_preview_version?: string | null;
 }
 
 const PENDING_PATH = '/cms-api/v1/manager/system/update/pending';
@@ -87,11 +89,15 @@ function toPendingOperation(dto: PendingOperationDto | null, trustedInstanceId: 
     acceptedMigrationRisk: dto.accepted_migration_risk,
     destructiveMigration: dto.destructive_migration,
     // A backend that omits `kind` is treated as a `core` update (back-compat).
-    kind: dto.kind === 'frontend' ? 'frontend' : 'core',
+    kind: dto.kind === 'frontend' ? 'frontend' : dto.kind === 'mobile-preview' ? 'mobile-preview' : 'core',
     // Only carry a frontend target when the backend actually sent one (core
     // operations send null/omit it — the manager resolves the frontend itself).
     ...(typeof dto.target_frontend_version === 'string'
       ? { targetFrontendVersion: dto.target_frontend_version }
+      : {}),
+    // Likewise for a mobile-preview target version (omitted -> manager resolves).
+    ...(typeof dto.target_mobile_preview_version === 'string'
+      ? { targetMobilePreviewVersion: dto.target_mobile_preview_version }
       : {}),
   };
 }

@@ -7,19 +7,34 @@
 import { readFile } from 'node:fs/promises';
 import semver from 'semver';
 import { formatTrustedKeysEnv } from '@shm/schemas';
-import type { CoreRelease, InstanceLock, InstanceManifest, PluginRelease, ReleaseChannel } from '@shm/schemas';
+import type {
+  CoreRelease,
+  InstanceLock,
+  InstanceManifest,
+  MobilePreviewRelease,
+  PluginRelease,
+  ReleaseChannel,
+} from '@shm/schemas';
+import {
+  evaluateMobilePluginCompatibility,
+  pickMobilePreviewForCore,
+  type MobilePluginGateResult,
+} from '@shm/resolver';
 import { composeCommands } from '@shm/docker';
 import {
   buildInstanceInstallArtifacts,
   evaluateHealth,
   evaluateMysqlMajorUpgrade,
   executeFrontendUpdate,
+  executeMobilePreviewUpdate,
   executeUpdate,
   planFrontendUpdate,
+  planMobilePreviewUpdate,
   planUpdate,
   reinstallPluginsForCore,
   resolveTargetRuntimeImages,
   type FrontendUpdatePlan,
+  type MobilePreviewUpdatePlan,
   type UpdatePlan,
   type UpdateStepResult,
 } from '@shm/core';
@@ -34,6 +49,8 @@ import {
 } from '@shm/instances';
 import {
   fetchAllFrontends,
+  fetchAllMobilePreviews,
+  fetchInstalledPluginMobileInputs,
   pluginSeams,
   readManifestFriendly,
   registryClient,
@@ -132,6 +149,21 @@ export async function instanceUpdate(deps: ActionDeps, instanceId: string, opts:
   const core = plan.core;
   const frontend = plan.frontend;
 
+  // When the instance runs the OPTIONAL mobile preview, a core update moves it
+  // to the newest preview compatible with the NEW core (the preview talks to the
+  // private backend, so it is core-coupled). If none is compatible/published we
+  // keep the currently pinned preview (reconstructed from the lock) so the
+  // service is never silently dropped — best-effort, since the preview is
+  // auxiliary and the read endpoints it proxies are largely core-stable.
+  let targetMobilePreview: MobilePreviewRelease | null = null;
+  if (manifest.images.mobilePreview) {
+    const currentLock = await lockStore.read();
+    const previewReleases = await fetchAllMobilePreviews(client, index.mobilePreview, channel);
+    targetMobilePreview =
+      pickMobilePreviewForCore(core, previewReleases) ??
+      releaseShapesFromLock(manifest, currentLock, 'core-update').mobilePreview;
+  }
+
   // Backfill the per-instance manager token for instances installed before the
   // token existed: the update recreates the containers anyway, so the backend
   // picks up SELFHELP_MANAGER_TOKEN from the rewritten secrets.env and the
@@ -208,6 +240,9 @@ export async function instanceUpdate(deps: ActionDeps, instanceId: string, opts:
           registry: { id: manifest.registry.id, url: manifest.registry.url, metadataSha256: client.lastSuccessfulCheck?.metadataSha256 ?? '' },
           core,
           frontend,
+          // Move/keep the optional preview alongside the core (no-op when the
+          // instance never enabled it).
+          ...(targetMobilePreview ? { mobilePreview: targetMobilePreview } : {}),
           services,
           installedPlugins: manifest.installedPlugins,
           pluginTrustedKeys: formatTrustedKeysEnv(deps.trustedKeys),
@@ -273,6 +308,201 @@ export async function instanceUpdate(deps: ActionDeps, instanceId: string, opts:
   );
 
   return { plan, executed: true, report };
+}
+
+// ---------------------------------------------------------------------------
+// instance mobile-preview update (preview-only, dry-run + execute)
+// ---------------------------------------------------------------------------
+
+export interface InstanceMobilePreviewUpdateOptions {
+  dryRun?: boolean;
+  channel?: ReleaseChannel;
+  /** 'latest' (default) or a specific mobile-preview version. */
+  target?: string;
+  /** Live progress hook (see {@link InstanceUpdateOptions.onStep}). */
+  onStep?: (step: UpdateStepResult) => void | Promise<void>;
+}
+
+export interface InstanceMobilePreviewUpdateResult {
+  plan: MobilePreviewUpdatePlan;
+  /**
+   * Dual-axis plugin↔preview verdict for the SELECTED preview (null when the
+   * plan resolved no target). `blocked` here refuses execution: an installed
+   * plugin declares a native renderer the target preview cannot satisfy.
+   */
+  pluginGate: MobilePluginGateResult | null;
+  executed: boolean;
+  report?: Awaited<ReturnType<typeof executeMobilePreviewUpdate>>;
+}
+
+/**
+ * Update ONLY the optional `selfhelp-mobile-preview` container of an instance to
+ * a newer compatible release, leaving the core stack (backend/worker/scheduler)
+ * and every volume untouched.
+ *
+ * The preview ships independently of the core (on the mobile repo's own tags),
+ * so an instance already on the latest core can still have a newer preview — the
+ * core-driven {@link instanceUpdate} reports `up_to_date` and never picks it up.
+ * This is the lightweight path: resolve the newest compatible preview, run the
+ * dual-axis plugin↔preview gate, rewrite the instance artifacts with the new
+ * preview image, pull it, recreate ONLY the preview container (`--no-deps`),
+ * health-check, and restore the previous config + container on failure. No
+ * backup, no migration, no maintenance window — the preview is stateless and
+ * core-coupled only through its runtime proxy.
+ */
+export async function instanceMobilePreviewUpdate(
+  deps: ActionDeps,
+  instanceId: string,
+  opts: InstanceMobilePreviewUpdateOptions,
+): Promise<InstanceMobilePreviewUpdateResult> {
+  const manifestStore = new ManifestStore(instanceId, deps.root);
+  const lockStore = new LockStore(instanceId, deps.root);
+  const manifest = await readManifestFriendly(deps, instanceId);
+  const lock = await lockStore.read();
+  const channel = opts.channel ?? manifest.registry.channel;
+
+  // The preview is opt-in: with no preview installed there is nothing to update.
+  // Surface a clear, non-throwing blocked plan instead of resolving against an
+  // empty current version.
+  if (!manifest.images.mobilePreview || !manifest.versions.mobilePreview) {
+    return {
+      plan: {
+        instanceId,
+        kind: 'mobile-preview',
+        currentMobilePreviewVersion: '0.0.0',
+        targetMobilePreviewVersion: null,
+        status: 'blocked',
+        mobilePreview: null,
+        reasons: [
+          'This instance has no mobile preview installed. Install the preview through a core update or install flow first.',
+        ],
+        steps: [],
+      },
+      pluginGate: null,
+      executed: false,
+    };
+  }
+
+  const client = registryClient(deps, manifest.registry.url);
+  const index = await client.getIndex();
+  const mobilePreviewReleases = await fetchAllMobilePreviews(client, index.mobilePreview, channel);
+
+  const plan = planMobilePreviewUpdate({
+    instanceId,
+    currentMobilePreviewVersion: manifest.versions.mobilePreview,
+    coreVersion: manifest.versions.selfhelp,
+    mobilePreviewReleases,
+    channel,
+    ...(opts.target ? { target: opts.target } : {}),
+  });
+
+  // Dual-axis plugin↔preview gate against the SELECTED preview: block when an
+  // installed plugin's native renderer is incompatible with the target preview's
+  // mobileRendererVersion; warn on coverage/bundle drift; info for web-only.
+  let pluginGate: MobilePluginGateResult | null = null;
+  if (plan.mobilePreview !== null) {
+    const gateInputs = await fetchInstalledPluginMobileInputs(
+      client,
+      index.plugins,
+      manifest.installedPlugins,
+      channel,
+    );
+    pluginGate = evaluateMobilePluginCompatibility(plan.mobilePreview, gateInputs);
+    if (pluginGate.status === 'blocked') {
+      for (const b of pluginGate.blocked) plan.reasons.push(b.message);
+    }
+  }
+
+  if (opts.dryRun || plan.status !== 'ok' || plan.mobilePreview === null) {
+    return { plan, pluginGate, executed: false };
+  }
+  // Refuse to execute a swap that would break an installed plugin's native
+  // renderer (the operator must update/remove the plugin or pick another preview).
+  if (pluginGate?.status === 'blocked') {
+    return { plan, pluginGate, executed: false };
+  }
+
+  const paths = instancePaths(instanceId, deps.root);
+  // Core + frontend stay EXACTLY as installed (pinned from the lock); only the
+  // preview release moves to the resolved target.
+  const { core, frontend } = releaseShapesFromLock(manifest, lock, 'mobile-preview-update');
+  const mobilePreview = plan.mobilePreview;
+
+  let preUpdateSnapshot:
+    | { compose: string; env: string; readme: string; manifest: InstanceManifest; lock: InstanceLock }
+    | null = null;
+
+  const report = await executeMobilePreviewUpdate(plan, {
+    runner: deps.runner,
+    instanceDir: paths.dir,
+    snapshot: async () => {
+      preUpdateSnapshot = {
+        compose: await readFile(paths.composePath, 'utf8').catch(() => ''),
+        env: await readFile(paths.envPath, 'utf8').catch(() => ''),
+        readme: await readFile(paths.readmePath, 'utf8').catch(() => ''),
+        manifest: await manifestStore.read(),
+        lock: await lockStore.read(),
+      };
+    },
+    applyArtifacts: async () => {
+      const artifacts = buildInstanceInstallArtifacts({
+        instanceId,
+        displayName: manifest.displayName,
+        mode: manifest.mode,
+        ...(manifest.mode === 'production'
+          ? { domain: manifest.domain }
+          : { localPort: Number(new URL(manifest.routing.publicFrontendUrl).port) }),
+        root: deps.root,
+        ...(deps.engineRoot ? { engineRoot: deps.engineRoot } : {}),
+        managerVersion: deps.managerVersion,
+        channel,
+        registry: {
+          id: manifest.registry.id,
+          url: manifest.registry.url,
+          metadataSha256: client.lastSuccessfulCheck?.metadataSha256 ?? lock.registry.metadataSha256,
+        },
+        // Same core + frontend (pinned from lock); only the preview moves.
+        core,
+        frontend,
+        mobilePreview,
+        services: lock.services,
+        installedPlugins: manifest.installedPlugins,
+        pluginTrustedKeys: formatTrustedKeysEnv(deps.trustedKeys),
+        ...(manifest.envOverrides ? { envOverrides: manifest.envOverrides } : {}),
+      });
+      await writeFileAtomic(paths.composePath, artifacts.composeYaml);
+      await writeFileAtomic(paths.envPath, artifacts.envText);
+      await writeFileAtomic(paths.readmePath, artifacts.readme);
+      await manifestStore.write({
+        ...artifacts.manifest,
+        createdAt: manifest.createdAt,
+        updatedAt: deps.now?.() ?? new Date().toISOString(),
+      });
+      await lockStore.write(artifacts.lock);
+    },
+    checkHealth: async () =>
+      evaluateHealth(
+        instanceId,
+        await deps.probeHealth(manifest.routing.publicFrontendUrl, manifest.routing.browserApiPrefix),
+        deps.now,
+      ),
+    rollback: async () => {
+      if (preUpdateSnapshot) {
+        const snap = preUpdateSnapshot;
+        if (snap.compose) await writeFileAtomic(paths.composePath, snap.compose);
+        if (snap.env) await writeFileAtomic(paths.envPath, snap.env);
+        if (snap.readme) await writeFileAtomic(paths.readmePath, snap.readme);
+        await manifestStore.write(snap.manifest);
+        await lockStore.write(snap.lock);
+      }
+      // Recreate ONLY the preview from the restored (previous) compose. The core
+      // stack was never touched, so a full `up -d` is unnecessary.
+      await deps.runner.run(paths.dir, composeCommands.upService('mobile-preview'));
+    },
+    ...(opts.onStep ? { onStep: opts.onStep } : {}),
+  });
+
+  return { plan, pluginGate, executed: true, report };
 }
 
 // ---------------------------------------------------------------------------
@@ -353,8 +583,9 @@ export async function instanceFrontendUpdate(
 
   const paths = instancePaths(instanceId, deps.root);
   // The core stays EXACTLY as installed (pinned from the lock); only the
-  // frontend release moves to the resolved target.
-  const { core } = releaseShapesFromLock(manifest, lock, 'frontend-update');
+  // frontend release moves to the resolved target. The optional preview is
+  // pinned from the lock too so a frontend swap never drops the preview service.
+  const { core, mobilePreview } = releaseShapesFromLock(manifest, lock, 'frontend-update');
   const frontend = plan.frontend;
 
   let preUpdateSnapshot:
@@ -390,9 +621,12 @@ export async function instanceFrontendUpdate(
           url: manifest.registry.url,
           metadataSha256: client.lastSuccessfulCheck?.metadataSha256 ?? lock.registry.metadataSha256,
         },
-        // Same core (pinned from lock), new frontend, same runtime services.
+        // Same core (pinned from lock), new frontend, same runtime services and
+        // the same optional preview (pinned from lock — a frontend-only swap
+        // must never drop or move the preview container).
         core,
         frontend,
+        ...(mobilePreview ? { mobilePreview } : {}),
         services: lock.services,
         installedPlugins: manifest.installedPlugins,
         pluginTrustedKeys: formatTrustedKeysEnv(deps.trustedKeys),

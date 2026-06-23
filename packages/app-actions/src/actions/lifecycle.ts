@@ -115,7 +115,7 @@ export async function instanceSetAddress(
   // Regenerate compose/.env/README/manifest with the pinned lock versions —
   // never the registry — so an address change can run fully offline and can
   // never bump code. The lock itself is NOT rewritten (versions are unchanged).
-  const { core, frontend } = releaseShapesFromLock(manifest, lock, 'address-change');
+  const { core, frontend, mobilePreview } = releaseShapesFromLock(manifest, lock, 'address-change');
   const paths = instancePaths(instanceId, deps.root);
   const artifacts = buildInstanceInstallArtifacts({
     instanceId,
@@ -129,6 +129,8 @@ export async function instanceSetAddress(
     registry: { id: lock.registry.id, url: lock.registry.url, metadataSha256: lock.registry.metadataSha256 },
     core,
     frontend,
+    // Keep the optional preview service across an address change.
+    ...(mobilePreview ? { mobilePreview } : {}),
     services: lock.services,
     installedPlugins: manifest.installedPlugins,
     pluginLock: lock.plugins,
@@ -589,7 +591,7 @@ export async function instanceSetEnv(deps: ActionDeps, instanceId: string, opts:
 
   const lockStore = new LockStore(instanceId, deps.root);
   const lock = await lockStore.read();
-  const { core, frontend } = releaseShapesFromLock(manifest, lock, 'env-change');
+  const { core, frontend, mobilePreview } = releaseShapesFromLock(manifest, lock, 'env-change');
   const paths = instancePaths(instanceId, deps.root);
   const localPort =
     manifest.mode === 'local' ? Number(new URL(manifest.routing.publicFrontendUrl).port) : undefined;
@@ -606,6 +608,8 @@ export async function instanceSetEnv(deps: ActionDeps, instanceId: string, opts:
     registry: { id: lock.registry.id, url: lock.registry.url, metadataSha256: lock.registry.metadataSha256 },
     core,
     frontend,
+    // Keep the optional preview pin so the rewritten manifest/.env retain it.
+    ...(mobilePreview ? { mobilePreview } : {}),
     services: lock.services,
     installedPlugins: manifest.installedPlugins,
     pluginLock: lock.plugins,

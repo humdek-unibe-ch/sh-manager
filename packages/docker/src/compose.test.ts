@@ -285,6 +285,81 @@ describe('engine-side bind sources (hostBindDir)', () => {
   });
 });
 
+describe('optional mobile-preview service', () => {
+  const previewImages: InstanceImages = {
+    ...images,
+    mobilePreview: 'ghcr.io/x/selfhelp-mobile-preview:0.2.0@sha256:m',
+  };
+
+  it('is omitted entirely when the instance did not opt in', () => {
+    // Default prodSpec carries no images.mobilePreview, so existing instances
+    // get exactly the services they had before — the feature is purely additive.
+    const doc = buildInstanceCompose(prodSpec);
+    expect(Object.keys(doc.services as object)).not.toContain('mobile-preview');
+  });
+
+  describe('production', () => {
+    const doc = buildInstanceCompose({ ...prodSpec, images: previewImages });
+
+    it('edge-routes under /mobile-preview without exposing the private backend', () => {
+      // The longer Host+PathPrefix rule outranks the frontend's bare Host()
+      // (same mechanism as the Mercure router), so /mobile-preview lands here
+      // while everything else falls through to the frontend. The backend gets
+      // NO router of its own — the preview reaches it over the instance network.
+      const labels = (svc(doc, 'mobile-preview').labels as string[]).join(' ');
+      expect(labels).toContain('Host(`website1.example.ch`) && PathPrefix(`/mobile-preview`)');
+      expect(labels).toContain(
+        'traefik.http.services.website1-mobile-preview.loadbalancer.server.port=8080',
+      );
+      expect(labels).toContain(
+        'traefik.http.routers.website1-mobile-preview.tls.certresolver=letsencrypt',
+      );
+      // The backend stays off the proxy network and routerless.
+      expect(svc(doc, 'backend').networks).toEqual(['instance']);
+      expect(svc(doc, 'backend').labels).toBeUndefined();
+    });
+
+    it('attaches to the proxy network yet still passes the edge-only guard', () => {
+      expect(svc(doc, 'mobile-preview').networks).toEqual(['instance', 'selfhelp_proxy']);
+      expect(findProxyNetworkViolations(doc)).toHaveLength(0);
+      expect(() => assertComposeSafe(doc)).not.toThrow();
+    });
+
+    it('configures the proxy server via non-secret env and never loads the Symfony dotenv', () => {
+      const preview = svc(doc, 'mobile-preview');
+      expect(preview.environment).toEqual({
+        PORT: '8080',
+        SELFHELP_PREVIEW_BASE_URL: '/mobile-preview',
+        SELFHELP_BACKEND_INTERNAL_URL: 'http://backend:8080',
+      });
+      // No env_file: the preview must never read .env / secrets.env.
+      expect(preview.env_file).toBeUndefined();
+      expect(preview.volumes ?? []).not.toContain('./.env:/app/.env:ro');
+    });
+
+    it('waits for the backend so the in-container API proxy target exists', () => {
+      const deps = svc(doc, 'mobile-preview').depends_on as Record<string, { condition: string }>;
+      expect(deps.backend).toEqual({ condition: 'service_started' });
+    });
+  });
+
+  describe('local', () => {
+    const doc = buildInstanceCompose({
+      instanceId: 'localtest',
+      mode: 'local',
+      localPort: 8081,
+      images: previewImages,
+    });
+
+    it('publishes on the frontend port + 2000 and stays unrouted', () => {
+      const preview = svc(doc, 'mobile-preview');
+      expect(preview.ports).toEqual(['127.0.0.1:10081:8080']);
+      expect(preview.labels).toBeUndefined();
+      expect(preview.networks).toEqual(['instance']);
+    });
+  });
+});
+
 describe('resource limits', () => {
   it('applies optional memory/cpu limits and custom log rotation', () => {
     const doc = buildInstanceCompose({

@@ -38,6 +38,8 @@ export interface FakeClientOptions {
   availableVersions?: string[];
   /** Frontend versions returned by listVersions('…','frontend') (default: a small fixed set). */
   availableFrontendVersions?: string[];
+  /** Mobile-preview versions returned by listVersions('…','mobile-preview') (default: a small fixed set). */
+  availableMobilePreviewVersions?: string[];
   /** Instance inventory served by the instance APIs (default: one active instance). */
   instances?: InstanceSummary[];
   /** Backups per instance id. */
@@ -48,6 +50,8 @@ export interface FakeClientOptions {
   dryRunPlan?: unknown;
   /** Plan returned by frontendUpdateDryRun (shape mirrors @shm/core FrontendUpdatePlan). */
   frontendDryRunPlan?: unknown;
+  /** Plan returned by mobilePreviewUpdateDryRun (shape mirrors @shm/core MobilePreviewUpdatePlan). */
+  mobilePreviewDryRunPlan?: unknown;
   /** When set, every mutating instance call rejects with this ApiError. */
   failMutations?: ApiError;
   /** getAuthMeta().operatorsConfigured (default true; false = first-run setup). */
@@ -235,6 +239,22 @@ export const FAKE_FRONTEND_DRY_RUN_PLAN = {
   steps: ['snapshot config', 'pull frontend image (0.1.7)', 'recreate frontend container', 'health check'],
 };
 
+/**
+ * Default mobile-preview-only dry-run plan (mirrors @shm/core
+ * MobilePreviewUpdatePlan + the adapter's appended `pluginGate`).
+ */
+export const FAKE_MOBILE_PREVIEW_DRY_RUN_PLAN = {
+  instanceId: 'clinic-a',
+  kind: 'mobile-preview',
+  currentMobilePreviewVersion: '0.2.0',
+  targetMobilePreviewVersion: '0.2.3',
+  status: 'ok',
+  mobilePreview: { id: 'selfhelp-mobile-preview-0.2.3', version: '0.2.3' },
+  reasons: [],
+  steps: ['snapshot config', 'pull mobile-preview image (0.2.3)', 'recreate mobile-preview container', 'health check'],
+  pluginGate: null,
+};
+
 /** Manager version baked into every fake snapshot (asserted by header tests). */
 export const FAKE_MANAGER_VERSION = '1.0.6-test';
 
@@ -287,6 +307,9 @@ export function makeFakeClient(opts: FakeClientOptions = {}): ApiClient {
     async listVersions(_channel, kind) {
       if (kind === 'frontend') {
         return { versions: opts.availableFrontendVersions ?? ['0.1.7', '0.1.6', '0.1.5'] };
+      }
+      if (kind === 'mobile-preview') {
+        return { versions: opts.availableMobilePreviewVersions ?? ['0.2.3', '0.2.2', '0.2.0'] };
       }
       return { versions: opts.availableVersions ?? ['0.3.0', '0.2.1', '0.2.0'] };
     },
@@ -469,6 +492,9 @@ export function makeFakeClient(opts: FakeClientOptions = {}): ApiClient {
     async frontendUpdateDryRun() {
       return { plan: opts.frontendDryRunPlan ?? FAKE_FRONTEND_DRY_RUN_PLAN };
     },
+    async mobilePreviewUpdateDryRun() {
+      return { plan: opts.mobilePreviewDryRunPlan ?? FAKE_MOBILE_PREVIEW_DRY_RUN_PLAN };
+    },
     async listOperations(instanceId) {
       return instanceId ? operations.filter((o) => o.instanceId === instanceId) : [...operations];
     },
@@ -498,6 +524,9 @@ export function makeFakeClient(opts: FakeClientOptions = {}): ApiClient {
     },
     async executeFrontendUpdate(instanceId) {
       return startFakeOperation('instance_frontend_update', instanceId);
+    },
+    async executeMobilePreviewUpdate(instanceId) {
+      return startFakeOperation('instance_mobile_preview_update', instanceId);
     },
     async createBackup(instanceId) {
       return startFakeOperation('instance_backup', instanceId);

@@ -28,6 +28,7 @@ export type OperationKind =
   | 'instance_create'
   | 'instance_update'
   | 'instance_frontend_update'
+  | 'instance_mobile_preview_update'
   | 'instance_backup'
   | 'instance_scheduled_backup'
   | 'instance_backup_prune'

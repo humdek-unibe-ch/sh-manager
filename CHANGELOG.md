@@ -8,13 +8,39 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `1.6.3`). Registry releases
+- **The manager tool** uses its own semver (currently `1.7.0`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
   **`0.x`** line (core, frontend, scheduler, worker — all `0.1.0`).
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
+
+## [1.7.0] - 2026-06-23
+
+### Added
+- **Mobile preview service orchestration (`selfhelp-mobile-preview`).** The
+  manager now installs, routes, and updates the per-instance mobile preview web
+  image as an independently versioned component alongside core/frontend:
+  - A `mobile-preview` service is added to the generated Docker Compose with a
+    Traefik `Host && PathPrefix(/mobile-preview)` route; the backend stays
+    private (the preview reaches `/cms-api` only through its own in-container
+    same-origin proxy with a narrow allowlist).
+  - `NEXT_PUBLIC_MOBILE_PREVIEW_ORIGIN` is wired into the frontend service env
+    only when the preview is enabled for the instance.
+  - Resolver: `pickMobilePreviewForCore` + `resolveMobilePreviewUpdate` select
+    the newest core-compatible preview, and `evaluateMobilePluginCompatibility`
+    runs the **dual-axis plugin mobile gate** (renders **native** when bundled +
+    contract-compatible, **warns** when compatible-but-not-bundled or on a
+    bundled-version drift, **blocks** when the image's `mobileRendererVersion`
+    does not satisfy a plugin's declared `compatibility.mobile`).
+  - New `instance update-mobile-preview` CLI command (dry-run + execute) and the
+    matching BFF routes + web UI dialog. The update recreates ONLY the preview
+    container (`docker compose up -d --no-deps mobile-preview`); the core stack
+    keeps running. A blocked plugin gate prevents execution; warnings are shown
+    but allow proceeding.
+  - The CMS-requested operation kind `instance_mobile_preview_update` is polled
+    and surfaced like the frontend update (no backup/migration phases).
 
 ## [1.6.4] - 2026-06-18
 

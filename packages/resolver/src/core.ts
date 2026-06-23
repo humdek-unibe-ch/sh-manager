@@ -4,6 +4,7 @@ import semver from 'semver';
 import type {
   CoreRelease,
   FrontendRelease,
+  MobilePreviewRelease,
   ReleaseChannel,
   SchedulerRelease,
   SecurityAdvisory,
@@ -323,4 +324,257 @@ export function pickSchedulerForCore(
 /** Picks the newest worker release compatible with the chosen core release. */
 export function pickWorkerForCore(core: CoreRelease, workers: WorkerRelease[]): WorkerRelease | null {
   return pickServiceForCore(core, workers);
+}
+
+/**
+ * Picks the newest `selfhelp-mobile-preview` release compatible with the chosen
+ * core release. The preview is OPTIONAL and core-coupled (it talks to the
+ * private backend), so it resolves exactly like scheduler/worker. Returns null
+ * when no compatible preview exists — install/update simply omits the service.
+ */
+export function pickMobilePreviewForCore(
+  core: CoreRelease,
+  previews: MobilePreviewRelease[],
+): MobilePreviewRelease | null {
+  return pickServiceForCore(core, previews);
+}
+
+export interface MobilePreviewUpdateInput {
+  /** The mobile-preview version currently installed on the instance. */
+  currentMobilePreviewVersion: string;
+  /** The instance's installed core version (unchanged by a preview-only update). */
+  coreVersion: string;
+  available: MobilePreviewRelease[];
+  /** 'latest' picks the newest compatible non-blocked preview; or a specific version. */
+  target?: string;
+  channel?: ReleaseChannel;
+}
+
+export interface MobilePreviewUpdateResult {
+  selected: MobilePreviewRelease | null;
+  status: 'ok' | 'blocked' | 'up_to_date';
+  reasons: string[];
+}
+
+/**
+ * Resolve a MOBILE-PREVIEW-ONLY update: the newest compatible preview image
+ * strictly newer than the one installed, leaving the core untouched. The mobile
+ * repo releases the preview image independently (on its own tags), so an
+ * instance on the latest core can still have a newer preview available — the
+ * core-driven resolver never sees that case. Compatibility is the running core
+ * satisfying the candidate's `backendCompatibility.requiredCoreRange`. Mobile
+ * preview is not a defined advisory `affected.kind`, so only the release
+ * `blocked` flag + channel + core range gate here. Downgrades are blocked.
+ */
+export function resolveMobilePreviewUpdate(input: MobilePreviewUpdateInput): MobilePreviewUpdateResult {
+  const {
+    currentMobilePreviewVersion,
+    coreVersion,
+    available,
+    target = 'latest',
+    channel = 'stable',
+  } = input;
+
+  const isCompatible = (p: MobilePreviewRelease): boolean => {
+    if (p.blocked) return false;
+    if (p.channel !== channel) return false;
+    return satisfiesLoose(coreVersion, p.backendCompatibility.requiredCoreRange);
+  };
+
+  const cur = coerceVersion(currentMobilePreviewVersion);
+
+  if (target !== 'latest') {
+    const wanted = coerceVersion(target);
+    const exact = available.find((r) => coerceVersion(r.version) === wanted);
+    if (!exact) {
+      return {
+        selected: null,
+        status: 'blocked',
+        reasons: [`Mobile preview ${target} is not available on the ${channel} channel.`],
+      };
+    }
+    if (cur !== null && wanted !== null && semver.eq(wanted, cur)) {
+      return { selected: null, status: 'up_to_date', reasons: [`Mobile preview ${currentMobilePreviewVersion} is up to date.`] };
+    }
+    if (cur !== null && wanted !== null && semver.lt(wanted, cur)) {
+      return {
+        selected: null,
+        status: 'blocked',
+        reasons: [`Mobile preview downgrade from ${currentMobilePreviewVersion} to ${target} is not supported.`],
+      };
+    }
+    if (!isCompatible(exact)) {
+      return {
+        selected: null,
+        status: 'blocked',
+        reasons: [`Mobile preview ${target} is not compatible with SelfHelp core ${coreVersion}.`],
+      };
+    }
+    return { selected: exact, status: 'ok', reasons: [] };
+  }
+
+  const newer = available
+    .filter(isCompatible)
+    .filter((p) => {
+      const v = coerceVersion(p.version);
+      return v !== null && cur !== null && semver.gt(v, cur);
+    })
+    .sort((a, b) => semver.rcompare(coerceVersion(a.version) ?? '0.0.0', coerceVersion(b.version) ?? '0.0.0'));
+
+  if (newer.length === 0) {
+    return { selected: null, status: 'up_to_date', reasons: [`Mobile preview ${currentMobilePreviewVersion} is up to date.`] };
+  }
+  return { selected: newer[0]!, status: 'ok', reasons: [] };
+}
+
+// ---------------------------------------------------------------------------
+// Plugin <-> mobile-preview compatibility gate
+// ---------------------------------------------------------------------------
+
+/** Minimal installed-plugin shape the mobile gate needs. */
+export interface InstalledPluginForMobileGate {
+  id: string;
+  version: string;
+  /**
+   * The plugin's declared mobile-renderer-contract range
+   * (`compatibility.mobile`). Absent = the plugin ships no native mobile
+   * renderer (web-only).
+   */
+  mobileCompatibility?: string | null;
+  /** Plugin `compatibility.reactNative` range, when it ships a mobile package. */
+  reactNativeCompatibility?: string | null;
+  /** Plugin `compatibility.expoSdk` range, when it ships a mobile package. */
+  expoSdkCompatibility?: string | null;
+}
+
+export type MobilePluginVerdict =
+  /** Native renderer present, compatible, and baked into the preview image. */
+  | 'native'
+  /** Compatible renderer, but not in the curated image -> open-on-web fallback. */
+  | 'not_bundled'
+  /** Declares a native renderer the preview's contract does NOT satisfy. */
+  | 'incompatible'
+  /** No native renderer declared -> open-on-web by design. */
+  | 'web_only';
+
+export interface MobilePluginEvaluation {
+  pluginId: string;
+  pluginVersion: string;
+  verdict: MobilePluginVerdict;
+  /** Set for `native` when the bundled package version differs from installed. */
+  bundledVersionDrift?: { bundled: string; installed: string };
+  message: string;
+}
+
+export interface MobilePluginGateResult {
+  /** Overall: blocked when ANY plugin is `incompatible`; warning when any is `not_bundled`/drift; else ok. */
+  status: PreflightLikeStatus;
+  evaluations: MobilePluginEvaluation[];
+  blocked: MobilePluginEvaluation[];
+  warnings: MobilePluginEvaluation[];
+}
+
+export type PreflightLikeStatus = 'ok' | 'warning' | 'blocked';
+
+/**
+ * Evaluate every installed plugin against a resolved `selfhelp-mobile-preview`
+ * release. This powers the manager's "will this preview render my plugins?"
+ * preflight (the dual-axis model the operator asked for):
+ *
+ * - A plugin that declares `compatibility.mobile`,
+ *   `compatibility.reactNative`, or `compatibility.expoSdk` ranges the preview
+ *   image does NOT satisfy is **blocked** (its native renderer would run against
+ *   the wrong contract/runtime).
+ * - A compatible plugin **baked into the image** renders natively (`native`),
+ *   with a non-fatal **warning** when the bundled package version drifts from
+ *   the installed plugin version.
+ * - A compatible plugin **not** in the curated image is a **warning**
+ *   (`not_bundled`): it falls back to open-on-web until a preview image bundles
+ *   it; the preview is still usable.
+ * - A plugin with no `compatibility.mobile` is **info** (`web_only`): the
+ *   open-on-web deep link is the intended experience.
+ *
+ * Pure + deterministic; the CLI/BFF format the result.
+ */
+export function evaluateMobilePluginCompatibility(
+  preview: Pick<MobilePreviewRelease, 'mobileRendererVersion' | 'reactNativeVersion' | 'expoSdkVersion' | 'bundledPlugins'>,
+  installed: InstalledPluginForMobileGate[],
+): MobilePluginGateResult {
+  const bundledById = new Map(preview.bundledPlugins.map((b) => [b.id, b]));
+  const evaluations: MobilePluginEvaluation[] = installed.map((plugin) => {
+    const range = plugin.mobileCompatibility ?? null;
+    if (range === null || range === '') {
+      return {
+        pluginId: plugin.id,
+        pluginVersion: plugin.version,
+        verdict: 'web_only',
+        message: `${plugin.id} has no native mobile renderer; it opens on the web frontend inside the preview.`,
+      };
+    }
+    if (!satisfiesLoose(preview.mobileRendererVersion, range)) {
+      return {
+        pluginId: plugin.id,
+        pluginVersion: plugin.version,
+        verdict: 'incompatible',
+        message:
+          `${plugin.id} requires mobile renderer "${range}" but the preview image ships ` +
+          `${preview.mobileRendererVersion}; update the mobile preview (or the plugin) first.`,
+      };
+    }
+    if (
+      plugin.reactNativeCompatibility &&
+      (!preview.reactNativeVersion || !satisfiesLoose(preview.reactNativeVersion, plugin.reactNativeCompatibility))
+    ) {
+      return {
+        pluginId: plugin.id,
+        pluginVersion: plugin.version,
+        verdict: 'incompatible',
+        message:
+          `${plugin.id} requires React Native "${plugin.reactNativeCompatibility}" but the preview image ships ` +
+          `${preview.reactNativeVersion ?? 'an unknown React Native version'}; update the mobile preview first.`,
+      };
+    }
+    if (
+      plugin.expoSdkCompatibility &&
+      (!preview.expoSdkVersion || !satisfiesLoose(preview.expoSdkVersion, plugin.expoSdkCompatibility))
+    ) {
+      return {
+        pluginId: plugin.id,
+        pluginVersion: plugin.version,
+        verdict: 'incompatible',
+        message:
+          `${plugin.id} requires Expo SDK "${plugin.expoSdkCompatibility}" but the preview image ships ` +
+          `${preview.expoSdkVersion ?? 'an unknown Expo SDK version'}; update the mobile preview first.`,
+      };
+    }
+    const bundled = bundledById.get(plugin.id);
+    if (!bundled) {
+      return {
+        pluginId: plugin.id,
+        pluginVersion: plugin.version,
+        verdict: 'not_bundled',
+        message:
+          `${plugin.id} has a compatible native renderer but is not baked into this preview image; ` +
+          `it falls back to open-on-web until a preview bundling it is published.`,
+      };
+    }
+    const drift =
+      coerceVersion(bundled.version) !== coerceVersion(plugin.version)
+        ? { bundled: bundled.version, installed: plugin.version }
+        : undefined;
+    return {
+      pluginId: plugin.id,
+      pluginVersion: plugin.version,
+      verdict: 'native',
+      ...(drift ? { bundledVersionDrift: drift } : {}),
+      message: drift
+        ? `${plugin.id} renders natively, but the preview bundles ${bundled.version} while ${plugin.version} is installed (version drift).`
+        : `${plugin.id} renders natively in the preview.`,
+    };
+  });
+
+  const blocked = evaluations.filter((e) => e.verdict === 'incompatible');
+  const warnings = evaluations.filter((e) => e.verdict === 'not_bundled' || e.bundledVersionDrift !== undefined);
+  const status: PreflightLikeStatus = blocked.length > 0 ? 'blocked' : warnings.length > 0 ? 'warning' : 'ok';
+  return { status, evaluations, blocked, warnings };
 }

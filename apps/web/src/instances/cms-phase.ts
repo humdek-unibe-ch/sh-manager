@@ -19,19 +19,25 @@ export function isPollable(summary: InstanceSummary): boolean {
  * `instance_frontend_update` step maps), so the operator's live checklist
  * advances row-by-row. Returns `null` for statuses with no dedicated row
  * (terminal states are reflected by the operation's own success/failure).
+ *
+ * `mobile-preview` is a lightweight, stateless swap like `frontend`: it takes no
+ * backup and runs no migrations, so it skips those rows.
  */
-export function cmsUpdatePhaseStep(kind: 'core' | 'frontend' | undefined, status: string): string | null {
-  const frontend = kind === 'frontend';
+export function cmsUpdatePhaseStep(
+  kind: 'core' | 'frontend' | 'mobile-preview' | undefined,
+  status: string,
+): string | null {
+  const lightweight = kind === 'frontend' || kind === 'mobile-preview';
   switch (status) {
     case 'accepted':
     case 'preflight_running':
       return 'plan';
     case 'backup_running':
-      return frontend ? null : 'backup';
+      return lightweight ? null : 'backup';
     case 'update_running':
       return 'pull';
     case 'migration_running':
-      return 'migrations';
+      return lightweight ? null : 'migrations';
     case 'health_check_running':
       return 'health';
     default:

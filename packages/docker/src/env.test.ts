@@ -120,6 +120,35 @@ describe('BFF URL invariant', () => {
   });
 });
 
+describe('mobile-preview origin env (admin panel)', () => {
+  it('omits the preview origin entirely when the instance did not opt in', () => {
+    // Additive: instances without the preview get exactly their previous env.
+    expect(buildInstanceEnv(input)).not.toHaveProperty('NEXT_PUBLIC_MOBILE_PREVIEW_ORIGIN');
+  });
+
+  it('defaults to the same-origin /mobile-preview path when the preview is deployed', () => {
+    const env = buildInstanceEnv({ ...input, mobilePreviewEnabled: true });
+    expect(env.NEXT_PUBLIC_MOBILE_PREVIEW_ORIGIN).toBe('/mobile-preview');
+  });
+
+  it('lets an operator point the panel at a live Expo dev server for fast refresh', () => {
+    const env = buildInstanceEnv({
+      ...input,
+      mode: 'local',
+      publicFrontendUrl: 'http://localhost:9123',
+      mobilePreviewEnabled: true,
+      mobilePreviewOrigin: 'http://localhost:8081',
+    });
+    expect(env.NEXT_PUBLIC_MOBILE_PREVIEW_ORIGIN).toBe('http://localhost:8081');
+  });
+
+  it('is operator-overridable (NOT a manager-controlled structural key)', () => {
+    // The live-reload workflow REQUIRES operators to repoint it, so it must not
+    // be re-asserted like the routing/identity keys.
+    expect(MANAGER_CONTROLLED_ENV_KEYS).not.toContain('NEXT_PUBLIC_MOBILE_PREVIEW_ORIGIN');
+  });
+});
+
 describe('plugin trust env (verification chain, security)', () => {
   const trusted = 'shm-release-1=BASE64PUBKEYAAAA;shm-release-2=BASE64PUBKEYBBBB';
   const registry = 'https://humdek-unibe-ch.github.io/sh2-plugin-registry/';

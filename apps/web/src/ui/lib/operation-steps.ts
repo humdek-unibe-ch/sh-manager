@@ -51,6 +51,12 @@ const STEP_MAPS: Record<OperationKind, StepDef[]> = {
     { id: 'recreate', label: 'Recreate frontend container' },
     { id: 'health', label: 'Health check' },
   ],
+  instance_mobile_preview_update: [
+    { id: 'plan', label: 'Resolve & plan mobile preview update' },
+    { id: 'pull', label: 'Pull verified mobile-preview image' },
+    { id: 'recreate', label: 'Recreate mobile-preview container' },
+    { id: 'health', label: 'Health check' },
+  ],
   instance_backup: [
     { id: 'database', label: 'Dump database' },
     { id: 'metadata', label: 'Snapshot manifest, lock & config' },

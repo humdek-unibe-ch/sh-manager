@@ -62,14 +62,23 @@ export interface PendingOperation {
   /**
    * What the operation updates. `core` (default, back-compat) updates the core
    * stack (and its compatible frontend); `frontend` is the lightweight,
-   * stateless frontend-only swap. A backend that omits it is treated as `core`.
+   * stateless frontend-only swap; `mobile-preview` is the equally lightweight,
+   * stateless swap of the optional `selfhelp-mobile-preview` container. A
+   * backend that omits it is treated as `core`.
    */
-  kind?: 'core' | 'frontend';
+  kind?: 'core' | 'frontend' | 'mobile-preview';
   /**
    * The frontend version a `frontend`-kind operation targets. Ignored for
    * `core` operations (which resolve the compatible frontend themselves).
    */
   targetFrontendVersion?: string;
+  /**
+   * The mobile-preview version a `mobile-preview`-kind operation targets.
+   * Ignored for `core` operations (which resolve the compatible preview
+   * themselves). When omitted on a `mobile-preview` op the manager resolves the
+   * newest compatible preview.
+   */
+  targetMobilePreviewVersion?: string;
 }
 
 export interface OperationStatusUpdate {

@@ -19,6 +19,14 @@ describe('cmsUpdatePhaseStep', () => {
     expect(cmsUpdatePhaseStep('frontend', 'health_check_running')).toBe('health');
   });
 
+  it('skips backup AND migrations for a mobile-preview swap (stateless, no DB work)', () => {
+    expect(cmsUpdatePhaseStep('mobile-preview', 'preflight_running')).toBe('plan');
+    expect(cmsUpdatePhaseStep('mobile-preview', 'backup_running')).toBeNull();
+    expect(cmsUpdatePhaseStep('mobile-preview', 'update_running')).toBe('pull');
+    expect(cmsUpdatePhaseStep('mobile-preview', 'migration_running')).toBeNull();
+    expect(cmsUpdatePhaseStep('mobile-preview', 'health_check_running')).toBe('health');
+  });
+
   it('returns null for terminal/unknown statuses (reflected by the op result)', () => {
     expect(cmsUpdatePhaseStep('core', 'succeeded')).toBeNull();
     expect(cmsUpdatePhaseStep('core', 'failed')).toBeNull();

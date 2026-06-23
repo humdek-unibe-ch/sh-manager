@@ -187,7 +187,7 @@ These are the canonical SelfHelp testing policy, shared verbatim across the back
 
 ## Release Rules
 
-- The manager tool uses its own semver tracked in `CHANGELOG.md` (currently `0.x`, e.g. `0.1.0`); tags are `v*` and drive `manager-release`. It is independent of the SelfHelp platform version it installs (also `0.x` pre-release).
+- The manager tool uses its own stable semver tracked in `package.json` and `CHANGELOG.md` (currently `1.x`); tags are `v*` and drive the release workflow. It is independent of the SelfHelp platform version it installs (currently `0.x` pre-release).
 - A release MUST pass the quality gate (`npm run check`: typecheck + lint + test + schema/signature validation) and the license report.
 - Released images are built + pushed to GHCR with an SPDX **SBOM**, a Trivy scan (advisory), and **cosign** signing when a signing key is configured. Do not remove the SBOM/scan/signing steps.
 - Keep the **signed release / trusted registry** model intact: never weaken or bypass registry signature/checksum verification, and never add an untrusted key to the trusted-keys set without an explicit governance reason.

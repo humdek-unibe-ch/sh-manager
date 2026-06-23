@@ -3,7 +3,7 @@
 Audience: Developers
 Status: Active
 Applies to: `sh-manager` (manager tool `0.1.0`)
-Last verified: 2026-06-08
+Last verified: 2026-06-23
 Source of truth: `packages/*/src`, `apps/cli/src`, `apps/web/src`
 
 ## Overview
@@ -51,8 +51,8 @@ sh-manager (CLI)            sh-manager-web (BFF)
 | --- | --- |
 | `@shm/schemas` | Types, JSON Schemas, schema-version gating, validators (`validateTrustedKeys`, registry/manifest/lock schemas). |
 | `@shm/registry` | Canonical JSON, Ed25519 signature verification, SHA-256 checksums, the registry client. Byte-compatible with the registry signer and the host PHP `SignedPayloadBuilder`. |
-| `@shm/resolver` | Semver resolution, security **advisories**, and core ⇄ frontend ⇄ plugin ⇄ plugin-API compatibility. |
-| `@shm/docker` | Per-instance Docker Compose generation, `.env` (non-secret BFF invariant), **safety guards**, the compose runner interface. |
+| `@shm/resolver` | Semver resolution, security **advisories**, and core ⇄ frontend ⇄ mobile-preview ⇄ plugin ⇄ plugin-API compatibility — incl. the dual-axis **mobile plugin gate** (`compatibility.mobile` vs the image's `mobileRendererVersion`, plus the `reactNative`/`expoSdk` runtime axis and bundled-plugin coverage). |
+| `@shm/docker` | Per-instance Docker Compose generation, `.env` (non-secret BFF invariant), **safety guards**, the compose runner interface. Optionally emits the stateless `selfhelp-mobile-preview` service with an in-container backend proxy + a Traefik `PathPrefix(/mobile-preview)` route (the backend stays private — no extra public port). |
 | `@shm/traefik` | The single shared reverse proxy (the only container with the Docker socket, read-only). |
 | `@shm/instances` | Path layout, **atomic writes**, inventory/manifest/lock stores, drift detection, operator README generation, secrets, remove. |
 | `@shm/core` | Instance-scope guard, preflight, health, update plan/execute, bootstrap/install orchestration, post-up provisioning. |

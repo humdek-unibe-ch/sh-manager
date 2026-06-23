@@ -13,9 +13,13 @@ import {
   requiresManagerSatisfied,
   validateCoreRelease,
   validateFrontendRelease,
+  validateMobilePreviewRelease,
+  validatePluginRelease,
   validateRegistryIndex,
   type CoreRelease,
   type FrontendRelease,
+  type MobilePreviewRelease,
+  type PluginRelease,
   type RegistryIndex,
   type RegistryReleaseRef,
   type TrustedKeysFile,
@@ -191,5 +195,13 @@ export class RegistryClient {
 
   getFrontendRelease(ref: RegistryReleaseRef) {
     return this.getRelease<FrontendRelease>(ref, validateFrontendRelease);
+  }
+
+  getMobilePreviewRelease(ref: RegistryReleaseRef) {
+    return this.getRelease<MobilePreviewRelease>(ref, validateMobilePreviewRelease);
+  }
+
+  getPluginRelease(ref: RegistryReleaseRef) {
+    return this.getRelease<PluginRelease>(ref, validatePluginRelease);
   }
 }

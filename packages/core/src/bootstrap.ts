@@ -14,6 +14,7 @@ import type {
   CoreRelease,
   FrontendRelease,
   InstalledPlugin,
+  InstanceImages,
   InstanceLock,
   InstanceManifest,
   InstanceMode,
@@ -21,6 +22,7 @@ import type {
   InventoryInstanceEntry,
   LockPluginEntry,
   LockServiceEntry,
+  MobilePreviewRelease,
   ReleaseChannel,
   ServerInventory,
 } from '@shm/schemas';
@@ -121,6 +123,13 @@ export interface InstanceInstallInput {
   registry: { id: string; url: string; metadataSha256: string };
   core: CoreRelease;
   frontend: FrontendRelease;
+  /**
+   * Optional `selfhelp-mobile-preview` release pinned for this instance. When
+   * present the generated compose gains the routed preview service and the
+   * manifest/lock/.env record its version/digest/origin. Absent/null = the
+   * instance has no preview (the default; the service is simply omitted).
+   */
+  mobilePreview?: MobilePreviewRelease | null;
   services: { mysql: LockServiceEntry; redis: LockServiceEntry; mercure: LockServiceEntry };
   resources?: InstanceResourceConfig;
   installedPlugins?: InstalledPlugin[];
@@ -171,7 +180,8 @@ export function buildInstanceInstallArtifacts(input: InstanceInstallInput): Inst
     publicFrontendUrl,
   });
 
-  const images = {
+  const mobilePreview = input.mobilePreview ?? null;
+  const images: InstanceImages = {
     backend: input.core.backend.image,
     frontend: input.frontend.image,
     scheduler: input.core.scheduler.image,
@@ -179,6 +189,9 @@ export function buildInstanceInstallArtifacts(input: InstanceInstallInput): Inst
     mysql: input.services.mysql.image,
     redis: input.services.redis.image,
     mercure: input.services.mercure.image,
+    // Opt-in: only when a preview release is pinned does the compose builder
+    // emit the routed mobile-preview service (it keys off this image ref).
+    ...(mobilePreview ? { mobilePreview: mobilePreview.image } : {}),
   };
 
   const manifest: InstanceManifest = {
@@ -197,6 +210,7 @@ export function buildInstanceInstallArtifacts(input: InstanceInstallInput): Inst
       scheduler: input.core.version,
       worker: input.core.version,
       pluginApi: input.core.pluginApiVersion,
+      ...(mobilePreview ? { mobilePreview: mobilePreview.version } : {}),
     },
     images,
     routing,
@@ -225,6 +239,9 @@ export function buildInstanceInstallArtifacts(input: InstanceInstallInput): Inst
       // update can ALWAYS enforce "does the running core accept this frontend?"
       // — even if this core release has since left the registry index.
       requiredFrontendRange: input.core.frontendCompatibility.requiredFrontendRange,
+      // Pin the preview image digest so a recreate is reproducible even if the
+      // preview release later leaves the registry index.
+      ...(mobilePreview ? { mobilePreviewImageDigest: mobilePreview.digest } : {}),
     },
     services: input.services,
     plugins: input.pluginLock ?? {},
@@ -239,6 +256,8 @@ export function buildInstanceInstallArtifacts(input: InstanceInstallInput): Inst
       publicFrontendUrl,
       registryUrl: input.registry.url,
       ...(input.pluginTrustedKeys ? { pluginTrustedKeys: input.pluginTrustedKeys } : {}),
+      // Tell the frontend admin panel where to embed the preview iframe.
+      ...(mobilePreview ? { mobilePreviewEnabled: true } : {}),
       ...(input.envOverrides ? { envOverrides: input.envOverrides } : {}),
     }),
   );
