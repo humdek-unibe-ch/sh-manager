@@ -63,7 +63,6 @@ describe('buildOperationExecutor — mobile-preview branch', () => {
         rolledBack: false,
         steps: [{ name: 'pull', status: 'done', detail: '0.2.3' }],
       },
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
 
     const exec = buildOperationExecutor(deps);
@@ -91,7 +90,6 @@ describe('buildOperationExecutor — mobile-preview branch', () => {
         rolledBack: false,
         steps: [],
       },
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
 
     const exec = buildOperationExecutor(deps);
@@ -106,7 +104,6 @@ describe('buildOperationExecutor — mobile-preview branch', () => {
       plan: { status: 'blocked', reasons: ['no compatible preview is published yet'] },
       pluginGate: { status: 'blocked', blocked: [{ message: 'plugin acme needs renderer >=0.3' }] },
       executed: false,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
 
     const exec = buildOperationExecutor(deps);
