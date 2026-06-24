@@ -381,7 +381,7 @@ export async function instanceClone(
 
   // Pin the clone to the SOURCE lock's versions + image digests so it runs
   // exactly the source's images.
-  const { core, frontend } = releaseShapesFromLock(sourceManifest, sourceLock, 'cloned');
+  const { core, frontend, mobilePreview } = releaseShapesFromLock(sourceManifest, sourceLock, 'cloned');
 
   const artifacts = buildInstanceInstallArtifacts({
     instanceId: targetInstanceId,
@@ -401,6 +401,8 @@ export async function instanceClone(
     },
     core,
     frontend,
+    // A clone runs the source's optional preview too.
+    ...(mobilePreview ? { mobilePreview } : {}),
     services: sourceLock.services,
     installedPlugins: sourceManifest.installedPlugins,
     pluginLock: sourceLock.plugins,

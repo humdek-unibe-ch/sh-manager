@@ -120,6 +120,57 @@ describe('BFF URL invariant', () => {
   });
 });
 
+describe('mobile-preview origin env (admin panel)', () => {
+  it('omits the preview origin entirely when the instance did not opt in', () => {
+    // Additive: instances without the preview get exactly their previous env.
+    expect(buildInstanceEnv(input)).not.toHaveProperty('NEXT_PUBLIC_MOBILE_PREVIEW_ORIGIN');
+  });
+
+  it('defaults to the same-origin /mobile-preview path when the preview is deployed', () => {
+    const env = buildInstanceEnv({ ...input, mobilePreviewEnabled: true });
+    expect(env.NEXT_PUBLIC_MOBILE_PREVIEW_ORIGIN).toBe('/mobile-preview');
+  });
+
+  it('lets an operator point the panel at a live Expo dev server for fast refresh', () => {
+    const env = buildInstanceEnv({
+      ...input,
+      mode: 'local',
+      publicFrontendUrl: 'http://localhost:9123',
+      mobilePreviewEnabled: true,
+      mobilePreviewOrigin: 'http://localhost:8081',
+    });
+    expect(env.NEXT_PUBLIC_MOBILE_PREVIEW_ORIGIN).toBe('http://localhost:8081');
+  });
+
+  it('is operator-overridable (NOT a manager-controlled structural key)', () => {
+    // The live-reload workflow REQUIRES operators to repoint it, so it must not
+    // be re-asserted like the routing/identity keys.
+    expect(MANAGER_CONTROLLED_ENV_KEYS).not.toContain('NEXT_PUBLIC_MOBILE_PREVIEW_ORIGIN');
+  });
+
+  it('stamps SELFHELP_MOBILE_PREVIEW_VERSION when a preview version was provisioned', () => {
+    // Mirrors SELFHELP_FRONTEND_VERSION: the CMS System-Maintenance page reads
+    // this to report the provisioned preview image version instead of "unknown".
+    const env = buildInstanceEnv({
+      ...input,
+      mobilePreviewEnabled: true,
+      mobilePreviewVersion: '0.1.11',
+    });
+    expect(env.SELFHELP_MOBILE_PREVIEW_VERSION).toBe('0.1.11');
+  });
+
+  it('omits the version stamp when no preview version is known (panel self-reports)', () => {
+    const env = buildInstanceEnv({ ...input, mobilePreviewEnabled: true });
+    expect(env).not.toHaveProperty('SELFHELP_MOBILE_PREVIEW_VERSION');
+  });
+
+  it('treats the version stamp as a manager-controlled key (operators cannot fake it)', () => {
+    // Unlike the origin, the version is a trustworthy provisioning fact, so it is
+    // re-asserted like SELFHELP_FRONTEND_VERSION.
+    expect(MANAGER_CONTROLLED_ENV_KEYS).toContain('SELFHELP_MOBILE_PREVIEW_VERSION');
+  });
+});
+
 describe('plugin trust env (verification chain, security)', () => {
   const trusted = 'shm-release-1=BASE64PUBKEYAAAA;shm-release-2=BASE64PUBKEYBBBB';
   const registry = 'https://humdek-unibe-ch.github.io/sh2-plugin-registry/';

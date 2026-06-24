@@ -8,13 +8,89 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `1.6.3`). Registry releases
+- **The manager tool** uses its own semver (currently `1.6.6`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
   **`0.x`** line (core, frontend, scheduler, worker — all `0.1.0`).
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
+
+## [1.6.6] - 2026-06-23
+
+### Added
+- **CMS-driven mobile-preview install/update (operation loop).** The CMS can now
+  request a mobile-preview install/update for its own instance (System
+  Maintenance → "Update / enable mobile preview"), and the manager executes it
+  through the **same** CMS operation loop it already runs for `core` and
+  `frontend`. `buildOperationExecutor` gains a `mobile-preview` branch
+  (`executeMobilePreviewOperation`) that reuses `instanceMobilePreviewUpdate`:
+  - it honors the operation's `targetMobilePreviewVersion` (falling back to the
+    generic `targetVersion`/`latest` so the manager resolves the newest
+    core-compatible preview);
+  - it maps the lightweight preview report onto the shared `UpdateExecutionReport`
+    (target = the preview version) and streams the coarse lifecycle phases
+    (`preflight_running` → `update_running` → `health_check_running`) back to the
+    CMS over the existing status channel;
+  - a non-executed plan (blocked resolver **or** a blocking plugin ⇄ preview
+    gate) is surfaced as a **failed** report carrying the reasons, so the
+    CMS-driven path is as actionable as the CLI.
+- `operations-client` maps the backend's `target_mobile_preview_version` DTO field
+  onto `PendingOperation.targetMobilePreviewVersion`.
+- **The provisioned preview version is now stamped into the instance env.**
+  `buildInstanceEnv` emits `SELFHELP_MOBILE_PREVIEW_VERSION` — a manager-owned key
+  (re-asserted like `SELFHELP_FRONTEND_VERSION`) — whenever a preview image is
+  provisioned, so the CMS System-Maintenance page reports the real preview version
+  instead of `unknown`. Install / update / recreate / address-change all carry it
+  (sourced from the manifest's `versions.mobilePreview`); the panel origin
+  (`NEXT_PUBLIC_MOBILE_PREVIEW_ORIGIN`) stays operator-overridable for live-reload.
+
+### Notes
+- This complements the `instance update-mobile-preview` CLI + web-UI path added in
+  1.6.5; the install/recreate/rollback mechanics are unchanged — only the
+  CMS-requested operation dispatch is new. Requires backend core `>=0.1.20`
+  (emits the `mobile-preview` operation kind + `target_mobile_preview_version`).
+
+## [1.6.5] - 2026-06-23
+
+### Added
+- **Mobile preview service orchestration (`selfhelp-mobile-preview`).** The
+  manager now installs, routes, and updates the per-instance mobile preview web
+  image as an independently versioned component alongside core/frontend:
+  - A `mobile-preview` service is added to the generated Docker Compose with a
+    Traefik `Host && PathPrefix(/mobile-preview)` route; the backend stays
+    private (the preview reaches `/cms-api` only through its own in-container
+    same-origin proxy with a narrow allowlist).
+  - `NEXT_PUBLIC_MOBILE_PREVIEW_ORIGIN` is wired into the frontend service env
+    only when the preview is enabled for the instance.
+  - Resolver: `pickMobilePreviewForCore` + `resolveMobilePreviewUpdate` select
+    the newest core-compatible preview, and `evaluateMobilePluginCompatibility`
+    runs the **dual-axis plugin mobile gate** (renders **native** when bundled +
+    contract-compatible, **warns** when compatible-but-not-bundled or on a
+    bundled-version drift, **blocks** when the image's `mobileRendererVersion`
+    does not satisfy a plugin's declared `compatibility.mobile`).
+  - New `instance update-mobile-preview` CLI command (dry-run + execute) and the
+    matching BFF routes + web UI dialog. The update recreates ONLY the preview
+    container (`docker compose up -d --no-deps mobile-preview`); the core stack
+    keeps running. A blocked plugin gate prevents execution; warnings are shown
+    but allow proceeding.
+  - The CMS-requested operation kind `instance_mobile_preview_update` is polled
+    and surfaced like the frontend update (no backup/migration phases).
+  - **Provisioned by default with every install.** `instance install` now
+    resolves the newest core-compatible `selfhelp-mobile-preview` and bakes the
+    service into the generated compose/manifest/lock automatically — no separate
+    enable step. The preview is auxiliary, so a registry that has not published a
+    compatible one yet does NOT fail the install: the stack lands without the
+    extra service and a clear notice points to `instance update-mobile-preview`.
+  - **`instance update-mobile-preview` doubles as the enable/bootstrap path.**
+    An instance that has no preview (installed before any compatible release
+    existed, or one that was removed) is treated as preview `0.0.0`, so the
+    command resolves the newest compatible release and CREATES the container
+    (`docker compose up -d --no-deps mobile-preview`). With nothing compatible
+    published it returns a clear, non-throwing `blocked` plan ("installs
+    automatically once one is available") instead of a misleading "up to date".
+    Bootstrap rollback removes the just-created container instead of trying to
+    recreate a service the restored compose never declared.
 
 ## [1.6.4] - 2026-06-18
 

@@ -8,6 +8,7 @@ import { readdir } from 'node:fs/promises';
 import semver from 'semver';
 import { formatTrustedKeysEnv } from '@shm/schemas';
 import type { CoreRelease, FrontendRelease, InstanceMode, ReleaseChannel } from '@shm/schemas';
+import { pickMobilePreviewForCore } from '@shm/resolver';
 import { DEFAULT_PROXY_NETWORK, composeProjectName } from '@shm/docker';
 import {
   buildInstanceInstallArtifacts,
@@ -28,6 +29,7 @@ import {
   ensureProxyRunning,
   errMessage,
   fetchAllFrontends,
+  fetchAllMobilePreviews,
   isDbCredentialError,
   looksLikeInstanceState,
   persistOrReuseAdminPassword,
@@ -167,6 +169,22 @@ export async function instanceInstall(
   const frontend = pickCompatibleFrontend(core, frontends);
   if (!frontend) throw new Error(`No compatible frontend release for core ${core.version}.`);
 
+  // The in-browser mobile preview ships with every instance: resolve the newest
+  // selfhelp-mobile-preview release the chosen core satisfies and provision it
+  // alongside the core stack. The preview is auxiliary, so a registry that has
+  // not published a compatible one yet must NOT fail the install — it lands
+  // without the extra service and can be added later with
+  // `instance update-mobile-preview`.
+  const mobilePreviews = await fetchAllMobilePreviews(client, index.mobilePreview, channel);
+  const mobilePreview = pickMobilePreviewForCore(core, mobilePreviews);
+  if (!mobilePreview) {
+    await opts.log?.(
+      `No selfhelp-mobile-preview release compatible with SelfHelp core ${core.version} is published on the ` +
+        `${channel} channel yet; installing without the in-browser mobile preview (add it later with ` +
+        `"sh-manager instance update-mobile-preview ${opts.instanceId}").`,
+    );
+  }
+
   const serviceImages = {
     mysql: core.runtime?.mysql.recommendedImage ?? DEFAULT_SERVICE_IMAGES.mysql,
     redis: core.runtime?.redis.recommendedImage ?? DEFAULT_SERVICE_IMAGES.redis,
@@ -188,6 +206,9 @@ export async function instanceInstall(
     registry: { id: index.publisher.name, url: opts.registryUrl, metadataSha256: client.lastSuccessfulCheck?.metadataSha256 ?? '' },
     core,
     frontend,
+    // Provisioned by default with every instance (omitted only when no
+    // compatible preview is published yet — see the resolve above).
+    ...(mobilePreview ? { mobilePreview } : {}),
     services,
     pluginTrustedKeys: formatTrustedKeysEnv(deps.trustedKeys),
   });

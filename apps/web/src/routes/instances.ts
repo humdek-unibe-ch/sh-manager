@@ -22,6 +22,7 @@ import type {
   CloneInstanceRequest,
   CreateInstanceRequest,
   FrontendUpdateInstanceRequest,
+  MobilePreviewUpdateInstanceRequest,
   LogService,
   RemoveInstanceRequest,
   SafeModeRequest,
@@ -256,6 +257,18 @@ export async function routeInstanceManagement(
   if (rest === '/frontend-update' && ctx.method === 'POST') {
     const body = (ctx.body ?? {}) as FrontendUpdateInstanceRequest;
     await start('instance_frontend_update', instanceId, (opCtx) => im.instances.frontendUpdate(instanceId, body, opCtx));
+    return true;
+  }
+  if (rest === '/mobile-preview-update/dry-run' && ctx.method === 'POST') {
+    const body = (ctx.body ?? {}) as MobilePreviewUpdateInstanceRequest;
+    sendJson(res, 200, { plan: await im.instances.mobilePreviewUpdateDryRun(instanceId, body) });
+    return true;
+  }
+  if (rest === '/mobile-preview-update' && ctx.method === 'POST') {
+    const body = (ctx.body ?? {}) as MobilePreviewUpdateInstanceRequest;
+    await start('instance_mobile_preview_update', instanceId, (opCtx) =>
+      im.instances.mobilePreviewUpdate(instanceId, body, opCtx),
+    );
     return true;
   }
   if (rest === '/backups' && ctx.method === 'POST') {

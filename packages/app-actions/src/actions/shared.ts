@@ -21,6 +21,7 @@ import type {
   InstanceManifest,
   InstanceMode,
   LockServiceEntry,
+  MobilePreviewRelease,
   RegistryReleaseRef,
   TrustedKeysFile,
 } from '@shm/schemas';
@@ -343,6 +344,103 @@ export async function fetchAllFrontends(client: RegistryClient, refs: RegistryRe
 }
 
 /**
+ * Fetch + verify every published `selfhelp-mobile-preview` release on a channel.
+ * The `mobilePreview` index array is ADDITIVE (registry schemaVersion 1.1), so a
+ * registry that predates it simply yields none — the preview stays disabled.
+ */
+export async function fetchAllMobilePreviews(
+  client: RegistryClient,
+  refs: RegistryReleaseRef[] | undefined,
+  channel: string,
+): Promise<MobilePreviewRelease[]> {
+  const wanted = (refs ?? []).filter((r) => r.channel === channel && !r.blocked);
+  const out: MobilePreviewRelease[] = [];
+  for (const r of wanted) out.push((await client.getMobilePreviewRelease(r)).release);
+  return out;
+}
+
+/**
+ * Resolve each installed plugin's declared `compatibility.mobile` range from the
+ * registry, shaped for {@link evaluateMobilePluginCompatibility}. Matches the
+ * exact installed version when published, else the newest id match (the operator
+ * may run a version no longer indexed). A plugin with no registry match — or one
+ * whose release omits `compatibility.mobile` — is treated as web-only (the gate
+ * then reports open-on-web, never a false block). Best-effort + offline-tolerant:
+ * a fetch failure for one ref is swallowed so the gate degrades to web-only for
+ * that plugin instead of failing the whole preview operation.
+ */
+export async function fetchInstalledPluginMobileInputs(
+  client: RegistryClient,
+  refs: RegistryReleaseRef[] | undefined,
+  installed: { id: string; version: string }[],
+  channel: string,
+): Promise<
+  {
+    id: string;
+    version: string;
+    mobileCompatibility?: string;
+    reactNativeCompatibility?: string;
+    expoSdkCompatibility?: string;
+  }[]
+> {
+  const wanted = (refs ?? []).filter((r) => r.channel === channel && !r.blocked);
+  const byId = new Map<string, RegistryReleaseRef[]>();
+  for (const r of wanted) {
+    const list = byId.get(r.id) ?? [];
+    list.push(r);
+    byId.set(r.id, list);
+  }
+  const out: {
+    id: string;
+    version: string;
+    mobileCompatibility?: string;
+    reactNativeCompatibility?: string;
+    expoSdkCompatibility?: string;
+  }[] = [];
+  for (const plugin of installed) {
+    const candidates = byId.get(plugin.id) ?? [];
+    const exact = candidates.find((r) => r.version === plugin.version);
+    const ref =
+      exact ??
+      [...candidates].sort((a, b) =>
+        (semverCoerce(b.version) ?? '0.0.0').localeCompare(semverCoerce(a.version) ?? '0.0.0', undefined, {
+          numeric: true,
+        }),
+      )[0];
+    let mobileCompatibility: string | undefined;
+    let reactNativeCompatibility: string | undefined;
+    let expoSdkCompatibility: string | undefined;
+    if (ref) {
+      try {
+        const compatibility = (await client.getPluginRelease(ref)).release.compatibility;
+        mobileCompatibility = compatibility.mobile;
+        reactNativeCompatibility = compatibility.reactNative;
+        expoSdkCompatibility = compatibility.expoSdk;
+      } catch {
+        // Offline / unverifiable: degrade to web-only for this plugin.
+        mobileCompatibility = undefined;
+        reactNativeCompatibility = undefined;
+        expoSdkCompatibility = undefined;
+      }
+    }
+    out.push({
+      id: plugin.id,
+      version: plugin.version,
+      ...(mobileCompatibility ? { mobileCompatibility } : {}),
+      ...(reactNativeCompatibility ? { reactNativeCompatibility } : {}),
+      ...(expoSdkCompatibility ? { expoSdkCompatibility } : {}),
+    });
+  }
+  return out;
+}
+
+/** Loose major.minor.patch extraction for the best-match sort above. */
+function semverCoerce(v: string): string | null {
+  const m = /(\d+)\.(\d+)\.(\d+)/.exec(v);
+  return m ? `${m[1]}.${m[2]}.${m[3]}` : null;
+}
+
+/**
  * Synthesises the minimal core/frontend release shapes the artifact builder
  * needs from an instance's manifest + lock — for offline operations (clone,
  * address change) that must pin the EXACT versions/digests already installed
@@ -352,7 +450,7 @@ export function releaseShapesFromLock(
   manifest: InstanceManifest,
   lock: InstanceLock,
   keyId: string,
-): { core: CoreRelease; frontend: FrontendRelease } {
+): { core: CoreRelease; frontend: FrontendRelease; mobilePreview: MobilePreviewRelease | null } {
   const channel = manifest.registry.channel;
   const core: CoreRelease = {
     kind: 'selfhelp-core-release',
@@ -391,7 +489,28 @@ export function releaseShapesFromLock(
     backendCompatibility: { requiredCoreRange: '*', requiredApiVersion: lock.core.pluginApiVersion },
     security: { signature: lock.core.signedPayloadSha256, keyId },
   };
-  return { core, frontend };
+  // Preserve the OPTIONAL mobile-preview pin so an offline rebuild (clone /
+  // address-change / env-change / frontend-update) never silently drops the
+  // routed preview service from the regenerated compose. Only the image/version/
+  // digest are persisted in the manifest+lock; `mobileRendererVersion` +
+  // `bundledPlugins` are not (they are install-time provenance) and are unused
+  // by the artifact builder, so inert placeholders keep the shape type-valid.
+  const mobilePreview: MobilePreviewRelease | null =
+    manifest.images.mobilePreview && manifest.versions.mobilePreview
+      ? {
+          kind: 'selfhelp-mobile-preview-release',
+          id: `selfhelp-mobile-preview-${manifest.versions.mobilePreview}`,
+          version: manifest.versions.mobilePreview,
+          channel,
+          image: manifest.images.mobilePreview,
+          digest: lock.core.mobilePreviewImageDigest ?? '',
+          backendCompatibility: { requiredCoreRange: '*', requiredApiVersion: lock.core.pluginApiVersion },
+          mobileRendererVersion: '0.0.0',
+          bundledPlugins: [],
+          security: { signature: lock.core.signedPayloadSha256, keyId },
+        }
+      : null;
+  return { core, frontend, mobilePreview };
 }
 
 /** Filename of the generated admin bootstrap password inside `<instance>/secrets/`. */

@@ -73,7 +73,7 @@ export interface BootstrapActions {
 }
 
 /** Which registry feed a version listing reads from. */
-export type RegistryVersionKind = 'core' | 'frontend';
+export type RegistryVersionKind = 'core' | 'frontend' | 'mobile-preview';
 
 /** Map the typed sub-results onto the generic {@link CheckResult}. */
 export function dockerToCheck(d: DockerCheck): CheckResult {

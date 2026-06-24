@@ -44,10 +44,12 @@ import {
   instanceSetName,
   instanceUpdate,
   instanceFrontendUpdate,
+  instanceMobilePreviewUpdate,
   serverInit,
   serverProxyLogs,
   ComposeExecBackendOperationsClient,
   type InstanceFrontendUpdateOptions,
+  type InstanceMobilePreviewUpdateOptions,
   type InstanceInstallOptions,
   type InstanceUpdateOptions,
   type PluginRecoverResult,
@@ -267,6 +269,18 @@ export function buildInstanceActions(opts: BuildInstanceActionsOptions): Manager
       return res.plan;
     },
 
+    async mobilePreviewUpdateDryRun(instanceId, req) {
+      const res = await instanceMobilePreviewUpdate(deps, instanceId, {
+        dryRun: true,
+        ...(req.target ? { target: req.target } : {}),
+        ...(req.channel ? { channel: req.channel as InstanceMobilePreviewUpdateOptions['channel'] } : {}),
+      });
+      // The plan carries the resolved swap; the gate carries the dual-axis
+      // plugin↔preview verdict (native / not_bundled / incompatible / web_only)
+      // so the UI can warn before the operator applies it.
+      return { ...res.plan, pluginGate: res.pluginGate };
+    },
+
     async create(req, ctx) {
       // First instance on a fresh state root: initialize the server (proxy +
       // inventory) inline so the GUI needs no separate "server init" step. The
@@ -369,6 +383,28 @@ export function buildInstanceActions(opts: BuildInstanceActionsOptions): Manager
         ok: res.report?.ok ?? false,
         rolledBack: res.report?.rolledBack ?? false,
         toVersion: res.plan.targetFrontendVersion,
+      };
+    },
+
+    async mobilePreviewUpdate(instanceId, req, ctx) {
+      await ctx.setPhase('plan');
+      const res = await instanceMobilePreviewUpdate(deps, instanceId, {
+        ...(req.target ? { target: req.target } : {}),
+        ...(req.channel ? { channel: req.channel as InstanceMobilePreviewUpdateOptions['channel'] } : {}),
+        // Stream each execution step live (see `update` above).
+        onStep: (step) => streamUpdateStep(ctx, step),
+      });
+      if (!res.executed) {
+        await ctx.log(
+          `Mobile preview update not executed (${res.plan.status}): ${res.plan.reasons.join('; ') || 'no newer preview available'}`,
+        );
+        return { executed: false, plan: res.plan, pluginGate: res.pluginGate };
+      }
+      return {
+        executed: true,
+        ok: res.report?.ok ?? false,
+        rolledBack: res.report?.rolledBack ?? false,
+        toVersion: res.plan.targetMobilePreviewVersion,
       };
     },
 
@@ -578,7 +614,9 @@ export function buildInstanceActions(opts: BuildInstanceActionsOptions): Manager
       const systemUpdate: PendingCmsWork['systemUpdate'] = pending
         ? pending.kind === 'frontend'
           ? 'frontend'
-          : 'core'
+          : pending.kind === 'mobile-preview'
+            ? 'mobile-preview'
+            : 'core'
         : null;
       // Managed-mode plugin installs/updates/uninstalls/purges parked by the CMS
       // for the operator (the manager) count as pending work for the poller too.

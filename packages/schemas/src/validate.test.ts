@@ -6,6 +6,7 @@ import type {
   BackupManifest,
   InstanceLock,
   InstanceManifest,
+  MobilePreviewRelease,
   RegistryIndex,
   SchedulerRelease,
   TrustedKeysFile,
@@ -15,6 +16,7 @@ import {
   validateBackupManifest,
   validateInstanceLock,
   validateInstanceManifest,
+  validateMobilePreviewRelease,
   validateRegistryIndex,
   validateSchedulerRelease,
   validateWorkerRelease,
@@ -287,6 +289,79 @@ describe('formatTrustedKeysEnv (plugin verification chain, security)', () => {
       keys: keys.keys.map((k) => ({ ...k, status: 'revoked' as const })),
     };
     expect(formatTrustedKeysEnv(allRevoked)).toBe('');
+  });
+});
+
+const validMobilePreview: MobilePreviewRelease = {
+  kind: 'selfhelp-mobile-preview-release',
+  id: 'selfhelp-mobile-preview-0.2.0',
+  version: '0.2.0',
+  channel: 'stable',
+  image: 'ghcr.io/humdek-unibe-ch/selfhelp-mobile-preview:0.2.0',
+  digest: `sha256:${'a'.repeat(64)}`,
+  backendCompatibility: { requiredCoreRange: '>=0.1.19 <0.2.0', requiredApiVersion: '0.1.0' },
+  mobileRendererVersion: '0.1.0',
+  reactNativeVersion: '0.83.0',
+  expoSdkVersion: '55.0.0',
+  bundledPlugins: [
+    { id: 'sh2-shp-survey-js', version: '0.2.23', mobilePackage: '@humdek/sh2-shp-survey-js-mobile', mobilePackageVersion: '0.2.23' },
+  ],
+  security: { signature: 's', keyId: 'selfhelp-dev-fixture' },
+};
+
+describe('validateMobilePreviewRelease', () => {
+  it('accepts a valid mobile-preview release', () => {
+    expect(validateMobilePreviewRelease(validMobilePreview).valid).toBe(true);
+  });
+
+  it('accepts an empty bundled set (a preview with no native plugins)', () => {
+    expect(validateMobilePreviewRelease({ ...validMobilePreview, bundledPlugins: [] }).valid).toBe(true);
+  });
+
+  it('rejects the wrong kind', () => {
+    expect(validateMobilePreviewRelease({ ...validMobilePreview, kind: 'selfhelp-frontend-release' }).valid).toBe(false);
+  });
+
+  it('rejects a release missing the mobile renderer contract', () => {
+    const broken = { ...validMobilePreview } as Record<string, unknown>;
+    delete broken.mobileRendererVersion;
+    expect(validateMobilePreviewRelease(broken).valid).toBe(false);
+  });
+
+  it('rejects a bundled plugin missing its mobile package', () => {
+    const broken = JSON.parse(JSON.stringify(validMobilePreview));
+    delete broken.bundledPlugins[0].mobilePackage;
+    expect(validateMobilePreviewRelease(broken).valid).toBe(false);
+  });
+});
+
+describe('mobile-preview optional manifest/lock/index fields (additive)', () => {
+  it('accepts a manifest that opts into the mobile preview', () => {
+    const r = validateInstanceManifest({
+      ...validManifest,
+      versions: { ...validManifest.versions, mobilePreview: '0.2.0' },
+      images: { ...validManifest.images, mobilePreview: 'ghcr.io/humdek-unibe-ch/selfhelp-mobile-preview:0.2.0' },
+    });
+    expect(r.valid).toBe(true);
+  });
+
+  it('accepts a lock that pins the mobile-preview image digest', () => {
+    const r = validateInstanceLock({
+      ...validLock,
+      core: { ...validLock.core, mobilePreviewImageDigest: `sha256:${'e'.repeat(64)}` },
+    });
+    expect(r.valid).toBe(true);
+  });
+
+  it('accepts a registry index carrying a mobilePreview array (schemaVersion 1.1)', () => {
+    const idx: RegistryIndex = {
+      ...validRegistry,
+      schemaVersion: '1.1',
+      mobilePreview: [
+        { id: 'selfhelp-mobile-preview-0.2.0', version: '0.2.0', channel: 'stable', releaseUrl: 'releases/mobile-preview/selfhelp-mobile-preview-0.2.0.json' },
+      ],
+    };
+    expect(validateRegistryIndex(idx).valid).toBe(true);
   });
 });
 

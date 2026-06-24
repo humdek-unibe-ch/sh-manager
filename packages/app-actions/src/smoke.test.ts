@@ -34,7 +34,7 @@ import { RecordingComposeRunner, type ComposeResult } from '@shm/docker';
 import { canonicalize, sha256Hex, type Fetcher, type FetchResponse } from '@shm/registry';
 import { LockStore, ManifestStore, instancePaths } from '@shm/instances';
 import type { ActionDeps } from './actions.js';
-import { instanceHealth, instanceInstall, instanceUpdate, serverInit } from './actions.js';
+import { instanceHealth, instanceInstall, instanceMobilePreviewUpdate, instanceUpdate, serverInit } from './actions.js';
 
 const examplesDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'packages', 'schemas', 'examples');
 const readExample = (n: string) => readFile(path.join(examplesDir, n), 'utf8');
@@ -69,7 +69,11 @@ class FixtureFetcher implements Fetcher {
  * `core020Extra` merges extra (re-signed) fields into the 0.2.0 core release,
  * e.g. a runtime policy demanding MySQL major-upgrade approval.
  */
-async function buildUpgradeRegistry(core020Extra: Record<string, unknown> = {}): Promise<Record<string, string>> {
+async function buildUpgradeRegistry(
+  core020Extra: Record<string, unknown> = {},
+  opts: { includeMobilePreview?: boolean } = {},
+): Promise<Record<string, string>> {
+  const { includeMobilePreview = true } = opts;
   const core010 = await readExample('core-release.json');
   const frontend010 = await readExample('frontend-release.json');
 
@@ -96,17 +100,43 @@ async function buildUpgradeRegistry(core020Extra: Record<string, unknown> = {}):
   const index = JSON.parse(await readExample('registry-index.json')) as {
     core: unknown[];
     frontend: unknown[];
+    mobilePreview?: unknown[];
   };
   index.core.push({ id: 'selfhelp-core-0.2.0', version: '0.2.0', channel: 'stable', releaseUrl: 'releases/core/selfhelp-core-0.2.0.json' });
   index.frontend.push({ id: 'selfhelp-frontend-0.2.0', version: '0.2.0', channel: 'stable', releaseUrl: 'releases/frontend/selfhelp-frontend-0.2.0.json' });
 
-  return {
-    'registry.json': JSON.stringify(index),
+  const files: Record<string, string> = {
     'selfhelp-core-0.1.0.json': core010,
     'selfhelp-core-0.2.0.json': core020,
     'selfhelp-frontend-0.1.0.json': frontend010,
     'selfhelp-frontend-0.2.0.json': fe020,
   };
+
+  // The in-browser mobile preview is provisioned with EVERY install (compatible
+  // with core 0.1.x). A registry without it (additive schemaVersion 1.1) is the
+  // `includeMobilePreview: false` case: installs must still succeed, just without
+  // the extra service.
+  if (includeMobilePreview) {
+    const previewBody: Record<string, unknown> = {
+      kind: 'selfhelp-mobile-preview-release',
+      id: 'selfhelp-mobile-preview-0.1.0',
+      version: '0.1.0',
+      channel: 'stable',
+      image: 'ghcr.io/humdek-unibe-ch/selfhelp-mobile-preview:0.1.0',
+      digest: `sha256:${'7'.repeat(64)}`,
+      backendCompatibility: { requiredCoreRange: '>=0.1.0 <0.2.0', requiredApiVersion: '0.1.0' },
+      mobileRendererVersion: '0.1.0',
+      reactNativeVersion: '0.83.6',
+      expoSdkVersion: '55.0.0',
+      bundledPlugins: [],
+    };
+    index.mobilePreview = [
+      { id: 'selfhelp-mobile-preview-0.1.0', version: '0.1.0', channel: 'stable', releaseUrl: 'releases/mobile-preview/selfhelp-mobile-preview-0.1.0.json' },
+    ];
+    files['selfhelp-mobile-preview-0.1.0.json'] = JSON.stringify({ ...previewBody, security: sign(previewBody) });
+  }
+
+  return { 'registry.json': JSON.stringify(index), ...files };
 }
 
 const REGISTRY_URL = 'https://humdek-unibe-ch.github.io/sh2-plugin-registry/';
@@ -129,8 +159,9 @@ afterEach(async () => {
  */
 async function smokeDeps(
   core020Extra: Record<string, unknown> = {},
+  registryOpts: { includeMobilePreview?: boolean } = {},
 ): Promise<{ d: ActionDeps; runner: RecordingComposeRunner }> {
-  const fetcher = new FixtureFetcher(await buildUpgradeRegistry(core020Extra));
+  const fetcher = new FixtureFetcher(await buildUpgradeRegistry(core020Extra, registryOpts));
   const digest = `sha256:${'a'.repeat(64)}`;
   const runner = new RecordingComposeRunner((args: string[]): ComposeResult =>
     args.join(' ').includes('mysqldump') ? { stdout: '-- dump\n', stderr: '' } : { stdout: '', stderr: '' },
@@ -218,6 +249,108 @@ describe('release smoke (offline, signed fixture registry)', () => {
 
     const health = await instanceHealth(d, 'qa-fresh');
     expect(health.overall).toBe('healthy');
+  });
+
+  it('a fresh install provisions the in-browser mobile preview by default', async () => {
+    // Every install ships the preview when the registry has a compatible one:
+    // it is resolved during install and baked into the compose + manifest + lock,
+    // so the operator never has to enable it by hand.
+    const { d } = await smokeDeps();
+    await serverInit(d, { serverId: 'srv-smoke', mode: 'production', letsencryptEmail: 'ops@example.ch' });
+    await instanceInstall(d, {
+      instanceId: 'qa-mp',
+      displayName: 'QA Mobile Preview',
+      mode: 'local',
+      localPort: 8090,
+      registryUrl: REGISTRY_URL,
+      version: '0.1.0',
+      bringUp: true,
+    });
+
+    const manifest = await new ManifestStore('qa-mp', root).read();
+    expect(manifest.versions.mobilePreview).toBe('0.1.0');
+    expect(manifest.images.mobilePreview).toContain('selfhelp-mobile-preview:0.1.0');
+    // The preview image digest is pinned in the lock so a recreate is reproducible.
+    const lock = await new LockStore('qa-mp', root).read();
+    expect(lock.core.mobilePreviewImageDigest).toBe(`sha256:${'7'.repeat(64)}`);
+
+    const compose = await readCompose('qa-mp');
+    expect(compose.services['mobile-preview']).toBeDefined();
+  });
+
+  it('a fresh install still succeeds when no compatible mobile preview is published', async () => {
+    // The preview is auxiliary: a registry that has not published a compatible
+    // one (additive schemaVersion 1.1 absent) must NOT fail the install — the
+    // stack lands without the extra service and it can be added later.
+    const { d } = await smokeDeps({}, { includeMobilePreview: false });
+    await serverInit(d, { serverId: 'srv-smoke', mode: 'production', letsencryptEmail: 'ops@example.ch' });
+    const res = await instanceInstall(d, {
+      instanceId: 'qa-no-mp',
+      displayName: 'QA No Mobile Preview',
+      mode: 'local',
+      localPort: 8091,
+      registryUrl: REGISTRY_URL,
+      version: '0.1.0',
+      bringUp: true,
+    });
+
+    expect(res.broughtUp).toBe(true);
+    const manifest = await new ManifestStore('qa-no-mp', root).read();
+    expect(manifest.versions.mobilePreview).toBeUndefined();
+    const compose = await readCompose('qa-no-mp');
+    expect(compose.services['mobile-preview']).toBeUndefined();
+  });
+
+  it('update-mobile-preview bootstraps the preview onto an instance that never had it', async () => {
+    // An instance installed before any preview existed: update-mobile-preview is
+    // the ENABLE path. Install against a registry with none, then publish one and
+    // run the command against the SAME state root — it creates ONLY the preview
+    // container and records the version, without recreating the whole stack.
+    const { d: noMp } = await smokeDeps({}, { includeMobilePreview: false });
+    await serverInit(noMp, { serverId: 'srv-smoke', mode: 'production', letsencryptEmail: 'ops@example.ch' });
+    await instanceInstall(noMp, {
+      instanceId: 'qa-boot',
+      displayName: 'QA Bootstrap',
+      mode: 'local',
+      localPort: 8092,
+      registryUrl: REGISTRY_URL,
+      version: '0.1.0',
+      bringUp: true,
+    });
+    expect((await new ManifestStore('qa-boot', root).read()).versions.mobilePreview).toBeUndefined();
+
+    const { d: withMp, runner } = await smokeDeps({}, { includeMobilePreview: true });
+    const res = await instanceMobilePreviewUpdate(withMp, 'qa-boot', {});
+    expect(res.executed).toBe(true);
+    expect(res.report?.ok).toBe(true);
+
+    const manifest = await new ManifestStore('qa-boot', root).read();
+    expect(manifest.versions.mobilePreview).toBe('0.1.0');
+    const compose = await readCompose('qa-boot');
+    expect(compose.services['mobile-preview']).toBeDefined();
+    // Bootstrap creates ONLY the preview container, never the whole stack.
+    expect(runner.calls.some((c) => c.args.join(' ') === 'up -d --no-deps mobile-preview')).toBe(true);
+  });
+
+  it('update-mobile-preview reports a clear blocked plan when no compatible preview is published', async () => {
+    // Bootstrapping with nothing compatible published must not throw or report a
+    // misleading "0.0.0 up to date": the plan is blocked with operator guidance.
+    const { d } = await smokeDeps({}, { includeMobilePreview: false });
+    await serverInit(d, { serverId: 'srv-smoke', mode: 'production', letsencryptEmail: 'ops@example.ch' });
+    await instanceInstall(d, {
+      instanceId: 'qa-boot-none',
+      displayName: 'QA Bootstrap None',
+      mode: 'local',
+      localPort: 8093,
+      registryUrl: REGISTRY_URL,
+      version: '0.1.0',
+      bringUp: true,
+    });
+
+    const res = await instanceMobilePreviewUpdate(d, 'qa-boot-none', { dryRun: true });
+    expect(res.executed).toBe(false);
+    expect(res.plan.status).toBe('blocked');
+    expect(res.plan.reasons.join(' ')).toMatch(/installs automatically once one is available/);
   });
 
   it('update-from-previous (0.1.0 -> 0.2.0) backs up, runs maintenance, migrates, and preserves the MySQL volume', async () => {

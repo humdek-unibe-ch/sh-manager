@@ -3,7 +3,7 @@
 Audience: Server operators
 Status: Active
 Applies to: `sh-manager` (manager tool `1.2.0+`)
-Last verified: 2026-06-12
+Last verified: 2026-06-23
 Source of truth: `apps/cli/src/actions.ts` (`instanceSetAddress`), `packages/docker/src/compose.ts`, `packages/docker/src/env.ts`, `apps/web/src/ui/features/manager/SetAddressDialog.tsx`
 
 Every instance is reachable at exactly one address, decided by its mode:
@@ -98,16 +98,24 @@ Domains already used by another instance on the same server are refused.
 
 ## How the address is wired (reference)
 
-| Mode | Frontend | Realtime (Mercure) |
-| --- | --- | --- |
-| Production | Traefik routes `https://<domain>` → frontend container | Traefik routes `https://<domain>/.well-known/mercure` → Mercure container |
-| Local | `127.0.0.1:<port>` → frontend container | Frontend BFF proxies events to the internal `http://mercure/.well-known/mercure` hub |
+| Mode | Frontend | Realtime (Mercure) | Mobile preview (optional) |
+| --- | --- | --- | --- |
+| Production | Traefik routes `https://<domain>` → frontend container | Traefik routes `https://<domain>/.well-known/mercure` → Mercure container | Traefik routes `https://<domain>/mobile-preview` → mobile-preview container |
+| Local | `127.0.0.1:<port>` → frontend container | Frontend BFF proxies events to the internal `http://mercure/.well-known/mercure` hub | `127.0.0.1:<port>/mobile-preview` → mobile-preview container |
 
 In production, the browser and the mobile app subscribe to the public
 `https://<domain>/.well-known/mercure` URL. In local mode there is no public
 hub URL — events flow through the frontend's own `/api/auth/events` endpoint,
 which talks to the Mercure container over the instance's private Docker
 network.
+
+When the optional **mobile preview** service is enabled, Traefik routes
+`/mobile-preview` on the **same domain/port** to the `selfhelp-mobile-preview`
+container; the CMS page editor embeds that path in an iframe. The container's
+in-process proxy reaches the backend over the **private** Docker network, so no
+extra public backend port is opened. The backend remains unrouted by Traefik in
+both modes (it is reached only by the frontend and the mobile-preview proxy over
+the internal network).
 
 ## Troubleshooting
 

@@ -37,11 +37,14 @@ export function findDockerSocketMounts(doc: ComposeDocument): GuardViolation[] {
 
 /**
  * Only edge-routed services may attach to the shared proxy network: the
- * frontend (the public app) and the Mercure hub (subscriber SSE endpoint under
- * /.well-known/mercure in production). DB/backend/worker/scheduler/redis must
- * never be reachable from the shared network.
+ * frontend (the public app), the Mercure hub (subscriber SSE endpoint under
+ * /.well-known/mercure in production), and the optional mobile-preview service
+ * (Expo web export routed under /mobile-preview). DB/backend/worker/scheduler/
+ * redis must never be reachable from the shared network — the mobile preview
+ * reaches the backend over the PRIVATE instance network, so the backend keeps
+ * no router of its own.
  */
-const PROXY_ALLOWED_SERVICES = new Set(['frontend', 'mercure']);
+const PROXY_ALLOWED_SERVICES = new Set(['frontend', 'mercure', 'mobile-preview']);
 
 export function findProxyNetworkViolations(
   doc: ComposeDocument,

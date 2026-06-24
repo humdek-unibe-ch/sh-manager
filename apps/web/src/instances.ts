@@ -68,12 +68,12 @@ export interface InstanceDetail {
 
 /**
  * What the CMS has parked for the manager on one instance, as a cheap peek.
- * `systemUpdate` is the kind of a requested core/frontend update (so the poller
- * can journal it under its real operation kind); `pluginOps` flags parked
- * managed-mode plugin install/update/uninstall/purge work.
+ * `systemUpdate` is the kind of a requested core/frontend/mobile-preview update
+ * (so the poller can journal it under its real operation kind); `pluginOps`
+ * flags parked managed-mode plugin install/update/uninstall/purge work.
  */
 export interface PendingCmsWork {
-  systemUpdate: 'core' | 'frontend' | null;
+  systemUpdate: 'core' | 'frontend' | 'mobile-preview' | null;
   pluginOps: boolean;
 }
 
@@ -120,6 +120,12 @@ export interface UpdateInstanceRequest {
 
 export interface FrontendUpdateInstanceRequest {
   /** Target frontend version, or 'latest' (default). */
+  target?: string;
+  channel?: string;
+}
+
+export interface MobilePreviewUpdateInstanceRequest {
+  /** Target mobile-preview version, or 'latest' (default). */
   target?: string;
   channel?: string;
 }
@@ -223,11 +229,19 @@ export interface ManagerInstanceActions {
   updateDryRun(instanceId: string, req: UpdateInstanceRequest): Promise<unknown>;
   /** Plan-only frontend-only update preview (never mutates). */
   frontendUpdateDryRun(instanceId: string, req: FrontendUpdateInstanceRequest): Promise<unknown>;
+  /** Plan-only mobile-preview-only update preview (never mutates). */
+  mobilePreviewUpdateDryRun(instanceId: string, req: MobilePreviewUpdateInstanceRequest): Promise<unknown>;
 
   create(req: CreateInstanceRequest, ctx: OperationContext): Promise<unknown>;
   update(instanceId: string, req: UpdateInstanceRequest, ctx: OperationContext): Promise<unknown>;
   /** Update ONLY the frontend (stateless swap; core + data untouched). */
   frontendUpdate(instanceId: string, req: FrontendUpdateInstanceRequest, ctx: OperationContext): Promise<unknown>;
+  /** Update ONLY the optional mobile preview (stateless swap; core + data untouched). */
+  mobilePreviewUpdate(
+    instanceId: string,
+    req: MobilePreviewUpdateInstanceRequest,
+    ctx: OperationContext,
+  ): Promise<unknown>;
   backup(instanceId: string, ctx: OperationContext): Promise<unknown>;
   /** Takes an automatic pre-restore backup, then applies the restore. */
   restore(instanceId: string, req: RestoreInstanceRequest, ctx: OperationContext): Promise<unknown>;

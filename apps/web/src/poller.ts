@@ -100,9 +100,11 @@ export class CmsOperationsPoller {
     const kind =
       work.systemUpdate === 'frontend'
         ? 'instance_frontend_update'
-        : work.systemUpdate === 'core'
-          ? 'instance_update'
-          : 'cms_operations_drain';
+        : work.systemUpdate === 'mobile-preview'
+          ? 'instance_mobile_preview_update'
+          : work.systemUpdate === 'core'
+            ? 'instance_update'
+            : 'cms_operations_drain';
 
     try {
       const { done } = await this.runner.start(

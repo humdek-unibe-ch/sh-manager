@@ -50,6 +50,25 @@ export interface InstanceEnvInput {
    */
   registryUrl?: string;
   /**
+   * Whether the optional `selfhelp-mobile-preview` service is deployed for this
+   * instance. When true the frontend's admin MobilePreviewPanel is told where to
+   * embed the preview via `NEXT_PUBLIC_MOBILE_PREVIEW_ORIGIN` (default the
+   * same-origin `/mobile-preview` path the compose Traefik router serves). It is
+   * deliberately NOT manager-controlled so a developer can point it at a live
+   * Expo dev server (`http://localhost:8081`) for fast-refresh local work.
+   */
+  mobilePreviewEnabled?: boolean;
+  /** Override the preview origin the frontend panel embeds (defaults to `/mobile-preview`). */
+  mobilePreviewOrigin?: string;
+  /**
+   * Version of the provisioned `selfhelp-mobile-preview` image. Stamped into
+   * `SELFHELP_MOBILE_PREVIEW_VERSION` so the CMS System-Maintenance page reports
+   * the running preview version (mirrors {@link InstanceEnvInput.frontendVersion}).
+   * Absent ⇒ the backend reports `unknown` and the page-editor panel self-reports
+   * from the image's `version.json`.
+   */
+  mobilePreviewVersion?: string;
+  /**
    * Operator-set non-secret env overrides (manager UI / CLI). Merged LAST so an
    * operator value wins over the generated default — EXCEPT for the structural
    * {@link MANAGER_CONTROLLED_ENV_KEYS}, which are always re-asserted so an
@@ -73,6 +92,7 @@ export const MANAGER_CONTROLLED_ENV_KEYS: readonly string[] = [
   'SELFHELP_MODE',
   'SELFHELP_CMS_VERSION',
   'SELFHELP_FRONTEND_VERSION',
+  'SELFHELP_MOBILE_PREVIEW_VERSION',
   'NEXT_PUBLIC_API_URL',
   'SYMFONY_INTERNAL_URL',
   'SYMFONY_API_PREFIX',
@@ -225,6 +245,19 @@ export function buildInstanceEnv(input: InstanceEnvInput): Record<string, string
     ...(input.pluginTrustedKeys ? { SELFHELP_PLUGIN_TRUSTED_KEYS: input.pluginTrustedKeys } : {}),
     SELFHELP_PLUGIN_REQUIRE_SIGNATURE: 'true',
     ...(input.registryUrl ? { SELFHELP_PLUGIN_DEFAULT_REGISTRY_URL: input.registryUrl } : {}),
+    // The admin MobilePreviewPanel only renders when the preview is deployed.
+    // Expose its origin so the panel builds the iframe src (default the
+    // same-origin /mobile-preview path; operators may override for live-reload).
+    ...(input.mobilePreviewEnabled
+      ? {
+          NEXT_PUBLIC_MOBILE_PREVIEW_ORIGIN: input.mobilePreviewOrigin ?? '/mobile-preview',
+          // Manager-owned version stamp (like SELFHELP_FRONTEND_VERSION) so the CMS
+          // System-Maintenance page reports the provisioned preview version.
+          ...(input.mobilePreviewVersion
+            ? { SELFHELP_MOBILE_PREVIEW_VERSION: input.mobilePreviewVersion }
+            : {}),
+        }
+      : {}),
   };
 
   // Operator overrides win for everything EXCEPT the manager-owned structural

@@ -3,8 +3,8 @@
 Audience: Server operators
 Status: Active
 Applies to: `sh-manager` (manager tool `0.1.6+`)
-Last verified: 2026-06-15
-Source of truth: `apps/cli/src/bin.ts`, `apps/cli/src/actions.ts`, `packages/core/src/update.ts`, `packages/resolver/src/core.ts`
+Last verified: 2026-06-23
+Source of truth: `apps/cli/src/bin.ts`, `apps/cli/src/actions.ts`, `packages/core/src/update.ts`, `packages/resolver/src/core.ts`, `packages/app-actions/src/actions/update.ts`
 
 Updates are **backup-first** and **rollback-on-failure**. The manager resolves a
 compatible target version (honouring security advisories and core ⇄ frontend ⇄
@@ -97,6 +97,101 @@ not include the instance's current core, and honours security advisories. In the
 GUI, use **Update frontend…** on the instance detail page (dry-run first, then
 execute). A frontend-only update can also be requested from the CMS (it records a
 `kind: frontend` operation the manager drains — see below).
+
+## Mobile-preview updates
+
+The **mobile preview** (`selfhelp-mobile-preview`) is an independently versioned
+service, **provisioned by default with every install**, that lets a CMS admin
+preview a page as it renders in the Expo mobile app, embedded in the page editor.
+`instance install` resolves the newest core-compatible preview and bakes the
+service into the instance automatically; because the preview is auxiliary, an
+install where the registry has **no** compatible preview yet still succeeds (the
+stack simply lands without it — add it later, see "Enabling the preview" below).
+It is released on its own cadence in the registry (release kind
+`selfhelp-mobile-preview-release`, listed under `registry.json#mobilePreview[]`)
+and updated with the same **lightweight** path as the frontend — it is stateless,
+so the manager:
+
+- pulls **only** the mobile-preview image and recreates **only** that container
+  (`--no-deps`),
+- takes a config snapshot (not a full database backup),
+- runs **no** database migration and needs **no** maintenance window,
+- leaves the core stack, the frontend, and every volume untouched,
+- health-checks (`/healthz`) and **rolls back** on failure.
+
+```bash
+# Preview (pure read): resolves the newest compatible mobile-preview image.
+sh-manager instance update-mobile-preview website1 --dry-run
+
+# Apply (optionally pin a version / pick a channel):
+sh-manager instance update-mobile-preview website1
+sh-manager instance update-mobile-preview website1 --version 0.2.1
+sh-manager instance update-mobile-preview website1 --channel beta
+```
+
+The resolver picks a mobile-preview image whose `release-manifest.json`
+`supports.core` includes the instance's current core (same `pickServiceForCore`
+logic as the scheduler/worker services), refuses a downgrade, and honours
+security advisories. The backend stays **private**: the manager wires the
+preview's in-container proxy to the backend over the internal Docker network and
+adds a Traefik `Host(...) && PathPrefix(/mobile-preview)` route for the browser
+iframe — no extra public backend port is opened.
+
+**Enabling the preview on an existing instance.** New installs provision the
+preview automatically, so most instances already have it. For one that does not —
+installed before any compatible image was published, or one where the service was
+removed — `update-mobile-preview` doubles as the **enable/bootstrap** path: it
+resolves the newest compatible image and **creates** the container (no separate
+"install preview" command). If nothing compatible is published yet, the dry run
+reports a clear `blocked` plan ("installs automatically once one is available")
+instead of a misleading "up to date", so you know it will land on its own once a
+compatible release exists.
+
+### Plugin mobile-compatibility gate
+
+The dry run also runs a **dual-axis plugin gate** for every plugin installed on
+the instance, comparing each plugin's manifest against the candidate image:
+
+- **blocked** — a plugin's `compatibility.mobile` range excludes the image's
+  advertised `mobileRendererVersion` (or its `reactNative` / `expoSdk` runtime
+  axis is incompatible). The update is **refused** until you pick a compatible
+  image or update the plugin.
+- **warning** — the plugin is compatible but **not bundled** in the image, or its
+  declared range drifts from the bundle. The plugin still works via the preview's
+  **open-on-web** fallback (a deep-link to the web frontend); native rendering is
+  unavailable for it.
+- **info** — a web-only plugin that declares no `compatibility.mobile` axis; it is
+  irrelevant to the mobile preview.
+
+In the GUI, use **Update mobile preview…** on the instance detail page; the
+dialog lists each plugin's evaluation and disables **Execute** while any plugin is
+`blocked`. A mobile-preview update can also be requested from the CMS (it records
+a `kind: mobile-preview` operation the manager drains — see below).
+
+### Preview environment variables (version stamp + panel origin)
+
+The preview is wired into the instance `.env` through two keys (generated by
+`@shm/docker` `buildInstanceEnv`):
+
+| Env var | Who sets it | Purpose |
+|---------|-------------|---------|
+| `SELFHELP_MOBILE_PREVIEW_VERSION` | **Manager** — re-asserted on every install/update; operators **cannot** override it | The version of the provisioned `selfhelp-mobile-preview` image. The CMS **System Maintenance → Mobile preview** row reads it (an unstamped value renders as a **"Not installed"** badge). Mirrors `SELFHELP_FRONTEND_VERSION`. |
+| `NEXT_PUBLIC_MOBILE_PREVIEW_ORIGIN` | Manager (default `/mobile-preview`), **operator-overridable** | Where the page-editor **Mobile preview** panel embeds the iframe. Set to the same-origin `/mobile-preview` Traefik route when the preview is provisioned. Deliberately **not** manager-locked so a developer can repoint it at a live Expo dev server for fast refresh. |
+
+You never set `SELFHELP_MOBILE_PREVIEW_VERSION` by hand on a managed instance —
+it is stamped automatically by install / update / recreate / address-change
+(sourced from the instance manifest's `versions.mobilePreview`).
+
+**Dev / source checkout (no manager).** A bare `composer` / `npm run dev` checkout
+has no manager to stamp these:
+
+- the System-Maintenance **Mobile preview** row reads `SELFHELP_MOBILE_PREVIEW_VERSION`
+  from your backend `.env` if you set it (otherwise it shows **"Not installed"**);
+- the page-editor panel **auto-resolves with zero config** — it embeds an installed
+  image at `/mobile-preview` when one answers `version.json`, else (in dev) falls
+  back to the Expo dev server at `http://localhost:8081` for **live-reload**. Set
+  `NEXT_PUBLIC_MOBILE_PREVIEW_ORIGIN` in the frontend `.env` to force a specific
+  origin. Full precedence: frontend `docs/developer/mobile-preview-panel.md`.
 
 ## CMS-requested updates (instance-scoped)
 

@@ -217,8 +217,10 @@ export function createManagerServer(options: ManagerServerOptions): ManagerServe
       const registryUrl = raw && /^https?:\/\//.test(raw) ? raw : defaultRegistryUrl;
       const channel = ctx.url.searchParams.get('channel') ?? 'stable';
       // `kind` selects the registry feed: the core release line (default) or the
-      // independently-released frontend line (frontend-only update dialog).
-      const kind = ctx.url.searchParams.get('kind') === 'frontend' ? 'frontend' : 'core';
+      // independently-released frontend line (frontend-only update dialog) or
+      // the optional mobile-preview line (mobile-preview-only update dialog).
+      const rawKind = ctx.url.searchParams.get('kind');
+      const kind = rawKind === 'frontend' ? 'frontend' : rawKind === 'mobile-preview' ? 'mobile-preview' : 'core';
       return sendJson(res, 200, await options.actions.listVersions(registryUrl, channel, kind));
     }
 

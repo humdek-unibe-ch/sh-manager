@@ -136,4 +136,11 @@ describe('CMS-drained update phase ids drive real checklist rows', () => {
     );
     for (const id of ['plan', 'pull', 'health']) expect(ids).toContain(id);
   });
+
+  it('instance_mobile_preview_update has rows for every preview-update phase id', () => {
+    const ids = buildOperationSteps({ kind: 'instance_mobile_preview_update', phase: 'plan', status: 'running' }).map(
+      (s) => s.id,
+    );
+    for (const id of ['plan', 'pull', 'health']) expect(ids).toContain(id);
+  });
 });

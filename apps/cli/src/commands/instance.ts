@@ -37,6 +37,7 @@ import {
   LOG_SERVICES,
   instanceUpdate,
   instanceFrontendUpdate,
+  instanceMobilePreviewUpdate,
   drainInstanceOperations,
   drainInstancePluginOperations,
   ComposeExecBackendOperationsClient,
@@ -201,6 +202,48 @@ export function registerInstance(program: Command, ctx: CliContext): void {
           for (const step of res.plan.steps) console.log(`  - ${step}`);
         } else {
           console.log(`Frontend update status: ${res.plan.status} - ${res.plan.reasons.join('; ') || 'no newer frontend available'}`);
+        }
+        if (res.executed && res.report) {
+          console.log(`\nExecution: ${res.report.ok ? 'OK' : res.report.rolledBack ? 'ROLLED BACK' : 'FAILED'}`);
+          for (const s of res.report.steps) console.log(`  ${s.status.padEnd(7)} ${s.name}${s.detail ? ` (${s.detail})` : ''}`);
+        }
+      } catch (err) {
+        fail(err);
+      }
+    });
+
+  instance
+    .command('update-mobile-preview <id>')
+    .description(
+      'Plan (dry-run) or execute a mobile-preview-only update (leaves the core stack + all data untouched)',
+    )
+    .option('--dry-run', 'only show the plan', false)
+    .option('--channel <channel>', 'stable|beta|nightly')
+    .option('--version <version>', "target mobile-preview version or 'latest'")
+    .action(async (id: string, opts) => {
+      try {
+        const d = await deps(program.opts().root as string);
+        const res = await instanceMobilePreviewUpdate(d, id, {
+          dryRun: opts.dryRun,
+          channel: opts.channel as ReleaseChannel | undefined,
+          target: opts.version,
+        });
+        if (res.plan.status === 'ok' && res.plan.mobilePreview) {
+          console.log(
+            `Mobile preview update: ${res.plan.currentMobilePreviewVersion} -> ${res.plan.targetMobilePreviewVersion}`,
+          );
+          for (const step of res.plan.steps) console.log(`  - ${step}`);
+        } else {
+          console.log(
+            `Mobile preview update status: ${res.plan.status} - ${res.plan.reasons.join('; ') || 'no newer preview available'}`,
+          );
+        }
+        // Surface the dual-axis plugin↔preview verdict so the operator sees which
+        // plugins render natively vs open-on-web (and what blocks the swap).
+        if (res.pluginGate) {
+          for (const ev of res.pluginGate.evaluations) {
+            console.log(`  plugin ${ev.pluginId}: ${ev.verdict} - ${ev.message}`);
+          }
         }
         if (res.executed && res.report) {
           console.log(`\nExecution: ${res.report.ok ? 'OK' : res.report.rolledBack ? 'ROLLED BACK' : 'FAILED'}`);

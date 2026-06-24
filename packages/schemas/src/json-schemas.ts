@@ -102,6 +102,8 @@ export const instanceManifestSchema: JsonSchema = {
         scheduler: semverField,
         worker: semverField,
         pluginApi: { type: 'string' },
+        // Optional + additive: present only when the mobile preview is enabled.
+        mobilePreview: semverField,
       },
     },
     images: {
@@ -115,6 +117,8 @@ export const instanceManifestSchema: JsonSchema = {
         mysql: { type: 'string' },
         redis: { type: 'string' },
         mercure: { type: 'string' },
+        // Optional + additive: mobile-preview image ref (absent = not enabled).
+        mobilePreview: { type: 'string' },
       },
     },
     routing: {
@@ -204,6 +208,9 @@ export const instanceLockSchema: JsonSchema = {
         // persisted so frontend-only updates can always enforce it (pre-1.6
         // locks omit it and stay valid).
         requiredFrontendRange: { type: 'string' },
+        // Optional + additive: pinned mobile-preview image digest (present only
+        // when the instance runs the mobile preview service).
+        mobilePreviewImageDigest: sha256Field,
       },
     },
     services: {
@@ -272,6 +279,8 @@ export const registryIndexSchema: JsonSchema = {
     frontend: { type: 'array', items: { $ref: '#/$defs/releaseRef' } },
     scheduler: { type: 'array', items: { $ref: '#/$defs/releaseRef' } },
     worker: { type: 'array', items: { $ref: '#/$defs/releaseRef' } },
+    // Optional + additive (registry schemaVersion 1.1): mobile-preview refs.
+    mobilePreview: { type: 'array', items: { $ref: '#/$defs/releaseRef' } },
     // Plugins keep the unified registry's richer per-entry shape (they carry
     // manifestUrl + their own signature block), so they are validated loosely
     // here: only the fields the resolver needs are required.
@@ -415,6 +424,108 @@ const serviceReleaseSchema = (kind: string): JsonSchema => ({
 
 export const schedulerReleaseSchema: JsonSchema = serviceReleaseSchema('selfhelp-scheduler-release');
 export const workerReleaseSchema: JsonSchema = serviceReleaseSchema('selfhelp-worker-release');
+
+/**
+ * Mobile-preview release: the core-coupled service shape PLUS the mobile
+ * renderer contract version and the curated bundled-plugin set. Forward
+ * compatible (unknown optional fields tolerated), like every schema here.
+ */
+export const mobilePreviewReleaseSchema: JsonSchema = {
+  $id: 'selfhelp/selfhelp-mobile-preview-release.schema.json',
+  type: 'object',
+  required: [
+    'kind',
+    'id',
+    'version',
+    'channel',
+    'image',
+    'digest',
+    'backendCompatibility',
+    'mobileRendererVersion',
+    'bundledPlugins',
+    'security',
+  ],
+  properties: {
+    kind: { const: 'selfhelp-mobile-preview-release' },
+    id: { type: 'string' },
+    version: semverField,
+    channel: { enum: ['stable', 'beta', 'nightly', 'test'] },
+    releasedAt: { type: 'string' },
+    image: { type: 'string' },
+    digest: sha256Field,
+    builtFrom: { type: 'object' },
+    backendCompatibility: {
+      type: 'object',
+      required: ['requiredCoreRange'],
+      properties: {
+        requiredCoreRange: { type: 'string' },
+        requiredApiVersion: { type: 'string' },
+      },
+    },
+    mobileRendererVersion: semverField,
+    reactNativeVersion: semverField,
+    expoSdkVersion: semverField,
+    bundledPlugins: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['id', 'version', 'mobilePackage', 'mobilePackageVersion'],
+        properties: {
+          id: { type: 'string' },
+          version: semverField,
+          mobilePackage: { type: 'string' },
+          mobilePackageVersion: semverField,
+        },
+      },
+    },
+    security: signatureBlockSchema,
+    blocked: { type: 'boolean' },
+  },
+};
+
+/**
+ * Plugin release: the registry descriptor for an installable plugin. The
+ * manager reads it to evaluate plugin compatibility against a target core and
+ * (additively) against a mobile-preview's renderer contract via
+ * `compatibility.mobile`. Forward compatible like every schema here.
+ */
+export const pluginReleaseSchema: JsonSchema = {
+  $id: 'selfhelp/plugin-release.schema.json',
+  type: 'object',
+  required: ['kind', 'id', 'version', 'channel', 'official', 'compatibility', 'artifacts', 'security'],
+  properties: {
+    kind: { const: 'selfhelp-plugin-release' },
+    id: { type: 'string' },
+    version: semverField,
+    channel: { enum: ['stable', 'beta', 'nightly', 'test'] },
+    official: { type: 'boolean' },
+    compatibility: {
+      type: 'object',
+      required: ['core', 'pluginApi'],
+      properties: {
+        core: { type: 'string' },
+        pluginApi: { type: 'string' },
+        // Additive mobile-renderer-contract range (the dual-axis gate). Absent
+        // = web-only plugin (open-on-web in the preview).
+        mobile: { type: 'string' },
+        reactNative: { type: 'string' },
+        expoSdk: { type: 'string' },
+      },
+    },
+    dependencies: { type: 'object' },
+    artifacts: {
+      type: 'object',
+      required: ['manifestUrl', 'archiveUrl', 'sha256'],
+      properties: {
+        manifestUrl: { type: 'string' },
+        archiveUrl: { type: 'string' },
+        sha256: sha256Field,
+      },
+    },
+    security: signatureBlockSchema,
+    blocked: { type: 'boolean' },
+  },
+};
 
 export const advisoryFeedSchema: JsonSchema = {
   $id: 'selfhelp/advisory-feed.schema.json',
@@ -567,6 +678,8 @@ export const ALL_SCHEMAS: Record<string, JsonSchema> = {
   frontendRelease: frontendReleaseSchema,
   schedulerRelease: schedulerReleaseSchema,
   workerRelease: workerReleaseSchema,
+  mobilePreviewRelease: mobilePreviewReleaseSchema,
+  pluginRelease: pluginReleaseSchema,
   advisoryFeed: advisoryFeedSchema,
   updatePreflight: updatePreflightSchema,
   backupManifest: backupManifestSchema,

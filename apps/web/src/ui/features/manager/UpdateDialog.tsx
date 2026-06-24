@@ -30,8 +30,9 @@ import { Alert } from '../../components';
 import type { ApiClient } from '../../lib/api-client';
 import { InstanceUpdateBody } from './InstanceUpdateDialog';
 import { InstanceFrontendUpdateBody } from './InstanceFrontendUpdateDialog';
+import { InstanceMobilePreviewUpdateBody } from './InstanceMobilePreviewUpdateDialog';
 
-export type UpdateMode = 'core' | 'frontend';
+export type UpdateMode = 'core' | 'frontend' | 'mobile-preview';
 
 export interface UpdateDialogProps {
   client: ApiClient;
@@ -41,6 +42,31 @@ export interface UpdateDialogProps {
   onStarted: (operationId: string) => void;
   /** Which mode to open on (default: core). */
   initialMode?: UpdateMode;
+  /**
+   * Whether the instance has the OPTIONAL mobile preview installed. Only then is
+   * the "Mobile preview only" mode offered (and accepted as an initial mode).
+   */
+  mobilePreviewAvailable?: boolean;
+}
+
+function modeAlert(mode: UpdateMode): { title: string; body: string } {
+  switch (mode) {
+    case 'core':
+      return {
+        title: 'Core and frontend move together',
+        body: 'Updating the core also moves the frontend to a release the new core supports — they are upgraded in the same operation, so the instance is never left on an incompatible pair. The dry-run shows the exact core and frontend versions before anything changes.',
+      };
+    case 'frontend':
+      return {
+        title: 'Frontend-only swap',
+        body: 'Keeps the current core and swaps only the frontend container to a newer compatible release. No database migration, no maintenance window, all data untouched. Use this when the core is already current but a newer frontend is available.',
+      };
+    default:
+      return {
+        title: 'Mobile-preview-only swap',
+        body: 'Keeps the current core + frontend and swaps only the stateless mobile-preview container to a newer compatible release. The dry-run also checks installed-plugin compatibility (native / open-on-web / blocked) before anything changes.',
+      };
+  }
 }
 
 export function UpdateDialog({
@@ -50,13 +76,19 @@ export function UpdateDialog({
   onClose,
   onStarted,
   initialMode = 'core',
+  mobilePreviewAvailable = false,
 }: UpdateDialogProps): JSX.Element {
-  const [mode, setMode] = useState<UpdateMode>(initialMode);
+  // Never open on a mode the instance can't use (no preview installed).
+  const safeInitialMode: UpdateMode =
+    initialMode === 'mobile-preview' && !mobilePreviewAvailable ? 'core' : initialMode;
+  const [mode, setMode] = useState<UpdateMode>(safeInitialMode);
 
   // Re-arm the requested mode each time the dialog is (re)opened.
   useEffect(() => {
-    if (opened) setMode(initialMode);
-  }, [opened, initialMode]);
+    if (opened) setMode(safeInitialMode);
+  }, [opened, safeInitialMode]);
+
+  const alert = modeAlert(mode);
 
   return (
     <Modal opened={opened} onClose={onClose} title={`Update ${instanceId}`} size="lg" centered>
@@ -64,23 +96,31 @@ export function UpdateDialog({
         <SegmentedControl
           fullWidth
           value={mode}
-          onChange={(v) => setMode(v)}
+          onChange={(v) => setMode(v as UpdateMode)}
           data={[
             { label: 'SelfHelp core (+ matching frontend)', value: 'core' },
             { label: 'Frontend only (keep core)', value: 'frontend' },
+            // The optional preview ships separately, so the mode only appears
+            // when the instance actually has it installed.
+            ...(mobilePreviewAvailable ? [{ label: 'Mobile preview only', value: 'mobile-preview' }] : []),
           ]}
         />
 
-        <Alert tone="info" title={mode === 'core' ? 'Core and frontend move together' : 'Frontend-only swap'}>
-          {mode === 'core'
-            ? 'Updating the core also moves the frontend to a release the new core supports — they are upgraded in the same operation, so the instance is never left on an incompatible pair. The dry-run shows the exact core and frontend versions before anything changes.'
-            : 'Keeps the current core and swaps only the frontend container to a newer compatible release. No database migration, no maintenance window, all data untouched. Use this when the core is already current but a newer frontend is available.'}
+        <Alert tone="info" title={alert.title}>
+          {alert.body}
         </Alert>
 
         {mode === 'core' ? (
           <InstanceUpdateBody client={client} instanceId={instanceId} onClose={onClose} onStarted={onStarted} />
-        ) : (
+        ) : mode === 'frontend' ? (
           <InstanceFrontendUpdateBody client={client} instanceId={instanceId} onClose={onClose} onStarted={onStarted} />
+        ) : (
+          <InstanceMobilePreviewUpdateBody
+            client={client}
+            instanceId={instanceId}
+            onClose={onClose}
+            onStarted={onStarted}
+          />
         )}
       </Stack>
     </Modal>

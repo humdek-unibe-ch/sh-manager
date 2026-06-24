@@ -123,7 +123,12 @@ export async function startWebUi(opts: WebUiOptions = {}): Promise<{ host: strin
       const client = new RegistryClient({ baseUrl: registryUrl, trustedKeys, managerVersion });
       try {
         const index = await client.getIndex();
-        const feed = kind === 'frontend' ? index.frontend : index.core;
+        const feed =
+          kind === 'frontend'
+            ? index.frontend
+            : kind === 'mobile-preview'
+              ? (index.mobilePreview ?? [])
+              : index.core;
         const versions = [...new Set(feed.filter((r) => r.channel === channel && !r.blocked).map((r) => r.version))]
           .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
         return { versions };

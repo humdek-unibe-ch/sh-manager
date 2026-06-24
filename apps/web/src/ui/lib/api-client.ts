@@ -29,6 +29,7 @@ import type {
   LogService,
   MailerStatus,
   ManagerUpdateCheck,
+  MobilePreviewUpdateInstanceRequest,
   OperationRecord,
   PreflightResult,
   ProxyLogsResult,
@@ -91,7 +92,7 @@ export interface ApiClient {
    * registry feed: `core` (install/update target, default) or `frontend` (the
    * independently-released frontend used by the frontend-only update dialog).
    */
-  listVersions(channel?: string, kind?: 'core' | 'frontend'): Promise<RegistryVersions>;
+  listVersions(channel?: string, kind?: 'core' | 'frontend' | 'mobile-preview'): Promise<RegistryVersions>;
   /** Pre-auth sign-in metadata (works without a session). */
   getAuthMeta(): Promise<AuthMeta>;
   login(email: string, password: string): Promise<LoginResult>;
@@ -135,12 +136,22 @@ export interface ApiClient {
   updateDryRun(instanceId: string, req: UpdateInstanceRequest): Promise<{ plan: unknown }>;
   /** Plan-only frontend-only update preview (never mutates). */
   frontendUpdateDryRun(instanceId: string, req: FrontendUpdateInstanceRequest): Promise<{ plan: unknown }>;
+  /** Plan-only mobile-preview-only update preview (never mutates). */
+  mobilePreviewUpdateDryRun(
+    instanceId: string,
+    req: MobilePreviewUpdateInstanceRequest,
+  ): Promise<{ plan: unknown }>;
   listOperations(instanceId?: string): Promise<OperationRecord[]>;
   getOperation(operationId: string): Promise<OperationRecord>;
   createInstance(req: CreateInstanceRequest): Promise<StartedOperation>;
   executeUpdate(instanceId: string, req: UpdateInstanceRequest): Promise<StartedOperation>;
   /** Update ONLY the frontend (stateless swap; core + data untouched). */
   executeFrontendUpdate(instanceId: string, req: FrontendUpdateInstanceRequest): Promise<StartedOperation>;
+  /** Update ONLY the optional mobile preview (stateless swap; core + data untouched). */
+  executeMobilePreviewUpdate(
+    instanceId: string,
+    req: MobilePreviewUpdateInstanceRequest,
+  ): Promise<StartedOperation>;
   createBackup(instanceId: string): Promise<StartedOperation>;
   restoreBackup(instanceId: string, backupId: string): Promise<StartedOperation>;
   cloneInstance(instanceId: string, req: CloneInstanceRequest): Promise<StartedOperation>;
@@ -292,6 +303,12 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       request<{ plan: unknown }>(`/api/instances/${encodeURIComponent(instanceId)}/update/dry-run`, 'POST', req),
     frontendUpdateDryRun: (instanceId, req) =>
       request<{ plan: unknown }>(`/api/instances/${encodeURIComponent(instanceId)}/frontend-update/dry-run`, 'POST', req),
+    mobilePreviewUpdateDryRun: (instanceId, req) =>
+      request<{ plan: unknown }>(
+        `/api/instances/${encodeURIComponent(instanceId)}/mobile-preview-update/dry-run`,
+        'POST',
+        req,
+      ),
     listOperations: async (instanceId) =>
       (
         await request<{ operations: OperationRecord[] }>(
@@ -305,6 +322,8 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       request<StartedOperation>(`/api/instances/${encodeURIComponent(instanceId)}/update`, 'POST', req),
     executeFrontendUpdate: (instanceId, req) =>
       request<StartedOperation>(`/api/instances/${encodeURIComponent(instanceId)}/frontend-update`, 'POST', req),
+    executeMobilePreviewUpdate: (instanceId, req) =>
+      request<StartedOperation>(`/api/instances/${encodeURIComponent(instanceId)}/mobile-preview-update`, 'POST', req),
     createBackup: (instanceId) =>
       request<StartedOperation>(`/api/instances/${encodeURIComponent(instanceId)}/backups`, 'POST'),
     restoreBackup: (instanceId, backupId) =>

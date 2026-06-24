@@ -11,3 +11,4 @@ export * from './update/plan.js';
 export * from './update/mysql.js';
 export * from './update/execute.js';
 export * from './update/frontend.js';
+export * from './update/mobile-preview.js';

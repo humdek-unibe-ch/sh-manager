@@ -70,6 +70,12 @@ export interface InstanceVersions {
   scheduler: string;
   worker: string;
   pluginApi: string;
+  /**
+   * Optional `selfhelp-mobile-preview` image version. Present only when the
+   * instance opted into the in-browser mobile preview service; absent instances
+   * simply do not run the extra container.
+   */
+  mobilePreview?: string;
 }
 
 export interface InstanceImages {
@@ -80,6 +86,8 @@ export interface InstanceImages {
   mysql: string;
   redis: string;
   mercure: string;
+  /** Optional mobile-preview image ref (`ghcr.io/.../selfhelp-mobile-preview:x`). */
+  mobilePreview?: string;
 }
 
 export interface InstanceRouting {
@@ -204,6 +212,12 @@ export interface InstanceLock {
      * with pre-1.6 locks (which never stored it); new locks always set it.
      */
     requiredFrontendRange?: string;
+    /**
+     * Pinned digest of the optional `selfhelp-mobile-preview` image. Present only
+     * when the instance runs the mobile preview service. Additive + optional so
+     * locks for instances without the preview stay valid.
+     */
+    mobilePreviewImageDigest?: string;
   };
   services: {
     mysql: LockServiceEntry;
@@ -239,6 +253,12 @@ export interface RegistryIndex {
   scheduler: RegistryReleaseRef[];
   worker: RegistryReleaseRef[];
   plugins: RegistryReleaseRef[];
+  /**
+   * Optional `selfhelp-mobile-preview` release refs (additive registry
+   * `schemaVersion` `1.1`). Absent on older registries; the resolver treats a
+   * missing array as "no preview releases available".
+   */
+  mobilePreview?: RegistryReleaseRef[];
   advisoriesUrl?: string;
   compatibilityUrl?: string;
   trustedKeysUrl?: string;
@@ -340,9 +360,62 @@ export interface PluginRelease {
   version: string;
   channel: ReleaseChannel;
   official: boolean;
-  compatibility: { core: string; pluginApi: string };
+  /**
+   * `core` + `pluginApi` are always present; `mobile` is the additive,
+   * optional mobile-renderer-contract range a plugin declares when it ships a
+   * native mobile renderer. Absent = the plugin is web-only (it falls back to
+   * the preview's "open on web" deep link rather than rendering natively).
+   */
+  compatibility: { core: string; pluginApi: string; mobile?: string; reactNative?: string; expoSdk?: string };
   dependencies?: { plugins: { id: string; range: string }[] };
   artifacts: { manifestUrl: string; archiveUrl: string; sha256: string };
+  security: SignatureBlock;
+  blocked?: boolean;
+}
+
+/**
+ * One official plugin's mobile package baked into a `selfhelp-mobile-preview`
+ * image. The curated set lets the manager tell an operator which plugins render
+ * natively in the shared preview image (everything else falls back to the
+ * in-preview "open on web" deep link).
+ */
+export interface BundledPluginRef {
+  id: string;
+  version: string;
+  mobilePackage: string;
+  mobilePackageVersion: string;
+}
+
+/**
+ * `selfhelp-mobile-preview` release: the Expo **web export** image served behind
+ * the CMS for in-browser mobile preview. Mirrors the frontend release shape
+ * (`image` + `digest` + `backendCompatibility`) plus the mobile renderer
+ * contract version and the curated bundled-plugin set. This is NOT the EAS app
+ * binary (see the registry's design-only `selfhelp-mobile-release`).
+ */
+export interface MobilePreviewRelease {
+  kind: 'selfhelp-mobile-preview-release';
+  id: string;
+  version: string;
+  channel: ReleaseChannel;
+  releasedAt?: string;
+  image: string;
+  digest: string;
+  builtFrom?: Record<string, unknown>;
+  backendCompatibility: ServiceBackendCompatibility;
+  /**
+   * Mobile renderer contract the image is built against (mirrors
+   * `@selfhelp/shared` `MOBILE_RENDERER_VERSION`). A plugin's
+   * `compatibility.mobile` range is checked against this to decide native vs
+   * open-on-web rendering.
+   */
+  mobileRendererVersion: string;
+  /** React Native version the preview image was built with. */
+  reactNativeVersion?: string;
+  /** Expo SDK version the preview image was built with. */
+  expoSdkVersion?: string;
+  /** Curated official-plugin packages baked into the image. */
+  bundledPlugins: BundledPluginRef[];
   security: SignatureBlock;
   blocked?: boolean;
 }

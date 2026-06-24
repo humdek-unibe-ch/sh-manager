@@ -76,6 +76,7 @@ export function InstanceDetail({ client, instanceId }: InstanceDetailProps): JSX
     pluginRows,
     pluginsPage,
     corePlan,
+    hasMobilePreview,
     anyUpdateAvailable,
     componentRows,
   } = useInstanceDetail(client, instanceId);
@@ -235,6 +236,7 @@ export function InstanceDetail({ client, instanceId }: InstanceDetailProps): JSX
         opened={dialog === 'update'}
         onClose={() => setDialog(null)}
         onStarted={onStarted}
+        mobilePreviewAvailable={hasMobilePreview}
       />
       <CloneInstanceDialog
         client={client}
