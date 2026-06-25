@@ -15,7 +15,7 @@ import { render, screen, waitFor, userEvent } from '../../test/render';
 import { UpdateDialog } from './UpdateDialog';
 import { makeFakeClient } from '../../test/fake-client';
 
-function renderDialog(client = makeFakeClient(), onStarted = vi.fn()) {
+function renderDialog(client = makeFakeClient(), onStarted = vi.fn(), extra: { mobilePreviewAvailable?: boolean } = {}) {
   render(
     <UpdateDialog
       client={client}
@@ -23,6 +23,7 @@ function renderDialog(client = makeFakeClient(), onStarted = vi.fn()) {
       opened
       onClose={() => {}}
       onStarted={onStarted}
+      {...extra}
     />,
   );
   return { client, onStarted };
@@ -75,5 +76,28 @@ describe('UpdateDialog (combined core + frontend)', () => {
 
     await waitFor(() => expect(execSpy).toHaveBeenCalledWith('clinic-a', {}));
     await waitFor(() => expect(onStarted).toHaveBeenCalled());
+  });
+
+  // The mobile preview ships separately, but the manager bootstraps a missing
+  // one (`up -d --no-deps mobile-preview` creates the container), so the mode is
+  // ALWAYS offered — labelled "install" until the instance has it.
+  it('offers a mobile-preview INSTALL tab when the preview is not installed', async () => {
+    const user = userEvent.setup();
+    renderDialog(makeFakeClient(), vi.fn(), { mobilePreviewAvailable: false });
+
+    await user.click(screen.getByText('Mobile preview (install)'));
+
+    expect(screen.getByText('Install the mobile preview')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Install mobile preview/i })).toBeInTheDocument();
+  });
+
+  it('offers a mobile-preview UPDATE tab when the preview is installed', async () => {
+    const user = userEvent.setup();
+    renderDialog(makeFakeClient(), vi.fn(), { mobilePreviewAvailable: true });
+
+    await user.click(screen.getByText('Mobile preview only'));
+
+    expect(screen.getByText('Mobile-preview-only swap')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Update mobile preview/i })).toBeInTheDocument();
   });
 });

@@ -16,7 +16,20 @@ The manager has two version axes (see
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
 
-## [1.6.6] - 2026-06-23
+## [1.6.7] - 2026-06-25
+
+### Changed
+- **The combined Update window always offers the "Mobile preview" mode — as an
+  install when the instance has none.** Previously the segment only appeared once
+  the preview was already provisioned (`mobilePreviewAvailable`), so an operator
+  could never install it from the main update dialog (only from the per-row
+  action). The backend already bootstraps a missing preview (a missing version is
+  treated as `0.0.0` and `up -d --no-deps mobile-preview` CREATES the container),
+  so the dialog now always shows the mode and switches its label + copy + action
+  button between **"Mobile preview (install)"** and **"Mobile preview only"**
+  (update) based on `mobilePreviewAvailable`. This mirrors the CMS System
+  Maintenance page, which already surfaced the install/enable path. Covered by
+  `UpdateDialog.test.tsx` (install-tab + update-tab cases).
 
 ### Added
 - **CMS-driven mobile-preview install/update (operation loop).** The CMS can now

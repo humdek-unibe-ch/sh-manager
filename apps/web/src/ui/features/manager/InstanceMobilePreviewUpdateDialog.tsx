@@ -96,17 +96,26 @@ export interface InstanceMobilePreviewUpdateBodyProps {
   instanceId: string;
   onClose: () => void;
   onStarted: (operationId: string) => void;
+  /**
+   * Whether the preview is already installed. The dry-run/execute endpoints
+   * bootstrap a missing preview either way (the manager treats an absent preview
+   * as `0.0.0` and `up -d --no-deps` CREATES the container), so this only adapts
+   * the intro copy and the action label between "install" and "update".
+   */
+  installed?: boolean;
 }
 
 /**
- * The mobile-preview-only update form without the surrounding Modal. Keeps the
- * current core + frontend and swaps only the stateless preview container.
+ * The mobile-preview-only install/update form without the surrounding Modal.
+ * Keeps the current core + frontend and only touches the stateless preview
+ * container: it installs it when absent, or swaps it to a newer release.
  */
 export function InstanceMobilePreviewUpdateBody({
   client,
   instanceId,
   onClose,
   onStarted,
+  installed = true,
 }: InstanceMobilePreviewUpdateBodyProps): JSX.Element {
   const [target, setTarget] = useState('');
   const [useTestChannel, setUseTestChannel] = useState(false);
@@ -141,9 +150,9 @@ export function InstanceMobilePreviewUpdateBody({
   return (
     <Stack gap="md">
       <Text size="sm" c="dimmed">
-        The mobile preview is released independently of the core. This swaps only the preview container to a
-        newer compatible release — no database migration, no maintenance window, and all data is left untouched.
-        Run the dry-run first to resolve the target and check installed-plugin compatibility.
+        {installed
+          ? 'The mobile preview is released independently of the core. This swaps only the preview container to a newer compatible release — no database migration, no maintenance window, and all data is left untouched. Run the dry-run first to resolve the target and check installed-plugin compatibility.'
+          : 'The optional mobile preview is not installed on this instance yet. This installs only the stateless preview container at the newest release compatible with the current core — no database migration, no maintenance window, the core + frontend stay untouched. Run the dry-run first to resolve the target and check installed-plugin compatibility.'}
       </Text>
 
       <VersionSelect
@@ -243,7 +252,7 @@ export function InstanceMobilePreviewUpdateBody({
           Cancel
         </Button>
         <Button variant="primary" disabled={!canExecute} loading={execute.isPending} onClick={() => execute.mutate()}>
-          Update mobile preview
+          {installed ? 'Update mobile preview' : 'Install mobile preview'}
         </Button>
       </Group>
     </Stack>

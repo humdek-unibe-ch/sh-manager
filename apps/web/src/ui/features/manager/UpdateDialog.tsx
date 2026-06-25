@@ -43,13 +43,15 @@ export interface UpdateDialogProps {
   /** Which mode to open on (default: core). */
   initialMode?: UpdateMode;
   /**
-   * Whether the instance has the OPTIONAL mobile preview installed. Only then is
-   * the "Mobile preview only" mode offered (and accepted as an initial mode).
+   * Whether the instance already has the OPTIONAL mobile preview installed. The
+   * "Mobile preview" mode is ALWAYS offered (the manager bootstraps a missing
+   * preview — `up -d --no-deps mobile-preview` creates the container), so this
+   * flag only switches the copy/labels between "install" and "update".
    */
   mobilePreviewAvailable?: boolean;
 }
 
-function modeAlert(mode: UpdateMode): { title: string; body: string } {
+function modeAlert(mode: UpdateMode, mobilePreviewInstalled: boolean): { title: string; body: string } {
   switch (mode) {
     case 'core':
       return {
@@ -62,10 +64,15 @@ function modeAlert(mode: UpdateMode): { title: string; body: string } {
         body: 'Keeps the current core and swaps only the frontend container to a newer compatible release. No database migration, no maintenance window, all data untouched. Use this when the core is already current but a newer frontend is available.',
       };
     default:
-      return {
-        title: 'Mobile-preview-only swap',
-        body: 'Keeps the current core + frontend and swaps only the stateless mobile-preview container to a newer compatible release. The dry-run also checks installed-plugin compatibility (native / open-on-web / blocked) before anything changes.',
-      };
+      return mobilePreviewInstalled
+        ? {
+            title: 'Mobile-preview-only swap',
+            body: 'Keeps the current core + frontend and swaps only the stateless mobile-preview container to a newer compatible release. The dry-run also checks installed-plugin compatibility (native / open-on-web / blocked) before anything changes.',
+          }
+        : {
+            title: 'Install the mobile preview',
+            body: 'The optional mobile preview is not installed on this instance yet. This installs the stateless mobile-preview container at the newest release compatible with the current core — no database migration, no maintenance window, the core + frontend stay untouched. The dry-run resolves the target and checks installed-plugin compatibility before anything changes.',
+          };
   }
 }
 
@@ -78,17 +85,14 @@ export function UpdateDialog({
   initialMode = 'core',
   mobilePreviewAvailable = false,
 }: UpdateDialogProps): JSX.Element {
-  // Never open on a mode the instance can't use (no preview installed).
-  const safeInitialMode: UpdateMode =
-    initialMode === 'mobile-preview' && !mobilePreviewAvailable ? 'core' : initialMode;
-  const [mode, setMode] = useState<UpdateMode>(safeInitialMode);
+  const [mode, setMode] = useState<UpdateMode>(initialMode);
 
   // Re-arm the requested mode each time the dialog is (re)opened.
   useEffect(() => {
-    if (opened) setMode(safeInitialMode);
-  }, [opened, safeInitialMode]);
+    if (opened) setMode(initialMode);
+  }, [opened, initialMode]);
 
-  const alert = modeAlert(mode);
+  const alert = modeAlert(mode, mobilePreviewAvailable);
 
   return (
     <Modal opened={opened} onClose={onClose} title={`Update ${instanceId}`} size="lg" centered>
@@ -100,9 +104,10 @@ export function UpdateDialog({
           data={[
             { label: 'SelfHelp core (+ matching frontend)', value: 'core' },
             { label: 'Frontend only (keep core)', value: 'frontend' },
-            // The optional preview ships separately, so the mode only appears
-            // when the instance actually has it installed.
-            ...(mobilePreviewAvailable ? [{ label: 'Mobile preview only', value: 'mobile-preview' }] : []),
+            // The optional preview ships separately but the manager bootstraps a
+            // missing one, so the mode is always offered — labelled "install"
+            // until the instance has it.
+            { label: mobilePreviewAvailable ? 'Mobile preview only' : 'Mobile preview (install)', value: 'mobile-preview' },
           ]}
         />
 
@@ -120,6 +125,7 @@ export function UpdateDialog({
             instanceId={instanceId}
             onClose={onClose}
             onStarted={onStarted}
+            installed={mobilePreviewAvailable}
           />
         )}
       </Stack>
