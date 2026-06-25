@@ -626,7 +626,7 @@ describe('planMobilePreviewUpdate', () => {
     expect(plan.kind).toBe('mobile-preview');
     expect(plan.status).toBe('ok');
     expect(plan.targetMobilePreviewVersion).toBe('0.2.3');
-    expect(plan.steps.some((s) => s.includes('--no-deps'))).toBe(true);
+    expect(plan.steps.some((s) => s.includes('SELFHELP_MOBILE_PREVIEW_VERSION'))).toBe(true);
   });
 
   it('reports up_to_date when the installed preview is already newest', () => {
@@ -656,26 +656,42 @@ describe('executeMobilePreviewUpdate', () => {
   const healthy: HealthReport = { instanceId: 'website1', overall: 'healthy', services: [], checkedAt: 'now' };
   const unhealthy: HealthReport = { instanceId: 'website1', overall: 'unhealthy', services: [], checkedAt: 'now' };
 
-  it('recreates ONLY the preview container, never the core stack', async () => {
+  it('pulls only the preview image, then refreshes services so backend reads the new stamp', async () => {
     const runner = new RecordingComposeRunner();
     const order: string[] = [];
     const report = await executeMobilePreviewUpdate(okPlan(), {
       runner, instanceDir: '/tmp/website1',
       snapshot: async () => { order.push('snapshot'); },
       applyArtifacts: async () => { order.push('apply'); },
+      restorePluginState: async () => { order.push('plugins'); },
       checkHealth: async () => { order.push('health'); return healthy; },
       rollback: async () => { order.push('rollback'); },
     });
     expect(report.ok).toBe(true);
     expect(report.rolledBack).toBe(false);
     expect(report.targetMobilePreviewVersion).toBe('0.2.3');
-    expect(order).toEqual(['snapshot', 'apply', 'health']);
-    // `--no-deps` keeps the backend/frontend/db running untouched — unlike the
-    // frontend swap, no other service reads the preview version.
+    expect(order).toEqual(['snapshot', 'apply', 'plugins', 'health']);
+    // Only the preview image is pulled. The final `up -d` lets Symfony services
+    // whose env changed reread SELFHELP_MOBILE_PREVIEW_VERSION, so the CMS stops
+    // reporting the old preview version after Docker has already swapped it.
     expect(runner.calls.map((c) => c.args)).toEqual([
       ['pull', 'mobile-preview'],
-      ['up', '-d', '--no-deps', 'mobile-preview'],
+      ['up', '-d'],
     ]);
+  });
+
+  it('skips plugin restore when no restorePluginState dep is provided', async () => {
+    const runner = new RecordingComposeRunner();
+    const report = await executeMobilePreviewUpdate(okPlan(), {
+      runner, instanceDir: '/tmp/website1',
+      snapshot: async () => undefined,
+      applyArtifacts: async () => undefined,
+      checkHealth: async () => healthy,
+      rollback: async () => undefined,
+    });
+
+    expect(report.ok).toBe(true);
+    expect(report.steps.some((s) => s.name === 'plugins')).toBe(false);
   });
 
   it('aborts before any mutation when the snapshot fails', async () => {

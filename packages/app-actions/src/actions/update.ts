@@ -336,19 +336,18 @@ export interface InstanceMobilePreviewUpdateResult {
 }
 
 /**
- * Update ONLY the optional `selfhelp-mobile-preview` container of an instance to
- * a newer compatible release, leaving the core stack (backend/worker/scheduler)
- * and every volume untouched.
+ * Update the optional `selfhelp-mobile-preview` image of an instance to a newer
+ * compatible release, leaving the core/backend image and every volume untouched.
  *
  * The preview ships independently of the core (on the mobile repo's own tags),
  * so an instance already on the latest core can still have a newer preview — the
  * core-driven {@link instanceUpdate} reports `up_to_date` and never picks it up.
  * This is the lightweight path: resolve the newest compatible preview, run the
  * dual-axis plugin↔preview gate, rewrite the instance artifacts with the new
- * preview image, pull it, recreate ONLY the preview container (`--no-deps`),
- * health-check, and restore the previous config + container on failure. No
- * backup, no migration, no maintenance window — the preview is stateless and
- * core-coupled only through its runtime proxy.
+ * preview image, pull only that image, run `up -d` so the backend rereads the
+ * stamped preview-version env, health-check, and restore the previous config on
+ * failure. No backup, no migration, no maintenance window — the preview is
+ * stateless and core-coupled only through its runtime proxy.
  */
 export async function instanceMobilePreviewUpdate(
   deps: ActionDeps,
@@ -365,8 +364,8 @@ export async function instanceMobilePreviewUpdate(
   // compatible preview existed (or one that was removed) may not have it yet.
   // Rather than refuse, this command BOOTSTRAPS it: a missing preview is treated
   // as the sentinel version 0.0.0 so the resolver picks the newest compatible
-  // release and `executeMobilePreviewUpdate`'s `up -d --no-deps mobile-preview`
-  // CREATES the container from the rewritten compose.
+  // release and `executeMobilePreviewUpdate`'s `up -d` CREATES the container
+  // from the rewritten compose.
   const bootstrapping = !manifest.images.mobilePreview || !manifest.versions.mobilePreview;
   const currentMobilePreviewVersion = manifest.versions.mobilePreview ?? '0.0.0';
 
@@ -430,7 +429,9 @@ export async function instanceMobilePreviewUpdate(
 
   const paths = instancePaths(instanceId, deps.root);
   // Core + frontend stay EXACTLY as installed (pinned from the lock); only the
-  // preview release moves to the resolved target.
+  // preview release moves to the resolved target. The executor still runs a full
+  // `up -d` after pulling the preview image so the backend rereads the rewritten
+  // SELFHELP_MOBILE_PREVIEW_VERSION env stamp.
   const { core, frontend } = releaseShapesFromLock(manifest, lock, 'mobile-preview-update');
   const mobilePreview = plan.mobilePreview;
 
@@ -486,6 +487,9 @@ export async function instanceMobilePreviewUpdate(
       });
       await lockStore.write(artifacts.lock);
     },
+    restorePluginState: async () => {
+      await restorePluginStateAfterRecreate(deps, instanceId, manifest.versions.selfhelp);
+    },
     checkHealth: async () =>
       evaluateHealth(
         instanceId,
@@ -501,14 +505,7 @@ export async function instanceMobilePreviewUpdate(
         await manifestStore.write(snap.manifest);
         await lockStore.write(snap.lock);
       }
-      // A bootstrap (the instance had NO preview before) restores a compose that
-      // no longer declares the service, so recreating it would fail; the orphaned
-      // just-created container is reaped by the next full `docker compose up -d`.
-      // A normal swap recreates ONLY the PREVIOUS preview from the restored
-      // compose (the core stack was never touched, so a full `up -d` is moot).
-      if (!bootstrapping) {
-        await deps.runner.run(paths.dir, composeCommands.upService('mobile-preview'));
-      }
+      await deps.runner.run(paths.dir, composeCommands.upDetached());
     },
     ...(opts.onStep ? { onStep: opts.onStep } : {}),
   });

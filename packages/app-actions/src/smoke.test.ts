@@ -304,8 +304,9 @@ describe('release smoke (offline, signed fixture registry)', () => {
   it('update-mobile-preview bootstraps the preview onto an instance that never had it', async () => {
     // An instance installed before any preview existed: update-mobile-preview is
     // the ENABLE path. Install against a registry with none, then publish one and
-    // run the command against the SAME state root — it creates ONLY the preview
-    // container and records the version, without recreating the whole stack.
+    // run the command against the SAME state root. It pulls only the preview
+    // image, then runs `up -d` so the backend rereads the new preview-version
+    // env stamp that the CMS System Maintenance page reports.
     const { d: noMp } = await smokeDeps({}, { includeMobilePreview: false });
     await serverInit(noMp, { serverId: 'srv-smoke', mode: 'production', letsencryptEmail: 'ops@example.ch' });
     await instanceInstall(noMp, {
@@ -328,8 +329,8 @@ describe('release smoke (offline, signed fixture registry)', () => {
     expect(manifest.versions.mobilePreview).toBe('0.1.0');
     const compose = await readCompose('qa-boot');
     expect(compose.services['mobile-preview']).toBeDefined();
-    // Bootstrap creates ONLY the preview container, never the whole stack.
-    expect(runner.calls.some((c) => c.args.join(' ') === 'up -d --no-deps mobile-preview')).toBe(true);
+    expect(runner.calls.some((c) => c.args.join(' ') === 'pull mobile-preview')).toBe(true);
+    expect(runner.calls.some((c) => c.args.join(' ') === 'up -d')).toBe(true);
   });
 
   it('update-mobile-preview reports a clear blocked plan when no compatible preview is published', async () => {

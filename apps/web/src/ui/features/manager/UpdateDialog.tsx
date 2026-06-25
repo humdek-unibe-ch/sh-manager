@@ -45,7 +45,7 @@ export interface UpdateDialogProps {
   /**
    * Whether the instance already has the OPTIONAL mobile preview installed. The
    * "Mobile preview" mode is ALWAYS offered (the manager bootstraps a missing
-   * preview — `up -d --no-deps mobile-preview` creates the container), so this
+   * preview with `up -d` after writing the preview service), so this
    * flag only switches the copy/labels between "install" and "update".
    */
   mobilePreviewAvailable?: boolean;

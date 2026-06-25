@@ -8,13 +8,26 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `1.6.8`). Registry releases
+- **The manager tool** uses its own semver (currently `1.6.9`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
   **`0.x`** line (core, frontend, scheduler, worker — all `0.1.0`).
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
+
+## [1.6.9] - 2026-06-25
+
+### Fixed
+- **Mobile-preview updates now refresh the backend version stamp.** The manager
+  still pulls only the `selfhelp-mobile-preview` image, but after rewriting the
+  instance env it runs `docker compose up -d` instead of
+  `up -d --no-deps mobile-preview`. This lets the Symfony backend reread
+  `SELFHELP_MOBILE_PREVIEW_VERSION`, so the CMS System Maintenance page reports
+  the updated preview image version (for example `0.1.27`) immediately after a
+  manager- or CMS-requested preview update instead of showing the previous image.
+  Plugin state is re-mounted after the env refresh, matching the frontend-update
+  path.
 
 ## [1.6.8] - 2026-06-25
 

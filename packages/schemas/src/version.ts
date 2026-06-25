@@ -23,7 +23,7 @@ import semver from 'semver';
  * never publish an image that self-reports a stale version (the v1.6.2 image
  * that still reported 1.6.1 after a tag-only release).
  */
-export const MANAGER_VERSION = '1.6.8';
+export const MANAGER_VERSION = '1.6.9';
 
 /**
  * Release-time guard: verify the published git tag, the root `package.json`

@@ -5,10 +5,13 @@
  * image is released on the mobile repo's own tags, independently of the core,
  * and is a stateless front door (Expo web export + a thin `/cms-api` proxy to
  * the PRIVATE backend). So this is the lightweight path — a peer of the
- * frontend-only update: snapshot -> apply -> pull -> recreate ONLY the preview
- * container (`--no-deps`) -> health, with a config rollback on failure. No
- * backup, no migrations, no maintenance window; volumes and the core stack are
- * never touched (the backend keeps serving while the preview swaps).
+ * frontend-only update: snapshot -> apply -> pull ONLY the preview image ->
+ * `up -d` -> health, with a config rollback on failure. No backup, no
+ * migrations, no maintenance window; volumes are never touched. The full
+ * `up -d` is intentional: the backend reads the stamped
+ * `SELFHELP_MOBILE_PREVIEW_VERSION` from the rewritten env file, so a
+ * `--no-deps mobile-preview` swap leaves the CMS reporting the old preview
+ * version even though Docker is already running the new image.
  */
 import type { MobilePreviewRelease, ReleaseChannel } from '@shm/schemas';
 import { resolveMobilePreviewUpdate } from '@shm/resolver';
@@ -85,9 +88,10 @@ function buildMobilePreviewSteps(current: string, preview: MobilePreviewRelease)
     'snapshot the current compose/manifest/lock (for rollback)',
     `write new manifest + lock + compose (mobile preview ${current} -> ${preview.version})`,
     `pull mobile-preview image (${preview.version})`,
-    'recreate ONLY the mobile-preview container (docker compose up -d --no-deps mobile-preview); the core stack keeps serving',
+    'recreate changed services (docker compose up -d) so the backend rereads SELFHELP_MOBILE_PREVIEW_VERSION',
+    're-mount any installed plugins lost to a Symfony container recreate (no-op when none are installed)',
     'run health checks',
-    'on failure: restore the previous config and recreate the previous mobile-preview container',
+    'on failure: restore the previous config and recreate the previous containers',
   ];
 }
 
@@ -102,8 +106,13 @@ export interface MobilePreviewUpdateExecutionDeps {
   snapshot: () => Promise<void>;
   /** Rewrite the instance artifacts with the new mobile-preview image + version. */
   applyArtifacts: () => Promise<void>;
+  /**
+   * Re-mount composer-installed plugins after a backend/worker/scheduler recreate
+   * dropped their vendor/ from the writable layer. No-op when no plugins are installed.
+   */
+  restorePluginState?: () => Promise<void>;
   checkHealth: () => Promise<HealthReport>;
-  /** Restore the snapshot config and recreate the previous mobile-preview container. */
+  /** Restore the snapshot config and recreate services from the previous config. */
   rollback: (reason: string) => Promise<void>;
   /** Live progress hook (see {@link UpdateExecutionDeps.onStep}); best-effort. */
   onStep?: (step: UpdateStepResult) => void | Promise<void>;
@@ -121,10 +130,10 @@ export interface MobilePreviewUpdateExecutionReport {
 /**
  * Executes an approved, non-blocked mobile-preview-only plan. No backup, no
  * migrations, no maintenance window: the preview is stateless and core-coupled
- * only through the runtime proxy, so the path is snapshot -> apply -> pull ->
- * recreate the preview (`--no-deps`) -> health, with a config rollback (and a
- * previous-image recreate) on any failure. The core stack and all volumes are
- * never touched.
+ * only through the runtime proxy, so the path is snapshot -> apply -> pull the
+ * preview image -> `up -d` -> health, with a config rollback on any failure.
+ * `up -d` lets the backend pick up the rewritten preview-version env while
+ * keeping Docker volume state intact.
  */
 export async function executeMobilePreviewUpdate(
   plan: MobilePreviewUpdatePlan,
@@ -163,11 +172,16 @@ export async function executeMobilePreviewUpdate(
       detail: plan.targetMobilePreviewVersion,
     });
 
-    // `--no-deps` recreates ONLY the preview container. Unlike the frontend
-    // swap, no other service reads the preview version (the backend never sees
-    // it), so the core stack must NOT be recreated — it keeps serving traffic.
-    await deps.runner.run(deps.instanceDir, composeCommands.upService(MOBILE_PREVIEW_UPDATE_SERVICE));
+    // Pull only the preview image, then let Compose recreate changed services.
+    // The backend reads SELFHELP_MOBILE_PREVIEW_VERSION from the rewritten env,
+    // so a `--no-deps mobile-preview` swap leaves the CMS on a stale version.
+    await deps.runner.run(deps.instanceDir, composeCommands.upDetached());
     await emitStep(steps, deps.onStep, { name: 'up', status: 'done', detail: MOBILE_PREVIEW_UPDATE_SERVICE });
+
+    if (deps.restorePluginState) {
+      await deps.restorePluginState();
+      await emitStep(steps, deps.onStep, { name: 'plugins', status: 'done' });
+    }
 
     const health = await deps.checkHealth();
     if (!isHealthy(health)) {

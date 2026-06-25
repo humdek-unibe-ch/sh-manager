@@ -7,10 +7,11 @@
  * core (on the mobile repo's own tags), so an instance already on the latest
  * core can still have a newer preview. This is the lightweight path: the dry-run
  * resolves the newest compatible preview AND runs the dual-axis plugin↔preview
- * gate (native / not_bundled / incompatible / web_only), and execution swaps
- * ONLY the preview container — no database migration, no full backup, no
- * maintenance window, because the preview is stateless. The core stack and every
- * volume stay untouched.
+ * gate (native / not_bundled / incompatible / web_only), and execution pulls
+ * ONLY the preview image before refreshing env-reading services so the CMS sees
+ * the new preview version — no database migration, no full backup, no
+ * maintenance window, because the preview is stateless. Every volume stays
+ * untouched.
  */
 import { useState } from 'react';
 import { Code, Divider, Group, List, Modal, Stack, Text } from '@mantine/core';

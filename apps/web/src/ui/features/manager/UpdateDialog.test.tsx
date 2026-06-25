@@ -79,7 +79,7 @@ describe('UpdateDialog (combined core + frontend)', () => {
   });
 
   // The mobile preview ships separately, but the manager bootstraps a missing
-  // one (`up -d --no-deps mobile-preview` creates the container), so the mode is
+  // one with `up -d` after writing the preview service, so the mode is
   // ALWAYS offered — labelled "install" until the instance has it.
   it('offers a mobile-preview INSTALL tab when the preview is not installed', async () => {
     const user = userEvent.setup();
