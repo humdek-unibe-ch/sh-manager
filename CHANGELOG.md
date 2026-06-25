@@ -8,13 +8,23 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The manager has two version axes (see
 [docs/release-publishing.md](docs/release-publishing.md)):
 
-- **The manager tool** uses its own semver (currently `1.6.6`). Registry releases
+- **The manager tool** uses its own semver (currently `1.6.8`). Registry releases
   declare a `requiresManager` constraint, so the tool version is a compatibility
   contract.
 - **The SelfHelp platform** it installs/updates is currently the pre-release
   **`0.x`** line (core, frontend, scheduler, worker — all `0.1.0`).
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
+
+## [1.6.8] - 2026-06-25
+
+### Fixed
+- **Local mobile preview now uses the instance's single frontend port.** Generated
+  local Compose no longer publishes the preview separately on
+  `<frontend port + 2000>`; the preview stays on the private instance network and
+  the frontend's same-origin `/mobile-preview/*` proxy reaches it by service
+  name. This matches the documented local URL and means one SSH tunnel exposes
+  the CMS and its mobile preview together.
 
 ## [1.6.7] - 2026-06-25
 

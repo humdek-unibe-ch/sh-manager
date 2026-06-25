@@ -351,9 +351,9 @@ describe('optional mobile-preview service', () => {
       images: previewImages,
     });
 
-    it('publishes on the frontend port + 2000 and stays unrouted', () => {
+    it('stays private because the frontend proxies the same-origin path', () => {
       const preview = svc(doc, 'mobile-preview');
-      expect(preview.ports).toEqual(['127.0.0.1:10081:8080']);
+      expect(preview.ports).toBeUndefined();
       expect(preview.labels).toBeUndefined();
       expect(preview.networks).toEqual(['instance']);
     });

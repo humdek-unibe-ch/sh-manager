@@ -3,7 +3,7 @@
 Audience: Server operators
 Status: Active
 Applies to: `sh-manager` (manager tool `1.2.0+`)
-Last verified: 2026-06-23
+Last verified: 2026-06-25
 Source of truth: `apps/cli/src/actions.ts` (`instanceSetAddress`), `packages/docker/src/compose.ts`, `packages/docker/src/env.ts`, `apps/web/src/ui/features/manager/SetAddressDialog.tsx`
 
 Every instance is reachable at exactly one address, decided by its mode:
@@ -109,13 +109,13 @@ hub URL — events flow through the frontend's own `/api/auth/events` endpoint,
 which talks to the Mercure container over the instance's private Docker
 network.
 
-When the optional **mobile preview** service is enabled, Traefik routes
-`/mobile-preview` on the **same domain/port** to the `selfhelp-mobile-preview`
-container; the CMS page editor embeds that path in an iframe. The container's
-in-process proxy reaches the backend over the **private** Docker network, so no
-extra public backend port is opened. The backend remains unrouted by Traefik in
-both modes (it is reached only by the frontend and the mobile-preview proxy over
-the internal network).
+When the optional **mobile preview** service is enabled, the CMS page editor
+embeds `/mobile-preview` on the **same domain/port**. Production Traefik routes
+that path directly to the `selfhelp-mobile-preview` container; in local mode the
+Next.js frontend proxies it to `http://mobile-preview:8080` over the instance
+network. The preview container's in-process proxy reaches the backend over the
+same private network, so neither the preview nor the backend needs an extra
+public port.
 
 ## Troubleshooting
 

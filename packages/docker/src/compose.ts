@@ -361,12 +361,9 @@ export function buildInstanceCompose(spec: InstanceComposeSpec): ComposeDocument
         `traefik.http.routers.${id}-mobile-preview.tls.certresolver=letsencrypt`,
         `traefik.http.services.${id}-mobile-preview.loadbalancer.server.port=${MOBILE_PREVIEW_INTERNAL_PORT}`,
       ];
-    } else if (spec.localPort !== undefined) {
-      // Local mode: publish on a deterministic loopback port (frontend port +
-      // 2000) for manual testing. The open-on-web fallback origin is the preview
-      // host here (a known local-only limitation; production shares the host).
-      mobilePreview.ports = [`127.0.0.1:${spec.localPort + 2000}:${MOBILE_PREVIEW_INTERNAL_PORT}`];
     }
+    // Local mode deliberately publishes no second host port: the frontend's
+    // same-origin /mobile-preview rewrite reaches this service over `instance`.
     services['mobile-preview'] = mobilePreview;
   }
 
