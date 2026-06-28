@@ -39,6 +39,6 @@
     "postcss": "^8.5.10",
     "tailwind-preset-mantine": "^4.0.3",
     "tailwindcss": "^4.2.4",
-    "vite": "^5.4.11"
+    "vite": "^8.1.0"
   }
 }
