@@ -16,6 +16,16 @@ The manager has two version axes (see
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
 
+## [Unreleased]
+
+### Added
+- **Login brute-force limits in the environment editor.** New instances list
+  `AUTH_LOGIN_MAX_ATTEMPTS`, `AUTH_LOGIN_WINDOW`, `AUTH_2FA_MAX_ATTEMPTS`,
+  `AUTH_2FA_WINDOW`, `AUTH_RECOVERY_MAX_REQUESTS` and `AUTH_RECOVERY_WINDOW`
+  (defaults `15`/`15minutes`, `15`/`15minutes`, `3`/`1hour`) in the generated
+  `.env`, so operators can tune the backend's login, 2FA and password-recovery
+  rate limits per instance. Backends without the feature ignore them.
+
 ## [1.6.9] - 2026-06-25
 
 ### Fixed

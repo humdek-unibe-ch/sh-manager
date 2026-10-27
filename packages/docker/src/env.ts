@@ -229,6 +229,17 @@ export function buildInstanceEnv(input: InstanceEnvInput): Record<string, string
     // default exists for either, so they must be provided here.
     JWT_TOKEN_TTL: '3600',
     JWT_REFRESH_TOKEN_TTL: '2592000',
+    // Auth brute-force limits (backend config/packages/rate_limiter.yaml):
+    // failed logins / wrong 2FA codes per account, reset mails per address.
+    // Listed so operators can tune them in the environment editor; the
+    // backend falls back to the same values when unset. Windows carry no
+    // spaces because this file is unquoted dotenv.
+    AUTH_LOGIN_MAX_ATTEMPTS: '15',
+    AUTH_LOGIN_WINDOW: '15minutes',
+    AUTH_2FA_MAX_ATTEMPTS: '15',
+    AUTH_2FA_WINDOW: '15minutes',
+    AUTH_RECOVERY_MAX_REQUESTS: '3',
+    AUTH_RECOVERY_WINDOW: '1hour',
     // Browser traffic normally reaches the API through the frontend BFF (same
     // origin), but the backend ALSO validates the request Origin for CORS and
     // CSRF. Localhost tooling is always allowed; a production instance also

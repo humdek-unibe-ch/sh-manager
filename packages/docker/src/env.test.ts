@@ -204,6 +204,35 @@ describe('plugin trust env (verification chain, security)', () => {
   });
 });
 
+describe('auth brute-force limits (backend rate limiter)', () => {
+  it('lists every limit with the backend defaults so operators can see and tune them', () => {
+    const env = buildInstanceEnv(input);
+    expect(env.AUTH_LOGIN_MAX_ATTEMPTS).toBe('15');
+    expect(env.AUTH_LOGIN_WINDOW).toBe('15minutes');
+    expect(env.AUTH_2FA_MAX_ATTEMPTS).toBe('15');
+    expect(env.AUTH_2FA_WINDOW).toBe('15minutes');
+    expect(env.AUTH_RECOVERY_MAX_REQUESTS).toBe('3');
+    expect(env.AUTH_RECOVERY_WINDOW).toBe('1hour');
+  });
+
+  it('is operator-editable, not a manager-controlled structural key', () => {
+    const env = buildInstanceEnv({ ...input, envOverrides: { AUTH_LOGIN_MAX_ATTEMPTS: '30' } });
+    expect(env.AUTH_LOGIN_MAX_ATTEMPTS).toBe('30');
+    expect(MANAGER_CONTROLLED_ENV_KEYS.filter((k) => k.startsWith('AUTH_'))).toEqual([]);
+  });
+
+  it('round-trips through the unquoted dotenv file without spaces the backend parser would reject', () => {
+    const env = buildInstanceEnv(input);
+    const authKeys = Object.keys(env).filter((k) => k.startsWith('AUTH_'));
+    expect(authKeys).toHaveLength(6);
+    const parsed = parseDotEnv(renderDotEnv(env));
+    for (const key of authKeys) {
+      expect(env[key]).not.toMatch(/\s/);
+      expect(parsed[key]).toBe(env[key]);
+    }
+  });
+});
+
 describe('operator env overrides (manager environment editor)', () => {
   it('lets an operator override an editable default and add a custom var', () => {
     const env = buildInstanceEnv({
