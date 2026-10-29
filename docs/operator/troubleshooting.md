@@ -129,8 +129,9 @@ Backups, images, logs, and volumes accumulate. `sh-manager doctor` flags low dis
 - **Dangling images/build cache:** `docker image prune` / `docker builder prune`
   (safe — does not remove named volumes). **Do not** run `docker system prune
   --volumes`, which would target data volumes.
-- Never delete `*_mysql_data`, `*_uploads`, `*_plugin_artifacts`, or
-  `*_plugin_artifacts_public` volumes — that is live instance data.
+- Never delete `*_mysql_data`, `*_uploads`, `*_form_files`, `*_assets`,
+  `*_plugin_artifacts`, or `*_plugin_artifacts_public` volumes — that is live
+  instance data.
 
 ## An update is blocked or failed
 

@@ -138,6 +138,9 @@ describe('buildInstanceCompose (production)', () => {
       expect(volumes).toContain('uploads:/app/public/uploads');
       expect(volumes).toContain('plugin_artifacts:/app/var/plugins');
       expect(volumes).toContain('plugin_artifacts_public:/app/public/plugin-artifacts');
+      // Private uploads live outside public/: form files and admin assets.
+      expect(volumes).toContain('form_files:/app/var/form-files');
+      expect(volumes).toContain('assets:/app/var/assets');
     }
   });
 
@@ -146,6 +149,8 @@ describe('buildInstanceCompose (production)', () => {
     expect(volumes.uploads!.name).toBe('selfhelp_website1_uploads');
     expect(volumes.plugin_artifacts!.name).toBe('selfhelp_website1_plugin_artifacts');
     expect(volumes.plugin_artifacts_public!.name).toBe('selfhelp_website1_plugin_artifacts_public');
+    expect(volumes.form_files!.name).toBe('selfhelp_website1_form_files');
+    expect(volumes.assets!.name).toBe('selfhelp_website1_assets');
   });
 
   it('hands the data volumes to www-data before any Symfony service starts', () => {
@@ -159,13 +164,15 @@ describe('buildInstanceCompose (production)', () => {
     expect(init.entrypoint).toEqual(['sh', '-c']);
     const script = (init.command as string[]).join(' ');
     expect(script).toContain('chown 33:33');
-    for (const dir of ['/app/public/uploads', '/app/var/plugins', '/app/public/plugin-artifacts']) {
+    for (const dir of ['/app/public/uploads', '/app/var/plugins', '/app/public/plugin-artifacts', '/app/var/form-files', '/app/var/assets']) {
       expect(script).toContain(dir);
     }
     expect(init.volumes).toEqual([
       'uploads:/app/public/uploads',
       'plugin_artifacts:/app/var/plugins',
       'plugin_artifacts_public:/app/public/plugin-artifacts',
+      'form_files:/app/var/form-files',
+      'assets:/app/var/assets',
     ]);
     // One-shot: no restart policy (compose default "no"), private network only.
     expect(init.restart).toBeUndefined();

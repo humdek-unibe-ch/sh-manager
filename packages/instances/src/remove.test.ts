@@ -67,6 +67,8 @@ describe('planRemove', () => {
       'selfhelp_website1_uploads',
       'selfhelp_website1_plugin_artifacts',
       'selfhelp_website1_plugin_artifacts_public',
+      'selfhelp_website1_form_files',
+      'selfhelp_website1_assets',
     ]);
   });
 

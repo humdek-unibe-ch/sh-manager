@@ -108,6 +108,9 @@ export async function instanceBackup(
   if (deps.archiveVolume) {
     await step('volumes', 'Archiving uploads & plugin artifacts…');
     await deps.archiveVolume(`${project}_uploads`, path.join(backupDir, 'uploads.tgz'));
+    // Private uploads (outside public/) belong to the same uploads area.
+    await deps.archiveVolume(`${project}_form_files`, path.join(backupDir, 'form_files.tgz'));
+    await deps.archiveVolume(`${project}_assets`, path.join(backupDir, 'assets.tgz'));
     includedAreas.push('uploads');
     await deps.archiveVolume(`${project}_plugin_artifacts`, path.join(backupDir, 'plugin_artifacts.tgz'));
     await deps.archiveVolume(

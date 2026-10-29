@@ -156,6 +156,8 @@ export function planRemove(req: RemoveRequest, inventory: ServerInventory, root:
         `${composeProject}_uploads`,
         `${composeProject}_plugin_artifacts`,
         `${composeProject}_plugin_artifacts_public`,
+        `${composeProject}_form_files`,
+        `${composeProject}_assets`,
       ]
     : [];
   const preserveBackups = req.deleteBackups !== true;

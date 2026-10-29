@@ -18,6 +18,14 @@ A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instanc
 
 ## [Unreleased]
 
+### Fixed
+- **Private uploads survive updates and are backed up.** Form uploads
+  (`/app/var/form-files`) and admin assets (`/app/var/assets`) now have their own
+  named volumes (`form_files`, `assets`), mounted on backend, worker and scheduler.
+  Before, they lived in the container and were lost when it was recreated. They
+  are chowned by `volume-init`, archived in the `uploads` backup area, restored,
+  copied by clone, and removed with `--delete-volumes`.
+
 ### Added
 - **Login brute-force limits in the environment editor.** New instances list
   `AUTH_LOGIN_MAX_ATTEMPTS`, `AUTH_LOGIN_WINDOW`, `AUTH_2FA_MAX_ATTEMPTS`,
