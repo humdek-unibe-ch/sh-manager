@@ -854,6 +854,8 @@ describe('instance lifecycle (offline)', () => {
         'selfhelp_website1_uploads',
         'selfhelp_website1_plugin_artifacts',
         'selfhelp_website1_plugin_artifacts_public',
+        'selfhelp_website1_form_files',
+        'selfhelp_website1_assets',
       ]),
     );
     // Restore quiesces with `stop` and never tears volumes down with `-v`.
@@ -1002,6 +1004,8 @@ describe('instance lifecycle (offline)', () => {
         'selfhelp_website1_uploads->selfhelp_website1-staging_uploads',
         'selfhelp_website1_plugin_artifacts->selfhelp_website1-staging_plugin_artifacts',
         'selfhelp_website1_plugin_artifacts_public->selfhelp_website1-staging_plugin_artifacts_public',
+        'selfhelp_website1_form_files->selfhelp_website1-staging_form_files',
+        'selfhelp_website1_assets->selfhelp_website1-staging_assets',
       ]),
     );
     expect(base.imported).toContain('clone-source.sql');

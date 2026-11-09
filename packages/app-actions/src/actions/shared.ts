@@ -150,6 +150,8 @@ export function instanceDataVolumes(instanceId: string): string[] {
     `${project}_uploads`,
     `${project}_plugin_artifacts`,
     `${project}_plugin_artifacts_public`,
+    `${project}_form_files`,
+    `${project}_assets`,
   ];
 }
 

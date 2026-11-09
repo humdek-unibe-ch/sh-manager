@@ -61,14 +61,19 @@ const ENV_CONTAINER_FILE = '/app/.env';
  * plugin artifacts survive container replacement during updates, and so backups
  * archive real data instead of an empty volume.
  *
- * The backend writes uploads under `public/uploads` (admin assets +
- * form-file uploads) and plugin artifacts to two distinct container paths:
+ * The backend writes public uploads under `public/uploads`, private ones
+ * outside the web root (`var/form-files` form uploads, `var/assets` admin
+ * assets), and plugin artifacts to two distinct container paths:
  * `var/plugins` (installed packages) and `public/plugin-artifacts`
  * (web-served ESM/CSS bundles). See backend `AdminAssetService`,
  * `FormFileUploadService`, and `PluginArchivePromoter`.
  */
 const UPLOADS_VOLUME = 'uploads';
 const UPLOADS_CONTAINER_DIR = '/app/public/uploads';
+const FORM_FILES_VOLUME = 'form_files';
+const FORM_FILES_CONTAINER_DIR = '/app/var/form-files';
+const ASSETS_VOLUME = 'assets';
+const ASSETS_CONTAINER_DIR = '/app/var/assets';
 const PLUGIN_ARTIFACTS_VOLUME = 'plugin_artifacts';
 const PLUGIN_ARTIFACTS_CONTAINER_DIR = '/app/var/plugins';
 const PLUGIN_ARTIFACTS_PUBLIC_VOLUME = 'plugin_artifacts_public';
@@ -195,6 +200,8 @@ export function buildInstanceCompose(spec: InstanceComposeSpec): ComposeDocument
     `${UPLOADS_VOLUME}:${UPLOADS_CONTAINER_DIR}`,
     `${PLUGIN_ARTIFACTS_VOLUME}:${PLUGIN_ARTIFACTS_CONTAINER_DIR}`,
     `${PLUGIN_ARTIFACTS_PUBLIC_VOLUME}:${PLUGIN_ARTIFACTS_PUBLIC_CONTAINER_DIR}`,
+    `${FORM_FILES_VOLUME}:${FORM_FILES_CONTAINER_DIR}`,
+    `${ASSETS_VOLUME}:${ASSETS_CONTAINER_DIR}`,
   ];
 
   // One-shot ownership hand-off for the named data volumes. The engine creates
@@ -208,7 +215,7 @@ export function buildInstanceCompose(spec: InstanceComposeSpec): ComposeDocument
     user: '0',
     entrypoint: ['sh', '-c'],
     command: [
-      `chown ${APP_RUNTIME_UID}:${APP_RUNTIME_UID} ${UPLOADS_CONTAINER_DIR} ${PLUGIN_ARTIFACTS_CONTAINER_DIR} ${PLUGIN_ARTIFACTS_PUBLIC_CONTAINER_DIR}`,
+      `chown ${APP_RUNTIME_UID}:${APP_RUNTIME_UID} ${UPLOADS_CONTAINER_DIR} ${PLUGIN_ARTIFACTS_CONTAINER_DIR} ${PLUGIN_ARTIFACTS_PUBLIC_CONTAINER_DIR} ${FORM_FILES_CONTAINER_DIR} ${ASSETS_CONTAINER_DIR}`,
     ],
     networks: ['instance'],
     volumes: [...persistentMounts],
@@ -387,6 +394,8 @@ export function buildInstanceCompose(spec: InstanceComposeSpec): ComposeDocument
     [PLUGIN_ARTIFACTS_PUBLIC_VOLUME]: {
       name: `${composeProjectName(id)}_${PLUGIN_ARTIFACTS_PUBLIC_VOLUME}`,
     },
+    [FORM_FILES_VOLUME]: { name: `${composeProjectName(id)}_${FORM_FILES_VOLUME}` },
+    [ASSETS_VOLUME]: { name: `${composeProjectName(id)}_${ASSETS_VOLUME}` },
   };
 
   return { name: composeProjectName(id), services, networks, volumes };
