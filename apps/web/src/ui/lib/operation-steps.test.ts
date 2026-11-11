@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
+// @vitest-environment jsdom
 import { describe, it, expect } from 'vitest';
 import { buildOperationSteps, operationKindLabel } from './operation-steps';
 import type { OperationKind, OperationStatus } from './types';

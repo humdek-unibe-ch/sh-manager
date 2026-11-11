@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Humdek, University of Bern
 // SPDX-License-Identifier: MPL-2.0
+// @vitest-environment jsdom
 import { describe, it, expect, vi } from 'vitest';
 import { subscribeManagerEvents, type EventSourceLike, type ManagerOperationEvent } from './manager-events';
 
