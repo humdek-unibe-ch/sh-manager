@@ -61,15 +61,13 @@ const ENV_CONTAINER_FILE = '/app/.env';
  * plugin artifacts survive container replacement during updates, and so backups
  * archive real data instead of an empty volume.
  *
- * The backend writes public uploads under `public/uploads`, private ones
- * outside the web root (`var/form-files` form uploads, `var/assets` admin
- * assets), and plugin artifacts to two distinct container paths:
+ * The backend writes uploads outside the web root (`var/form-files` form
+ * uploads, `var/assets` admin assets), and plugin artifacts to two distinct
+ * container paths:
  * `var/plugins` (installed packages) and `public/plugin-artifacts`
  * (web-served ESM/CSS bundles). See backend `AdminAssetService`,
  * `FormFileUploadService`, and `PluginArchivePromoter`.
  */
-const UPLOADS_VOLUME = 'uploads';
-const UPLOADS_CONTAINER_DIR = '/app/public/uploads';
 const FORM_FILES_VOLUME = 'form_files';
 const FORM_FILES_CONTAINER_DIR = '/app/var/form-files';
 const ASSETS_VOLUME = 'assets';
@@ -197,7 +195,6 @@ export function buildInstanceCompose(spec: InstanceComposeSpec): ComposeDocument
   // and installed plugin artifacts survive container replacement and are
   // captured by backups.
   const persistentMounts = [
-    `${UPLOADS_VOLUME}:${UPLOADS_CONTAINER_DIR}`,
     `${PLUGIN_ARTIFACTS_VOLUME}:${PLUGIN_ARTIFACTS_CONTAINER_DIR}`,
     `${PLUGIN_ARTIFACTS_PUBLIC_VOLUME}:${PLUGIN_ARTIFACTS_PUBLIC_CONTAINER_DIR}`,
     `${FORM_FILES_VOLUME}:${FORM_FILES_CONTAINER_DIR}`,
@@ -215,7 +212,7 @@ export function buildInstanceCompose(spec: InstanceComposeSpec): ComposeDocument
     user: '0',
     entrypoint: ['sh', '-c'],
     command: [
-      `chown ${APP_RUNTIME_UID}:${APP_RUNTIME_UID} ${UPLOADS_CONTAINER_DIR} ${PLUGIN_ARTIFACTS_CONTAINER_DIR} ${PLUGIN_ARTIFACTS_PUBLIC_CONTAINER_DIR} ${FORM_FILES_CONTAINER_DIR} ${ASSETS_CONTAINER_DIR}`,
+      `chown ${APP_RUNTIME_UID}:${APP_RUNTIME_UID} ${PLUGIN_ARTIFACTS_CONTAINER_DIR} ${PLUGIN_ARTIFACTS_PUBLIC_CONTAINER_DIR} ${FORM_FILES_CONTAINER_DIR} ${ASSETS_CONTAINER_DIR}`,
     ],
     networks: ['instance'],
     volumes: [...persistentMounts],
@@ -389,7 +386,6 @@ export function buildInstanceCompose(spec: InstanceComposeSpec): ComposeDocument
 
   const volumes: Record<string, unknown> = {
     mysql_data: { name: `${composeProjectName(id)}_mysql_data` },
-    [UPLOADS_VOLUME]: { name: `${composeProjectName(id)}_${UPLOADS_VOLUME}` },
     [PLUGIN_ARTIFACTS_VOLUME]: { name: `${composeProjectName(id)}_${PLUGIN_ARTIFACTS_VOLUME}` },
     [PLUGIN_ARTIFACTS_PUBLIC_VOLUME]: {
       name: `${composeProjectName(id)}_${PLUGIN_ARTIFACTS_PUBLIC_VOLUME}`,
