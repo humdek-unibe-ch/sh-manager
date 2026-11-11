@@ -3,7 +3,7 @@
 Audience: Server operators
 Status: Active
 Applies to: `sh-manager` (manager tool `1.4.0+`)
-Last verified: 2026-06-13
+Last verified: 2026-11-10
 Source of truth: `apps/cli/src/bin.ts`, `packages/backup/src`
 
 Backups are **checksummed** and cover every required area. Restores are
@@ -37,6 +37,21 @@ shown as a badge in the web console and controls automatic retention:
 
 Take a backup before every risky operation. Updates already take one
 automatically (see [update](update.md)).
+
+### What is in a backup, and downtime
+
+The **uploads** area is the instance's private files: form uploads
+(`<project>_form_files` volume, `/app/var/form-files` in the containers) and
+admin assets (`<project>_assets`, `/app/var/assets`). Plugin artifacts and the
+database dump are archived next to them.
+
+Manual, pre-update and pre-restore backups of an **active** instance stop
+`backend`, `worker` and `scheduler` while the database is dumped and the
+volumes are archived, then start them again (also when the backup fails). The
+site is unavailable for that short time, and the backup is consistent: no
+database row without its file. Scheduled nightly backups run **online** with no
+downtime; an upload or delete during that backup can leave the dump and the
+archives slightly apart.
 
 ## Inspect / validate a restore (no changes)
 
