@@ -7,7 +7,7 @@
  * Removing an instance with `full_delete` but WITHOUT its volumes (or an orphan
  * left by an older manager / an aborted install) deletes the instance directory
  * and the inventory entry, but leaves the persistent Docker volumes
- * (`<project>_mysql_data`, `_uploads`, `_plugin_artifacts*`) behind. Their
+ * (`<project>_mysql_data`, `_form_files`, `_assets`, `_plugin_artifacts*`) behind. Their
  * matching secrets are gone, so MySQL — which only applies credentials to an
  * EMPTY data volume — can never authenticate against them again: reinstalling
  * the same id used to die at `wait_db` with "Access denied".

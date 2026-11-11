@@ -64,7 +64,6 @@ describe('planRemove', () => {
     expect(plan.preserveBackups).toBe(true);
     expect(plan.deleteVolumes).toEqual([
       'selfhelp_website1_mysql_data',
-      'selfhelp_website1_uploads',
       'selfhelp_website1_plugin_artifacts',
       'selfhelp_website1_plugin_artifacts_public',
       'selfhelp_website1_form_files',

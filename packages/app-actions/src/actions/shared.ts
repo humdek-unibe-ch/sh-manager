@@ -42,6 +42,7 @@ import {
   ManifestStore,
   SECRET_DIR_MODE,
   SECRET_FILE_MODE,
+  instanceDataVolumeNames,
   instancePaths,
   nodeSecretIO,
   proxyDir,
@@ -144,15 +145,7 @@ export function dbCredentialMismatchError(instanceId: string, lastErr: unknown):
 
 /** Persistent Docker volume names for one instance, in a stable order. */
 export function instanceDataVolumes(instanceId: string): string[] {
-  const project = composeProjectName(instanceId);
-  return [
-    `${project}_mysql_data`,
-    `${project}_uploads`,
-    `${project}_plugin_artifacts`,
-    `${project}_plugin_artifacts_public`,
-    `${project}_form_files`,
-    `${project}_assets`,
-  ];
+  return instanceDataVolumeNames(composeProjectName(instanceId));
 }
 
 /**
