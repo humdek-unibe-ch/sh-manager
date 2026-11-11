@@ -103,6 +103,52 @@ describe('instance lifecycle (offline)', () => {
     expect(dump).toContain('-- dump');
   });
 
+  it('a maintenance backup stops the writers before the dump and starts them after the archives', async () => {
+    const { d, runner } = await lifecycleDeps();
+    await installWebsite1(d);
+    const from = runner.calls.length;
+
+    const res = await instanceBackup(d, 'website1');
+
+    const calls = runner.calls.slice(from).map((c) => c.args.join(' '));
+    const stop = calls.indexOf('stop backend worker scheduler');
+    const dump = calls.findIndex((c) => c.includes('mysqldump'));
+    const start = calls.indexOf('start backend worker scheduler');
+    expect(stop).toBeGreaterThanOrEqual(0);
+    expect(dump).toBeGreaterThan(stop);
+    expect(start).toBeGreaterThan(dump);
+    expect(res.manifest.mode).toBe('maintenance');
+  });
+
+  it('an online backup never stops the instance', async () => {
+    const { d, runner } = await lifecycleDeps();
+    await installWebsite1(d);
+    const from = runner.calls.length;
+
+    await instanceBackup(d, 'website1', { mode: 'online' });
+
+    const calls = runner.calls.slice(from).map((c) => c.args[0]);
+    expect(calls).not.toContain('stop');
+    expect(calls).not.toContain('start');
+  });
+
+  it('a failing maintenance backup still starts the writers again', async () => {
+    const { d, runner } = await lifecycleDeps();
+    await installWebsite1(d);
+    const from = runner.calls.length;
+    const failing: ActionDeps = {
+      ...d,
+      archiveVolume: async () => {
+        throw new Error('disk full');
+      },
+    };
+
+    await expect(instanceBackup(failing, 'website1')).rejects.toThrow('disk full');
+
+    const calls = runner.calls.slice(from).map((c) => c.args.join(' '));
+    expect(calls).toContain('start backend worker scheduler');
+  });
+
   it('two same-day backups get distinct ids and never overwrite each other (regression)', async () => {
     const { d } = await lifecycleDeps();
     await installWebsite1(d);
@@ -470,7 +516,7 @@ describe('instance lifecycle (offline)', () => {
     const res = await instanceClone(d, 'localtest', 'localtest-copy', { targetLocalPort: 9124, apply: true });
     expect(res.executed).toBe(true);
     expect(res.plan.targetDomain).toBe('localhost:9124');
-    expect(copied.some((c) => c.to === 'selfhelp_localtest-copy_uploads')).toBe(true);
+    expect(copied.some((c) => c.to === 'selfhelp_localtest-copy_assets')).toBe(true);
 
     // The clone publishes ITS port, not the source's.
     const compose = await readFile(instancePaths('localtest-copy', root).composePath, 'utf8');
@@ -847,11 +893,10 @@ describe('instance lifecycle (offline)', () => {
     // same-version restore restores the point-in-time compose -> no forward migration
     expect(res.migrated).toBe(false);
 
-    // The database dump was imported and all three persistent volumes restored.
+    // The database dump was imported and every persistent volume restored.
     expect(base.imported).toContain('database.sql');
     expect(base.extracted.map((e) => e.volumeName)).toEqual(
       expect.arrayContaining([
-        'selfhelp_website1_uploads',
         'selfhelp_website1_plugin_artifacts',
         'selfhelp_website1_plugin_artifacts_public',
         'selfhelp_website1_form_files',
@@ -998,10 +1043,9 @@ describe('instance lifecycle (offline)', () => {
     expect(cloneLock.core.version).toBe(sourceLock.core.version);
     expect(cloneLock.core.backendImageDigest).toBe(sourceLock.core.backendImageDigest);
 
-    // Uploads + both plugin volumes were copied into the target's volumes.
+    // Upload volumes (form files + assets) and both plugin volumes were copied.
     expect(base.copied.map((c) => `${c.from}->${c.to}`)).toEqual(
       expect.arrayContaining([
-        'selfhelp_website1_uploads->selfhelp_website1-staging_uploads',
         'selfhelp_website1_plugin_artifacts->selfhelp_website1-staging_plugin_artifacts',
         'selfhelp_website1_plugin_artifacts_public->selfhelp_website1-staging_plugin_artifacts_public',
         'selfhelp_website1_form_files->selfhelp_website1-staging_form_files',
