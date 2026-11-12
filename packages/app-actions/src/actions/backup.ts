@@ -8,7 +8,7 @@
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { BackupManifest, BackupOrigin, BackupSchedulePolicy } from '@shm/schemas';
-import { composeProjectName } from '@shm/docker';
+import { composeCommands, composeProjectName } from '@shm/docker';
 import { InventoryStore, LockStore, ManifestStore, instancePaths, writeFileAtomic } from '@shm/instances';
 import {
   DEFAULT_BACKUP_RETENTION,
@@ -38,7 +38,19 @@ import {
 // instance backup
 // ---------------------------------------------------------------------------
 
+/**
+ * The services that write uploads or the database. A maintenance backup stops
+ * them so the dump and the file archives describe the same moment.
+ */
+const BACKUP_QUIESCED_SERVICES = ['backend', 'worker', 'scheduler'] as const;
+
 export interface BackupOptions {
+  /**
+   * `maintenance` (default): stop {@link BACKUP_QUIESCED_SERVICES} for the
+   * dump and the archives, then start them again — short downtime, consistent
+   * backup. `online`: no downtime; an upload or delete during the backup can
+   * leave the dump and the archives slightly apart.
+   */
   mode?: 'maintenance' | 'online';
   origin?: BackupOrigin;
   seq?: number;
@@ -72,6 +84,12 @@ export async function instanceBackup(
   const backupDir = path.join(paths.backupsDir, backupId);
   await mkdir(backupDir, { recursive: true });
 
+  const mode = opts.mode ?? 'maintenance';
+  // Only an active instance is running; never start a disabled or broken one.
+  const inventory = await new InventoryStore(deps.root).read().catch(() => null);
+  const quiesce =
+    mode === 'maintenance' &&
+    inventory?.instances.find((i) => i.instanceId === instanceId)?.status === 'active';
   const includedAreas = ['database', 'manifest', 'lock'];
   const step = async (phase: string, detail: string): Promise<void> => {
     try {
@@ -81,40 +99,56 @@ export async function instanceBackup(
     }
   };
 
-  // 1. Database dump (maintenance-mode default; mysqldump runs in the db container).
-  await step('database', 'Dumping database…');
-  const { stdout: dump } = await deps.runner.run(paths.dir, ['exec', '-T', 'mysql', 'sh', '-lc', APP_DB_DUMP_CMD]);
-  await writeFile(path.join(backupDir, 'database.sql'), dump);
-
-  // 2. Metadata snapshots (manifest + lock + redacted env + compose copy).
-  await step('metadata', 'Snapshotting manifest, lock, env & compose…');
-  await writeFile(path.join(backupDir, 'selfhelp.instance.json'), JSON.stringify(manifest, null, 2));
-  await writeFile(path.join(backupDir, 'selfhelp.lock.json'), JSON.stringify(lock, null, 2));
-  const envText = await readFile(paths.envPath, 'utf8').catch(() => '');
-  if (envText) {
-    const redacted = Object.entries(redactEnv(parseEnv(envText)))
-      .map(([k, v]) => `${k}=${v}`)
-      .join('\n');
-    await writeFile(path.join(backupDir, 'env.redacted'), redacted);
+  // 0. Maintenance mode: stop every writer so the dump and the file archives
+  //    match. They are started again below even when the backup fails.
+  if (quiesce) {
+    await step('quiesce', 'Stopping backend, worker & scheduler for a consistent backup…');
+    await deps.runner.run(paths.dir, composeCommands.stopServices(BACKUP_QUIESCED_SERVICES));
   }
-  const composeText = await readFile(paths.composePath, 'utf8').catch(() => '');
-  if (composeText) await writeFile(path.join(backupDir, 'compose.yaml'), composeText);
 
-  // 3. Persistent volume archives (uploads + plugin artifacts) when available.
-  // The backend writes plugin data to two container paths, each backed by its
-  // own named volume, so both are archived under the single plugin_artifacts
-  // area (REQUIRED_BACKUP_AREAS stays unchanged; the extra .tgz is still
-  // checksummed by the backup manifest below).
-  if (deps.archiveVolume) {
-    await step('volumes', 'Archiving uploads & plugin artifacts…');
-    await deps.archiveVolume(`${project}_uploads`, path.join(backupDir, 'uploads.tgz'));
-    includedAreas.push('uploads');
-    await deps.archiveVolume(`${project}_plugin_artifacts`, path.join(backupDir, 'plugin_artifacts.tgz'));
-    await deps.archiveVolume(
-      `${project}_plugin_artifacts_public`,
-      path.join(backupDir, 'plugin_artifacts_public.tgz'),
-    );
-    includedAreas.push('plugin_artifacts');
+  try {
+    // 1. Database dump (mysqldump runs in the db container).
+    await step('database', 'Dumping database…');
+    const { stdout: dump } = await deps.runner.run(paths.dir, ['exec', '-T', 'mysql', 'sh', '-lc', APP_DB_DUMP_CMD]);
+    await writeFile(path.join(backupDir, 'database.sql'), dump);
+
+    // 2. Metadata snapshots (manifest + lock + redacted env + compose copy).
+    await step('metadata', 'Snapshotting manifest, lock, env & compose…');
+    await writeFile(path.join(backupDir, 'selfhelp.instance.json'), JSON.stringify(manifest, null, 2));
+    await writeFile(path.join(backupDir, 'selfhelp.lock.json'), JSON.stringify(lock, null, 2));
+    const envText = await readFile(paths.envPath, 'utf8').catch(() => '');
+    if (envText) {
+      const redacted = Object.entries(redactEnv(parseEnv(envText)))
+        .map(([k, v]) => `${k}=${v}`)
+        .join('\n');
+      await writeFile(path.join(backupDir, 'env.redacted'), redacted);
+    }
+    const composeText = await readFile(paths.composePath, 'utf8').catch(() => '');
+    if (composeText) await writeFile(path.join(backupDir, 'compose.yaml'), composeText);
+
+    // 3. Persistent volume archives (uploads + plugin artifacts) when available.
+    // The backend writes plugin data to two container paths, each backed by its
+    // own named volume, so both are archived under the single plugin_artifacts
+    // area (REQUIRED_BACKUP_AREAS stays unchanged; the extra .tgz is still
+    // checksummed by the backup manifest below).
+    if (deps.archiveVolume) {
+      await step('volumes', 'Archiving uploads & plugin artifacts…');
+      // Form uploads and admin assets make up the uploads area.
+      await deps.archiveVolume(`${project}_form_files`, path.join(backupDir, 'form_files.tgz'));
+      await deps.archiveVolume(`${project}_assets`, path.join(backupDir, 'assets.tgz'));
+      includedAreas.push('uploads');
+      await deps.archiveVolume(`${project}_plugin_artifacts`, path.join(backupDir, 'plugin_artifacts.tgz'));
+      await deps.archiveVolume(
+        `${project}_plugin_artifacts_public`,
+        path.join(backupDir, 'plugin_artifacts_public.tgz'),
+      );
+      includedAreas.push('plugin_artifacts');
+    }
+  } finally {
+    if (quiesce) {
+      await step('resume', 'Starting backend, worker & scheduler again…');
+      await deps.runner.run(paths.dir, composeCommands.startServices(BACKUP_QUIESCED_SERVICES));
+    }
   }
 
   await step('manifest', 'Writing backup manifest & checksums…');
@@ -124,7 +158,7 @@ export async function instanceBackup(
     selfhelpVersion: manifest.versions.selfhelp,
     migrationVersion: lock.core.migrationVersion,
     plugins: manifest.installedPlugins,
-    mode: opts.mode,
+    mode,
     origin: opts.origin,
     includedAreas,
     files,

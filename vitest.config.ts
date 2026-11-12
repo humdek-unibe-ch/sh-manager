@@ -2,11 +2,12 @@
 // SPDX-License-Identifier: MPL-2.0
 import { fileURLToPath } from 'node:url';
 import react from '@vitejs/plugin-react';
-import { defineConfig } from 'vitest/config';
+import { defineConfig, type ViteUserConfig } from 'vitest/config';
 
 const r = (p: string): string => fileURLToPath(new URL(p, import.meta.url));
 
-export default defineConfig({
+/** Shared with vitest.coverage-gate.config.ts. */
+export const baseConfig = {
   plugins: [react()],
   resolve: {
     alias: {
@@ -28,13 +29,14 @@ export default defineConfig({
     environment: 'node',
     setupFiles: ['./apps/web/src/ui/test/setup.ts'],
     include: ['packages/**/*.test.ts', 'apps/**/*.test.ts', 'apps/**/*.test.tsx', 'e2e/**/*.test.ts'],
-    // React component tests run under jsdom; everything else stays in node.
-    // Glob must tolerate absolute (incl. Windows) paths, so prefix with **/.
-    environmentMatchGlobs: [['**/apps/web/src/ui/**', 'jsdom']],
+    // React/UI tests opt into jsdom with a `// @vitest-environment jsdom`
+    // comment; everything else runs in node.
     coverage: {
       provider: 'v8',
       include: ['packages/**/src/**/*.ts', 'apps/**/src/**/*.ts'],
       exclude: ['**/index.ts', '**/*.test.ts', 'apps/web/**'],
     },
   },
-});
+} satisfies ViteUserConfig;
+
+export default defineConfig(baseConfig);

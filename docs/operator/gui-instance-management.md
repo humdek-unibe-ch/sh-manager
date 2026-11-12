@@ -170,6 +170,13 @@ manager version + self-update status, and the **Instances** section.
   dialog (it is stored in the restricted `secrets.env`, never the plain `.env`).
   The editor never displays secrets. Applying recreates the containers. CLI
   equivalent: `sh-manager instance env <id> [--set KEY=VALUE …] [--unset KEY …]`.
+  The **login brute-force limits** are editable here too:
+  `AUTH_LOGIN_MAX_ATTEMPTS` / `AUTH_LOGIN_WINDOW` (failed logins per account,
+  default `15` per `15minutes`), `AUTH_2FA_MAX_ATTEMPTS` / `AUTH_2FA_WINDOW`
+  (wrong 2FA codes, default `15` per `15minutes`) and
+  `AUTH_RECOVERY_MAX_REQUESTS` / `AUTH_RECOVERY_WINDOW` (password-reset emails
+  per address, default `3` per `1hour`). Write windows without spaces
+  (`30minutes`, `2hours`).
 - **Logs (Logs… button)** — read a service's recent container logs (the running
   container's stdout/stderr — exactly what Symfony on the **backend** and
   Next.js on the **frontend** print on error) without SSHing into the server.

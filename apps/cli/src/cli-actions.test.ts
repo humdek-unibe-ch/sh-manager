@@ -619,11 +619,11 @@ describe('CLI actions (offline)', () => {
     const d = await makeDeps();
     await serverInit(d, { serverId: 'dev', mode: 'local' });
     d.volumeExists = async (name) =>
-      name === 'selfhelp_ghost_mysql_data' || name === 'selfhelp_ghost_uploads';
+      name === 'selfhelp_ghost_mysql_data' || name === 'selfhelp_ghost_assets';
 
     const report = await scanInstanceOrphans(d, 'ghost');
     expect(report.registered).toBe(false);
-    expect(report.volumes).toEqual(['selfhelp_ghost_mysql_data', 'selfhelp_ghost_uploads']);
+    expect(report.volumes).toEqual(['selfhelp_ghost_mysql_data', 'selfhelp_ghost_assets']);
     expect(report.hasOrphans).toBe(true);
   });
 

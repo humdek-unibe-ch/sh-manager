@@ -174,8 +174,10 @@ export async function instanceRestore(
 
   // 2. Restore persistent volumes from the backup archives (when present).
   await step('volumes', 'Restoring uploads & plugin artifacts…');
-  const uploadsTgz = path.join(backupDir, 'uploads.tgz');
-  if (await pathExists(uploadsTgz)) await deps.extractVolume(uploadsTgz, `${project}_uploads`);
+  for (const area of ['form_files', 'assets']) {
+    const tgz = path.join(backupDir, `${area}.tgz`);
+    if (await pathExists(tgz)) await deps.extractVolume(tgz, `${project}_${area}`);
+  }
   const pluginTgz = path.join(backupDir, 'plugin_artifacts.tgz');
   if (await pathExists(pluginTgz)) await deps.extractVolume(pluginTgz, `${project}_plugin_artifacts`);
   const pluginPublicTgz = path.join(backupDir, 'plugin_artifacts_public.tgz');
@@ -435,7 +437,11 @@ export async function instanceClone(
   if (plan.copyUploads || plan.copyPluginArtifacts) {
     await phase('volumes', 'Copying uploads and plugin artifacts from the source (read-only).');
   }
-  if (plan.copyUploads) await deps.copyVolume(`${sourceProject}_uploads`, `${targetProject}_uploads`);
+  if (plan.copyUploads) {
+    for (const area of ['form_files', 'assets']) {
+      await deps.copyVolume(`${sourceProject}_${area}`, `${targetProject}_${area}`);
+    }
+  }
   if (plan.copyPluginArtifacts) {
     await deps.copyVolume(`${sourceProject}_plugin_artifacts`, `${targetProject}_plugin_artifacts`);
     await deps.copyVolume(

@@ -49,6 +49,9 @@ export const composeCommands = {
   down: (): string[] => ['down'],
   /** Stop containers without removing them (used by the disable flow). */
   stop: (): string[] => ['stop'],
+  /** Stop / start only the named services (used to quiesce writers during a backup). */
+  stopServices: (services: readonly string[]): string[] => ['stop', ...services],
+  startServices: (services: readonly string[]): string[] => ['start', ...services],
   restart: (): string[] => ['restart'],
   pull: (): string[] => ['pull'],
   /** Pull a single service's image (used by the frontend-only update). */

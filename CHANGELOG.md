@@ -16,6 +16,44 @@ The manager has two version axes (see
 
 A single manager `0.1.0` installs and manages SelfHelp `0.x` pre-release instances.
 
+## [Unreleased]
+
+### Fixed
+- **Private uploads survive updates and are backed up.** Form uploads
+  (`/app/var/form-files`) and admin assets (`/app/var/assets`) now have their own
+  named volumes (`form_files`, `assets`), mounted on backend, worker and scheduler.
+  Before, they lived in the container and were lost when it was recreated. They
+  are chowned by `volume-init`, archived in the `uploads` backup area, restored,
+  copied by clone, and removed with `--delete-volumes`.
+
+### Removed
+- **The `uploads` volume on `/app/public/uploads`.** The backend no longer writes
+  anything under `public/`, so the volume is gone from compose, backup, restore,
+  clone, remove and orphan scans. The `uploads` backup area now holds the
+  `form_files` and `assets` archives.
+
+### Changed
+- **Manual, pre-update and pre-restore backups are consistent.** They stop
+  backend, worker and scheduler for the database dump and the file archives,
+  then start them again (also when the backup fails), so a backup never holds a
+  database row whose upload is missing. Scheduled backups stay online. Only an
+  active instance is stopped and started; a disabled one is left alone.
+- **One list of an instance's data volumes** is shared by remove, orphan scans
+  and install-time reclaim.
+- **Dev tooling upgraded** (no runtime change): vitest 4.1, `@vitest/coverage-v8`
+  4.1, vite 8.1 and `@vitejs/plugin-react` 6 (root and web app), form-data
+  4.0.6 (security patch). UI tests choose jsdom with a
+  `// @vitest-environment jsdom` comment, since vitest 4 removed
+  `environmentMatchGlobs`; the coverage gate shares the base config directly.
+
+### Added
+- **Login brute-force limits in the environment editor.** New instances list
+  `AUTH_LOGIN_MAX_ATTEMPTS`, `AUTH_LOGIN_WINDOW`, `AUTH_2FA_MAX_ATTEMPTS`,
+  `AUTH_2FA_WINDOW`, `AUTH_RECOVERY_MAX_REQUESTS` and `AUTH_RECOVERY_WINDOW`
+  (defaults `15`/`15minutes`, `15`/`15minutes`, `3`/`1hour`) in the generated
+  `.env`, so operators can tune the backend's login, 2FA and password-recovery
+  rate limits per instance. Backends without the feature ignore them.
+
 ## [1.6.9] - 2026-06-25
 
 ### Fixed

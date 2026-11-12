@@ -55,6 +55,20 @@ export interface RemovePlan {
   steps: string[];
 }
 
+/**
+ * Persistent Docker volume names of one compose project, in a stable order.
+ * The single list used by remove, orphan scans and install-time reclaim.
+ */
+export function instanceDataVolumeNames(composeProject: string): string[] {
+  return [
+    `${composeProject}_mysql_data`,
+    `${composeProject}_plugin_artifacts`,
+    `${composeProject}_plugin_artifacts_public`,
+    `${composeProject}_form_files`,
+    `${composeProject}_assets`,
+  ];
+}
+
 function emptyPlan(req: RemoveRequest, composeProject: string, errors: string[]): RemovePlan {
   return {
     ok: false,
@@ -150,14 +164,7 @@ export function planRemove(req: RemoveRequest, inventory: ServerInventory, root:
     return emptyPlan(req, composeProject, errors);
   }
 
-  const deleteVolumes = req.deleteVolumes
-    ? [
-        `${composeProject}_mysql_data`,
-        `${composeProject}_uploads`,
-        `${composeProject}_plugin_artifacts`,
-        `${composeProject}_plugin_artifacts_public`,
-      ]
-    : [];
+  const deleteVolumes = req.deleteVolumes ? instanceDataVolumeNames(composeProject) : [];
   const preserveBackups = req.deleteBackups !== true;
 
   const steps = [

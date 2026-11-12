@@ -135,17 +135,23 @@ describe('buildInstanceCompose (production)', () => {
   it('mounts persistent uploads + plugin-artifact volumes on every Symfony service', () => {
     for (const name of ['backend', 'worker', 'scheduler']) {
       const volumes = svc(doc, name).volumes as string[];
-      expect(volumes).toContain('uploads:/app/public/uploads');
+      // Nothing is written under public/uploads any more.
+      expect(volumes.some((v) => v.endsWith(':/app/public/uploads'))).toBe(false);
       expect(volumes).toContain('plugin_artifacts:/app/var/plugins');
       expect(volumes).toContain('plugin_artifacts_public:/app/public/plugin-artifacts');
+      // Uploads live outside public/: form files and admin assets.
+      expect(volumes).toContain('form_files:/app/var/form-files');
+      expect(volumes).toContain('assets:/app/var/assets');
     }
   });
 
   it('declares per-instance named volumes for uploads + both plugin-artifact paths', () => {
     const volumes = doc.volumes as Record<string, { name: string }>;
-    expect(volumes.uploads!.name).toBe('selfhelp_website1_uploads');
+    expect(volumes.uploads).toBeUndefined();
     expect(volumes.plugin_artifacts!.name).toBe('selfhelp_website1_plugin_artifacts');
     expect(volumes.plugin_artifacts_public!.name).toBe('selfhelp_website1_plugin_artifacts_public');
+    expect(volumes.form_files!.name).toBe('selfhelp_website1_form_files');
+    expect(volumes.assets!.name).toBe('selfhelp_website1_assets');
   });
 
   it('hands the data volumes to www-data before any Symfony service starts', () => {
@@ -159,13 +165,14 @@ describe('buildInstanceCompose (production)', () => {
     expect(init.entrypoint).toEqual(['sh', '-c']);
     const script = (init.command as string[]).join(' ');
     expect(script).toContain('chown 33:33');
-    for (const dir of ['/app/public/uploads', '/app/var/plugins', '/app/public/plugin-artifacts']) {
+    for (const dir of ['/app/var/plugins', '/app/public/plugin-artifacts', '/app/var/form-files', '/app/var/assets']) {
       expect(script).toContain(dir);
     }
     expect(init.volumes).toEqual([
-      'uploads:/app/public/uploads',
       'plugin_artifacts:/app/var/plugins',
       'plugin_artifacts_public:/app/public/plugin-artifacts',
+      'form_files:/app/var/form-files',
+      'assets:/app/var/assets',
     ]);
     // One-shot: no restart policy (compose default "no"), private network only.
     expect(init.restart).toBeUndefined();

@@ -107,7 +107,7 @@ export function planRestore(req: RestoreRequest, manifest: BackupManifest): Rest
     preserveSecrets,
     generateNewSecrets,
     steps,
-    preservedDuringStop: ['mysql_data', 'uploads', 'plugin_artifacts'],
+    preservedDuringStop: ['mysql_data', 'form_files', 'assets', 'plugin_artifacts'],
     forbiddenCommands: ['docker compose down -v', 'docker volume rm <mysql_data>'],
   };
 }
